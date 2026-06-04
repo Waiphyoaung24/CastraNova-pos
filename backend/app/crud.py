@@ -14,6 +14,7 @@ from sqlmodel.sql.expression import SelectOfScalar
 from app.core.security import get_password_hash, verify_password
 from app.core.state_machine import IllegalTransition, assert_unit_transition
 from app.models import (
+    CostLine,
     Customer,
     CustomerCreate,
     CustomerUpdate,
@@ -524,6 +525,50 @@ def receive_quantity(
         return replay
     session.refresh(batch)
     return batch
+
+
+def consume_quantity_fifo(
+    *, session: Session, product_id: uuid.UUID, quantity_needed: int
+) -> list[CostLine]:
+    """Consume ``quantity_needed`` from a product's QUANTITY batches oldest-first
+    (FIFO, §6.3). Candidate batches are locked ``FOR UPDATE`` in deterministic
+    receipt order (``received_at, id``) so concurrent consumers acquire locks in
+    the same order and cannot deadlock; ``remaining_qty`` is decremented under
+    the lock. Returns the per-batch ``CostLine`` rows with ``part_movement_id``
+    unset — the caller attaches its consuming movement and commits the whole
+    transaction. Raises 409 (no batch mutated) when stock is insufficient (§4.6
+    no-negative-stock)."""
+    batches = session.exec(
+        select(PartBatch)
+        .where(PartBatch.product_id == product_id, col(PartBatch.remaining_qty) > 0)
+        .order_by(col(PartBatch.received_at), col(PartBatch.id))
+        .with_for_update()
+    ).all()
+    total_available = sum(b.remaining_qty for b in batches)
+    if total_available < quantity_needed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Insufficient stock: have {total_available}, need {quantity_needed}",
+        )
+
+    cost_lines: list[CostLine] = []
+    remaining = quantity_needed
+    for batch in batches:
+        if remaining == 0:
+            break
+        take = min(batch.remaining_qty, remaining)
+        batch.remaining_qty -= take
+        session.add(batch)
+        cost_lines.append(
+            CostLine(
+                part_batch_id=batch.id,
+                quantity=take,
+                unit_cost_thb=batch.purchase_cost_thb,
+                total_cost_thb=take * batch.purchase_cost_thb,
+            )
+        )
+        remaining -= take
+    return cost_lines
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------

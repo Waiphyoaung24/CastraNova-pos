@@ -598,6 +598,45 @@ class PartMovement(PartMovementBase, table=True):
     )
 
 
+# --- Cost line (append-only FIFO consumption split; M017, spec §4.6) ----------
+
+
+class CostLineBase(SQLModel):
+    part_movement_id: uuid.UUID = Field(
+        foreign_key="partmovement.id", nullable=False
+    )
+    part_batch_id: uuid.UUID = Field(foreign_key="partbatch.id", nullable=False)
+    quantity: int
+    unit_cost_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    total_cost_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+
+
+class CostLine(CostLineBase, table=True):
+    # One row per batch a consuming part_movement drew from — closes the FIFO
+    # audit chain (movement -> cost_line -> batch -> receipt). UNIQUE keeps a
+    # movement from double-counting a batch; CHECK ties total to qty * unit_cost.
+    __table_args__ = (
+        UniqueConstraint(
+            "part_movement_id", "part_batch_id", name="uq_cost_line_movement_batch"
+        ),
+        CheckConstraint(
+            "quantity > 0 AND total_cost_thb = quantity * unit_cost_thb",
+            name="ck_cost_line_total",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+
+
+class CostLinePublic(CostLineBase):
+    id: uuid.UUID
+
+
 # --- QUANTITY receive (FR-005/FR-006) request/response ------------------------
 
 
