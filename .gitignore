@@ -7,3 +7,4 @@ node_modules/
 /playwright/.cache/
 .DS_Store
 .claude/settings.local.json
+compose.local.yml

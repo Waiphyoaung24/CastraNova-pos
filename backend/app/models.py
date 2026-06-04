@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import EmailStr
-from sqlalchemy import Column, DateTime, Numeric
+from sqlalchemy import Column, DateTime, Index, Numeric, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -363,6 +363,97 @@ class PriceChangePublic(PriceChangeBase):
     id: uuid.UUID
     changed_by_user_id: uuid.UUID
     changed_at: datetime | None = None
+
+
+# --- Unit (SERIALIZED stock; state cache) -------------------------------------
+
+
+class UnitBase(SQLModel):
+    product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
+    supplier_id: uuid.UUID = Field(foreign_key="supplier.id", nullable=False)
+    supplier_serial: str = Field(max_length=128)
+    castranova_barcode: str = Field(max_length=64)
+    current_state: UnitState
+    current_location_id: uuid.UUID = Field(
+        foreign_key="location.id", nullable=False
+    )
+    purchase_cost_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    received_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+
+
+class Unit(UnitBase, table=True):
+    # UNIQUE(castranova_barcode), UNIQUE(supplier_id, supplier_serial) — serials
+    # may collide across suppliers; index (current_state, product_id) for SOH (§4.8).
+    __table_args__ = (
+        UniqueConstraint("castranova_barcode", name="uq_unit_castranova_barcode"),
+        UniqueConstraint(
+            "supplier_id", "supplier_serial", name="uq_unit_supplier_serial"
+        ),
+        Index("ix_unit_state_product", "current_state", "product_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    received_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class UnitPublic(UnitBase):
+    id: uuid.UUID
+    received_at: datetime | None = None
+
+
+# --- Unit movement (append-only serialized ledger; spec §4.4) -----------------
+
+
+class UnitMovementBase(SQLModel):
+    unit_id: uuid.UUID = Field(foreign_key="unit.id", nullable=False)
+    event_type: MovementType
+    from_location_id: uuid.UUID | None = Field(
+        default=None, foreign_key="location.id"
+    )
+    to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
+    # FK targets (sale/service_ticket/project_pull/stock_adjustment) are introduced
+    # in later migrations; columns stay nullable and the FK constraints are wired
+    # when each table lands (M010, M013, M012, M014).
+    sale_id: uuid.UUID | None = Field(default=None)
+    service_ticket_id: uuid.UUID | None = Field(default=None)
+    project_pull_id: uuid.UUID | None = Field(default=None)
+    stock_adjustment_id: uuid.UUID | None = Field(default=None)
+    actor_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    notes: str | None = Field(default=None, max_length=512)
+
+
+class UnitMovement(UnitMovementBase, table=True):
+    # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
+    # index (unit_id, occurred_at DESC) for lifecycle traversal (FR-015).
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_unit_movement_idempotency_key"),
+        Index(
+            "ix_unit_movement_unit_occurred",
+            "unit_id",
+            text("occurred_at DESC"),
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    idempotency_key: uuid.UUID
+    occurred_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+
+
+class UnitMovementPublic(UnitMovementBase):
+    id: uuid.UUID
+    idempotency_key: uuid.UUID
+    occurred_at: datetime
 
 
 # Generic message
