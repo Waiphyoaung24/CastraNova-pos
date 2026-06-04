@@ -10,6 +10,7 @@ from app.api.routes import (
     project_pulls,
     projects,
     receipts,
+    reports,
     sales,
     service_tickets,
     suppliers,
@@ -32,6 +33,7 @@ api_router.include_router(sales.router)
 api_router.include_router(service_tickets.router)
 api_router.include_router(notifications.router)
 api_router.include_router(low_stock.router)
+api_router.include_router(reports.router)
 
 
 if settings.ENVIRONMENT == "local":

@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, TypeVar
 
@@ -18,6 +18,9 @@ from app.core.state_machine import (
     assert_unit_transition,
 )
 from app.models import (
+    Channel,
+    ChannelMarginReport,
+    ChannelMarginRow,
     CostLine,
     Customer,
     CustomerCreate,
@@ -1502,3 +1505,110 @@ def authenticate(*, session: Session, email: str, password: str) -> User | None:
         session.commit()
         session.refresh(db_user)
     return db_user
+
+
+# --- Channel-margin report (FR-013) -------------------------------------------
+
+_CENT = Decimal("0.01")
+
+
+def _q(value: Decimal | int) -> Decimal:
+    """Quantize a money sum to cents."""
+    return Decimal(value).quantize(_CENT)
+
+
+def channel_margin_report(
+    *, session: Session, year: int, month: int
+) -> ChannelMarginReport:
+    """Monthly revenue / COGS / margin by derived channel (SALE, MAINTENANCE,
+    PROJECT), read-only (FR-013, spec §8). Channel is derived from each source
+    record's own timestamp (sale.sold_at / service_ticket.closed_at /
+    project_pull.fulfilled_at) falling in [month_start, next_month_start) UTC.
+    COGS is the full snapshot: SALE uses sale.total_cogs_thb (already includes
+    serialized-unit + part cost); PROJECT adds pulled unit.purchase_cost_thb to
+    the part FIFO cost. All sums are set-based; amounts quantized to cents."""
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    if month == 12:
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+
+    # --- SALE: sales sold_at in window. ---
+    sale_rev, sale_cogs = session.exec(
+        select(
+            func.coalesce(func.sum(Sale.total_thb), 0),
+            func.coalesce(func.sum(Sale.total_cogs_thb), 0),
+        ).where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
+    ).one()
+
+    # --- MAINTENANCE: parts of tickets closed in window. ---
+    maint_rev = session.exec(
+        select(
+            func.coalesce(
+                func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                0,
+            )
+        )
+        .join(
+            ServiceTicket,
+            col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+        )
+        .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
+    ).one()
+    maint_cogs = session.exec(
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), 0))
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(
+            ServiceTicket,
+            col(PartMovement.service_ticket_id) == col(ServiceTicket.id),
+        )
+        .where(
+            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+            col(ServiceTicket.closed_at) >= start,
+            col(ServiceTicket.closed_at) < end,
+        )
+    ).one()
+
+    # --- PROJECT (cost-only): pulls fulfilled in window. ---
+    proj_part_cogs = session.exec(
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), 0))
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+        .where(
+            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.fulfilled_at) >= start,
+            col(ProjectPull.fulfilled_at) < end,
+        )
+    ).one()
+    proj_unit_cogs = session.exec(
+        select(func.coalesce(func.sum(Unit.purchase_cost_thb), 0))
+        .select_from(UnitMovement)
+        .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.fulfilled_at) >= start,
+            col(ProjectPull.fulfilled_at) < end,
+        )
+    ).one()
+
+    rows = [
+        (Channel.SALE, _q(sale_rev), _q(sale_cogs)),
+        (Channel.MAINTENANCE, _q(maint_rev), _q(maint_cogs)),
+        (Channel.PROJECT, _q(0), _q(proj_part_cogs) + _q(proj_unit_cogs)),
+    ]
+    channels = [
+        ChannelMarginRow(
+            channel=ch, revenue_thb=rev, cogs_thb=cogs, margin_thb=rev - cogs
+        )
+        for ch, rev, cogs in rows
+    ]
+    total_rev = sum((r.revenue_thb for r in channels), Decimal("0.00"))
+    total_cogs = sum((r.cogs_thb for r in channels), Decimal("0.00"))
+    return ChannelMarginReport(
+        month=f"{year:04d}-{month:02d}",
+        channels=channels,
+        total_revenue_thb=total_rev,
+        total_cogs_thb=total_cogs,
+        total_margin_thb=total_rev - total_cogs,
+    )

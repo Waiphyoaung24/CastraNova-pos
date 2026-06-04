@@ -1071,6 +1071,24 @@ class NotificationPreferencesUpdate(SQLModel):
         return self
 
 
+# --- Channel-margin report (FR-013; read-only aggregation) --------------------
+
+
+class ChannelMarginRow(SQLModel):
+    channel: Channel
+    revenue_thb: Decimal
+    cogs_thb: Decimal
+    margin_thb: Decimal
+
+
+class ChannelMarginReport(SQLModel):
+    month: str  # "YYYY-MM"
+    channels: list[ChannelMarginRow]  # always 3 rows: SALE, MAINTENANCE, PROJECT
+    total_revenue_thb: Decimal
+    total_cogs_thb: Decimal
+    total_margin_thb: Decimal
+
+
 # Generic message
 class Message(SQLModel):
     message: str
