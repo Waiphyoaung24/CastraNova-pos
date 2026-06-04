@@ -3,7 +3,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.core.security import get_password_hash, verify_password
-from app.models import User, UserCreate, UserUpdate
+from app.models import Location, User, UserCreate, UserUpdate
 
 
 def create_user(*, session: Session, user_create: UserCreate) -> User:
@@ -34,6 +34,19 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
     statement = select(User).where(User.email == email)
     session_user = session.exec(statement).first()
     return session_user
+
+
+def seed_locations(*, session: Session) -> None:
+    """Idempotently seed the fixed warehouse + virtual locations."""
+    seeds = [
+        ("YGN_WH", "Yangon Warehouse"),
+        ("CUSTOMER", "Customer (virtual)"),
+        ("ADJUSTED_OUT", "Adjusted Out (virtual)"),
+    ]
+    for code, name in seeds:
+        if not session.exec(select(Location).where(Location.code == code)).first():
+            session.add(Location(code=code, name=name))
+    session.commit()
 
 
 # Dummy hash to use for timing attack prevention when user is not found

@@ -135,6 +135,28 @@ class UsersPublic(SQLModel):
     count: int
 
 
+# --- Location -----------------------------------------------------------------
+
+
+class LocationBase(SQLModel):
+    code: str = Field(unique=True, index=True, max_length=32)
+    name: str = Field(max_length=255)
+    country: str | None = Field(default=None, max_length=64)
+    is_active: bool = True
+
+
+class Location(LocationBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class LocationPublic(LocationBase):
+    id: uuid.UUID
+
+
 # Generic message
 class Message(SQLModel):
     message: str
