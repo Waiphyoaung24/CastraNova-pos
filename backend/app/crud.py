@@ -1,9 +1,11 @@
 import uuid
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, col, select
+from sqlmodel import Session, SQLModel, col, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.security import get_password_hash, verify_password
 from app.core.state_machine import assert_unit_transition
@@ -62,6 +64,39 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
     statement = select(User).where(User.email == email)
     session_user = session.exec(statement).first()
     return session_user
+
+
+_T = TypeVar("_T", bound=SQLModel)
+
+
+def get_or_replay(
+    *,
+    session: Session,
+    statement: SelectOfScalar[_T],
+    build: Callable[[], _T],
+) -> tuple[_T, bool]:
+    """Idempotent single-row insert keyed by UNIQUE(idempotency_key).
+
+    ``statement`` selects the existing row by its idempotency key; ``build``
+    constructs the new row. Returns ``(row, replayed)`` — ``replayed`` is True
+    when an existing row was returned instead of a fresh insert (offline replay
+    or a concurrent writer that won the UNIQUE race). Shared by Sale/Ticket/Pull
+    so every offline-originating mutation is replay-safe (spec §7)."""
+    existing = session.exec(statement).first()
+    if existing is not None:
+        return existing, True
+    obj = build()
+    session.add(obj)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = session.exec(statement).first()
+        if existing is None:
+            raise
+        return existing, True
+    session.refresh(obj)
+    return obj, False
 
 
 def seed_locations(*, session: Session) -> None:
