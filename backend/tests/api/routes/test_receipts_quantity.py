@@ -161,6 +161,36 @@ def test_receive_quantity_rejects_zero_qty(
     assert r.status_code == 422
 
 
+def test_receive_quantity_unknown_product_returns_404(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, supplier_id, _ = seed_quantity_product
+    r = client.post(
+        f"{PREFIX}/receipts/quantity",
+        headers=staff_token_headers,
+        json=_body(uuid.uuid4(), supplier_id),
+    )
+    assert r.status_code == 404
+    assert "Product" in r.json()["detail"]
+
+
+def test_receive_quantity_unknown_supplier_returns_404(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    product_id, _, _ = seed_quantity_product
+    r = client.post(
+        f"{PREFIX}/receipts/quantity",
+        headers=staff_token_headers,
+        json=_body(product_id, uuid.uuid4()),
+    )
+    assert r.status_code == 404
+    assert "Supplier" in r.json()["detail"]
+
+
 def test_receive_quantity_records_discrepancy_note(
     client: TestClient,
     staff_token_headers: dict[str, str],

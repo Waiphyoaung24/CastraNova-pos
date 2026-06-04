@@ -401,27 +401,45 @@ def receive_serialized(
 # --- QUANTITY receive + FIFO batch numbering (FR-005/FR-006, §6.4) ------------
 
 
-def next_batch_no(
-    *, session: Session, sku: str, today: date, adj: bool = False
-) -> str:
-    """Allocate the next ``YYYYMMDD-{SKU}-[ADJ-]###`` suffix for a SKU on a day.
+def _batch_suffix(batch_no: str) -> int:
+    """Numeric tail of a ``...-NNN`` batch_no; 0 if it is not parseable."""
+    tail = batch_no.rsplit("-", 1)[-1]
+    return int(tail) if tail.isdigit() else 0
 
-    The ``MAX(suffix) + 1`` read runs under a transaction-scoped advisory lock
-    keyed on ``(date, SKU)`` so two staff receiving the same SKU on the same day
-    get sequential suffixes with no collision (S8, §6.4). The lock releases
-    automatically at COMMIT/ROLLBACK; ``UNIQUE(product_id, batch_no)`` is the
-    backstop. Plain and ADJ batches keep independent sequences."""
+
+def next_batch_no(
+    *,
+    session: Session,
+    product_id: uuid.UUID,
+    sku: str,
+    today: date,
+    adj: bool = False,
+) -> str:
+    """Allocate the next ``YYYYMMDD-{SKU}-[ADJ-]###`` suffix for a product on a
+    day. The scan runs under a transaction-scoped 64-bit advisory lock keyed on
+    (date, SKU) so two staff receiving the same SKU on the same day get
+    sequential suffixes with no collision (S8, §6.4); the lock releases at
+    COMMIT/ROLLBACK and ``UNIQUE(product_id, batch_no)`` is the backstop. The
+    suffix is the numeric max over *this product's* batches for the day — scoped
+    by ``product_id`` + ``is_adjustment`` so a different SKU that shares a
+    dash-prefix cannot pollute the sequence, and parsed as an int so it survives
+    the 999->1000 digit-width transition a text max would mis-sort. Plain and ADJ
+    batches keep independent sequences."""
     yyyymmdd = today.strftime("%Y%m%d")
-    # transaction-scoped advisory lock on (date, SKU); released at COMMIT/ROLLBACK
-    session.execute(sa_select(func.pg_advisory_xact_lock(func.hashtext(f"{yyyymmdd}-{sku}"))))
-    prefix = f"{yyyymmdd}-{sku}-{'ADJ-' if adj else ''}"
-    last = session.exec(
-        select(PartBatch.batch_no)
-        .where(col(PartBatch.batch_no).like(f"{prefix}%"), PartBatch.is_adjustment == adj)
-        .order_by(col(PartBatch.batch_no).desc())
-    ).first()
-    suffix = (int(last.rsplit("-", 1)[1]) if last else 0) + 1
-    return f"{prefix}{suffix:03d}"
+    session.execute(
+        sa_select(
+            func.pg_advisory_xact_lock(func.hashtext(yyyymmdd), func.hashtext(sku))
+        )
+    )
+    same_day = session.exec(
+        select(PartBatch.batch_no).where(
+            PartBatch.product_id == product_id,
+            PartBatch.is_adjustment == adj,
+            col(PartBatch.batch_no).like(f"{yyyymmdd}-%"),
+        )
+    ).all()
+    suffix = max((_batch_suffix(bn) for bn in same_day), default=0) + 1
+    return f"{yyyymmdd}-{sku}-{'ADJ-' if adj else ''}{suffix:03d}"
 
 
 def _discrepancy_note(
@@ -487,7 +505,12 @@ def receive_quantity(
 
     batch = PartBatch(
         product_id=product_id,
-        batch_no=next_batch_no(session=session, sku=product.sku, today=date.today()),
+        batch_no=next_batch_no(
+            session=session,
+            product_id=product_id,
+            sku=product.sku,
+            today=date.today(),
+        ),
         supplier_id=supplier_id,
         supplier_batch_ref=supplier_batch_ref,
         received_qty=received_qty,
@@ -537,7 +560,11 @@ def consume_quantity_fifo(
     the lock. Returns the per-batch ``CostLine`` rows with ``part_movement_id``
     unset — the caller attaches its consuming movement and commits the whole
     transaction. Raises 409 (no batch mutated) when stock is insufficient (§4.6
-    no-negative-stock)."""
+    no-negative-stock); rejects a non-positive request with 400."""
+    if quantity_needed <= 0:
+        raise HTTPException(
+            status_code=400, detail="quantity_needed must be positive"
+        )
     batches = session.exec(
         select(PartBatch)
         .where(PartBatch.product_id == product_id, col(PartBatch.remaining_qty) > 0)
@@ -558,6 +585,7 @@ def consume_quantity_fifo(
             break
         take = min(batch.remaining_qty, remaining)
         batch.remaining_qty -= take
+        batch.updated_at = get_datetime_utc()
         session.add(batch)
         cost_lines.append(
             CostLine(

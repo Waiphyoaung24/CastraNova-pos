@@ -65,11 +65,11 @@ def test_next_batch_no_sequential_same_sku_same_day(
     sku = product.sku
     today = date(2026, 6, 4)
 
-    a = crud.next_batch_no(session=db, sku=sku, today=today)
+    a = crud.next_batch_no(session=db, product_id=product.id, sku=sku, today=today)
     assert a == f"20260604-{sku}-001"
     _persist_batch(db, product, supplier, user, a)
 
-    b = crud.next_batch_no(session=db, sku=sku, today=today)
+    b = crud.next_batch_no(session=db, product_id=product.id, sku=sku, today=today)
     assert b == f"20260604-{sku}-002"
 
 
@@ -79,10 +79,14 @@ def test_next_batch_no_resets_next_day(
     product, supplier, user = quantity_setup
     sku = product.sku
 
-    a = crud.next_batch_no(session=db, sku=sku, today=date(2026, 6, 4))
+    a = crud.next_batch_no(
+        session=db, product_id=product.id, sku=sku, today=date(2026, 6, 4)
+    )
     _persist_batch(db, product, supplier, user, a)
 
-    b = crud.next_batch_no(session=db, sku=sku, today=date(2026, 6, 5))
+    b = crud.next_batch_no(
+        session=db, product_id=product.id, sku=sku, today=date(2026, 6, 5)
+    )
     assert b == f"20260605-{sku}-001"
 
 
@@ -93,8 +97,56 @@ def test_next_batch_no_adj_sequence_is_independent(
     sku = product.sku
     today = date(2026, 6, 4)
 
-    plain = crud.next_batch_no(session=db, sku=sku, today=today)
+    plain = crud.next_batch_no(
+        session=db, product_id=product.id, sku=sku, today=today
+    )
     _persist_batch(db, product, supplier, user, plain)
 
-    adj = crud.next_batch_no(session=db, sku=sku, today=today, adj=True)
+    adj = crud.next_batch_no(
+        session=db, product_id=product.id, sku=sku, today=today, adj=True
+    )
     assert adj == f"20260604-{sku}-ADJ-001"
+
+
+def test_next_batch_no_increments_past_999(
+    db: Session, quantity_setup: tuple[Product, Supplier, User]
+) -> None:
+    # A text MAX would sort '1000' below '999'; the suffix must be parsed
+    # numerically so the sequence survives the digit-width transition.
+    product, supplier, user = quantity_setup
+    sku = product.sku
+    _persist_batch(db, product, supplier, user, f"20260604-{sku}-999")
+
+    nxt = crud.next_batch_no(
+        session=db, product_id=product.id, sku=sku, today=date(2026, 6, 4)
+    )
+    assert nxt == f"20260604-{sku}-1000"
+
+
+def test_next_batch_no_isolated_per_product_with_shared_prefix(
+    db: Session, quantity_setup: tuple[Product, Supplier, User]
+) -> None:
+    # Product B's SKU is a dash-prefix superset of product A's. A's sequence
+    # must not be polluted by B's batches (scoped by product_id, not LIKE).
+    product_a, supplier, user = quantity_setup
+    sku_a = product_a.sku
+    product_b = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"{sku_a}-X",
+            model_name="Bearing B",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="50.00",
+            repair_price_thb="10.00",
+        ),
+    )
+    today = date(2026, 6, 4)
+    b_no = crud.next_batch_no(
+        session=db, product_id=product_b.id, sku=product_b.sku, today=today
+    )
+    _persist_batch(db, product_b, supplier, user, b_no)  # 20260604-{sku_a}-X-001
+
+    a_no = crud.next_batch_no(
+        session=db, product_id=product_a.id, sku=sku_a, today=today
+    )
+    assert a_no == f"20260604-{sku_a}-001"  # not inflated by product B

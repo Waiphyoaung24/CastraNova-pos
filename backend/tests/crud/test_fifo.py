@@ -152,3 +152,18 @@ def test_fifo_cost_line_total_invariant(
 
     for line in lines:
         assert line.total_cost_thb == line.quantity * line.unit_cost_thb
+
+
+@pytest.mark.parametrize("bad", [0, -3])
+def test_fifo_rejects_nonpositive_quantity(
+    db: Session, quantity_product: tuple[uuid.UUID, uuid.UUID], bad: int
+) -> None:
+    pid, sid = quantity_product
+    _receive(db, pid, sid, qty=5, cost="10.00")
+
+    with pytest.raises(HTTPException) as exc:
+        crud.consume_quantity_fifo(session=db, product_id=pid, quantity_needed=bad)
+    db.rollback()
+
+    assert exc.value.status_code == 400
+    assert _remaining(db, pid) == 5  # no stock touched

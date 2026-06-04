@@ -619,6 +619,9 @@ class CostLine(CostLineBase, table=True):
         UniqueConstraint(
             "part_movement_id", "part_batch_id", name="uq_cost_line_movement_batch"
         ),
+        # FK lookups: "which cost lines drew from batch X?" (audit drill-down) and
+        # Postgres FK-integrity checks on partbatch changes.
+        Index("ix_cost_line_part_batch", "part_batch_id"),
         CheckConstraint(
             "quantity > 0 AND total_cost_thb = quantity * unit_cost_thb",
             name="ck_cost_line_total",
