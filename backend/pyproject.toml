@@ -19,6 +19,10 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.0.0,<3.0.0",
     "pyjwt<3.0.0,>=2.8.0",
     "pwdlib[argon2,bcrypt]>=0.3.0",
+    "reportlab<5.0.0,>=4.2.0",
+    "openpyxl<4.0.0,>=3.1.0",
+    "slowapi<1.0.0,>=0.1.9",
+    "qrcode<8.0.0,>=7.4.0",
 ]
 
 [dependency-groups]
