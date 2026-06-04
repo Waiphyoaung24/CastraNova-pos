@@ -273,7 +273,7 @@ def test_channels_always_three_rows_in_order(
     superuser_token_headers: dict[str, str],
 ) -> None:
     r = client.get(
-        f"{PREFIX}/reports/channel-margin?month=2026-01",
+        f"{PREFIX}/reports/channel-margin?month=2099-02",
         headers=superuser_token_headers,
     )
     assert r.status_code == 200, r.text
@@ -286,7 +286,7 @@ def test_empty_month_all_zero(
     superuser_token_headers: dict[str, str],
 ) -> None:
     r = client.get(
-        f"{PREFIX}/reports/channel-margin?month=2026-02",
+        f"{PREFIX}/reports/channel-margin?month=2099-01",
         headers=superuser_token_headers,
     )
     assert r.status_code == 200, r.text

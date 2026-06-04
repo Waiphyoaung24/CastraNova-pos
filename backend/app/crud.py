@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Callable
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypeVar
 
 from fastapi import HTTPException
@@ -1514,7 +1514,7 @@ _CENT = Decimal("0.01")
 
 def _q(value: Decimal | int) -> Decimal:
     """Quantize a money sum to cents."""
-    return Decimal(value).quantize(_CENT)
+    return Decimal(value).quantize(_CENT, rounding=ROUND_HALF_UP)
 
 
 def channel_margin_report(
@@ -1536,8 +1536,8 @@ def channel_margin_report(
     # --- SALE: sales sold_at in window. ---
     sale_rev, sale_cogs = session.exec(
         select(
-            func.coalesce(func.sum(Sale.total_thb), 0),
-            func.coalesce(func.sum(Sale.total_cogs_thb), 0),
+            func.coalesce(func.sum(Sale.total_thb), Decimal("0")),
+            func.coalesce(func.sum(Sale.total_cogs_thb), Decimal("0")),
         ).where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
     ).one()
 
@@ -1546,7 +1546,7 @@ def channel_margin_report(
         select(
             func.coalesce(
                 func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
-                0,
+                Decimal("0"),
             )
         )
         .join(
@@ -1556,7 +1556,7 @@ def channel_margin_report(
         .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
     ).one()
     maint_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), 0))
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(
             ServiceTicket,
@@ -1571,7 +1571,7 @@ def channel_margin_report(
 
     # --- PROJECT (cost-only): pulls fulfilled in window. ---
     proj_part_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), 0))
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
@@ -1581,7 +1581,7 @@ def channel_margin_report(
         )
     ).one()
     proj_unit_cogs = session.exec(
-        select(func.coalesce(func.sum(Unit.purchase_cost_thb), 0))
+        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
@@ -1595,7 +1595,7 @@ def channel_margin_report(
     rows = [
         (Channel.SALE, _q(sale_rev), _q(sale_cogs)),
         (Channel.MAINTENANCE, _q(maint_rev), _q(maint_cogs)),
-        (Channel.PROJECT, _q(0), _q(proj_part_cogs) + _q(proj_unit_cogs)),
+        (Channel.PROJECT, _q(0), _q(proj_part_cogs + proj_unit_cogs)),
     ]
     channels = [
         ChannelMarginRow(

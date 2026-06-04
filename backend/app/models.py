@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import EmailStr, model_validator
 from sqlalchemy import (
@@ -1074,19 +1074,22 @@ class NotificationPreferencesUpdate(SQLModel):
 # --- Channel-margin report (FR-013; read-only aggregation) --------------------
 
 
+MoneyTHB = Annotated[Decimal, Field(decimal_places=2, max_digits=14)]
+
+
 class ChannelMarginRow(SQLModel):
     channel: Channel
-    revenue_thb: Decimal
-    cogs_thb: Decimal
-    margin_thb: Decimal
+    revenue_thb: MoneyTHB
+    cogs_thb: MoneyTHB
+    margin_thb: MoneyTHB
 
 
 class ChannelMarginReport(SQLModel):
     month: str  # "YYYY-MM"
     channels: list[ChannelMarginRow]  # always 3 rows: SALE, MAINTENANCE, PROJECT
-    total_revenue_thb: Decimal
-    total_cogs_thb: Decimal
-    total_margin_thb: Decimal
+    total_revenue_thb: MoneyTHB
+    total_cogs_thb: MoneyTHB
+    total_margin_thb: MoneyTHB
 
 
 # Generic message
