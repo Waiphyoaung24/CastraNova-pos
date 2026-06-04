@@ -9,31 +9,35 @@ export type Body_login_login_access_token = {
     client_secret?: (string | null);
 };
 
+export type CustomerCreate = {
+    name: string;
+    country?: (string | null);
+    contact?: (string | null);
+    type?: CustomerType;
+    notes?: (string | null);
+};
+
+export type CustomerPublic = {
+    name: string;
+    country?: (string | null);
+    contact?: (string | null);
+    type?: CustomerType;
+    notes?: (string | null);
+    id: string;
+};
+
+export type CustomerType = 'DEALER' | 'END_CUSTOMER';
+
+export type CustomerUpdate = {
+    name?: (string | null);
+    country?: (string | null);
+    contact?: (string | null);
+    type?: (CustomerType | null);
+    notes?: (string | null);
+};
+
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
-};
-
-export type ItemCreate = {
-    title: string;
-    description?: (string | null);
-};
-
-export type ItemPublic = {
-    title: string;
-    description?: (string | null);
-    id: string;
-    owner_id: string;
-    created_at?: (string | null);
-};
-
-export type ItemsPublic = {
-    data: Array<ItemPublic>;
-    count: number;
-};
-
-export type ItemUpdate = {
-    title?: (string | null);
-    description?: (string | null);
 };
 
 export type Message = {
@@ -45,6 +49,17 @@ export type NewPassword = {
     new_password: string;
 };
 
+export type PriceChangePublic = {
+    product_id: string;
+    field: string;
+    old_value: string;
+    new_value: string;
+    reason?: (string | null);
+    id: string;
+    changed_by_user_id: string;
+    changed_at?: (string | null);
+};
+
 export type PrivateUserCreate = {
     email: string;
     password: string;
@@ -52,10 +67,174 @@ export type PrivateUserCreate = {
     is_verified?: boolean;
 };
 
+export type ProductCreate = {
+    sku: string;
+    model_name: string;
+    brand?: (string | null);
+    category?: (string | null);
+    tracking_mode?: TrackingMode;
+    specs?: ({
+    [key: string]: unknown;
+} | null);
+    retail_price_thb: (number | string);
+    repair_price_thb: (number | string);
+    default_min_stock_level?: (number | null);
+    is_active?: boolean;
+};
+
+export type ProductPublic = {
+    sku: string;
+    model_name: string;
+    brand?: (string | null);
+    category?: (string | null);
+    tracking_mode?: TrackingMode;
+    specs?: ({
+    [key: string]: unknown;
+} | null);
+    retail_price_thb: string;
+    repair_price_thb: string;
+    default_min_stock_level?: (number | null);
+    is_active?: boolean;
+    id: string;
+};
+
+export type ProductUpdate = {
+    model_name?: (string | null);
+    brand?: (string | null);
+    category?: (string | null);
+    tracking_mode?: (TrackingMode | null);
+    specs?: ({
+    [key: string]: unknown;
+} | null);
+    retail_price_thb?: (number | string | null);
+    repair_price_thb?: (number | string | null);
+    default_min_stock_level?: (number | null);
+    is_active?: (boolean | null);
+};
+
+export type ProjectCreate = {
+    code: string;
+    name: string;
+    customer_id: string;
+    start_date?: (string | null);
+    end_date?: (string | null);
+    status?: ProjectStatus;
+    budget_thb?: (number | string | null);
+};
+
+export type ProjectPublic = {
+    code: string;
+    name: string;
+    customer_id: string;
+    start_date?: (string | null);
+    end_date?: (string | null);
+    status?: ProjectStatus;
+    budget_thb?: (string | null);
+    id: string;
+};
+
+export type ProjectStatus = 'ACTIVE' | 'CLOSED';
+
+export type ProjectUpdate = {
+    code?: (string | null);
+    name?: (string | null);
+    customer_id?: (string | null);
+    start_date?: (string | null);
+    end_date?: (string | null);
+    status?: (ProjectStatus | null);
+    budget_thb?: (number | string | null);
+};
+
+export type ReceivePiece = {
+    supplier_serial: string;
+    purchase_cost_thb: (number | string);
+};
+
+export type ReceiveSerializedRequest = {
+    product_id: string;
+    supplier_id: string;
+    pieces: Array<ReceivePiece>;
+    idempotency_key: string;
+};
+
+export type ReceiveSerializedResponse = {
+    units: Array<UnitPublic>;
+};
+
+export type SaleCreateRequest = {
+    customer_id: string;
+    lines: Array<SaleLineInput>;
+    idempotency_key: string;
+};
+
+export type SaleLineInput = {
+    line_kind: SaleLineKind;
+    castranova_barcode?: (string | null);
+    sku?: (string | null);
+    quantity?: number;
+};
+
+export type SaleLineKind = 'UNIT' | 'PART';
+
+export type SaleLinePublic = {
+    id: string;
+    line_kind: SaleLineKind;
+    unit_id: (string | null);
+    product_id: (string | null);
+    quantity: number;
+    unit_price_thb: string;
+    unit_cost_thb: string;
+};
+
+export type SalePublic = {
+    id: string;
+    customer_id: string;
+    total_thb: string;
+    total_cogs_thb: string;
+    sold_at: string;
+    lines: Array<SaleLinePublic>;
+};
+
+export type SupplierCreate = {
+    name: string;
+    country?: (string | null);
+    contact?: (string | null);
+};
+
+export type SupplierPublic = {
+    name: string;
+    country?: (string | null);
+    contact?: (string | null);
+    id: string;
+};
+
+export type SupplierUpdate = {
+    name?: (string | null);
+    country?: (string | null);
+    contact?: (string | null);
+};
+
 export type Token = {
     access_token: string;
     token_type?: string;
 };
+
+export type TrackingMode = 'SERIALIZED' | 'QUANTITY';
+
+export type UnitPublic = {
+    product_id: string;
+    supplier_id: string;
+    supplier_serial: string;
+    castranova_barcode: string;
+    current_state: UnitState;
+    current_location_id: string;
+    purchase_cost_thb: string;
+    received_by_user_id: string;
+    id: string;
+    received_at?: (string | null);
+};
+
+export type UnitState = 'RECEIVED' | 'IN_STOCK' | 'SOLD' | 'MAINTENANCE_OUT' | 'PROJECT_OUT' | 'ADJUSTED_OUT';
 
 export type UpdatePassword = {
     current_password: string;
@@ -66,6 +245,7 @@ export type UserCreate = {
     email: string;
     is_active?: boolean;
     is_superuser?: boolean;
+    role?: UserRole;
     full_name?: (string | null);
     password: string;
 };
@@ -74,6 +254,7 @@ export type UserPublic = {
     email: string;
     is_active?: boolean;
     is_superuser?: boolean;
+    role?: UserRole;
     full_name?: (string | null);
     id: string;
     created_at?: (string | null);
@@ -85,6 +266,8 @@ export type UserRegister = {
     full_name?: (string | null);
 };
 
+export type UserRole = 'BKK_ADMIN' | 'YGN_STAFF';
+
 export type UsersPublic = {
     data: Array<UserPublic>;
     count: number;
@@ -94,6 +277,7 @@ export type UserUpdate = {
     email?: (string | null);
     is_active?: boolean;
     is_superuser?: boolean;
+    role?: UserRole;
     full_name?: (string | null);
     password?: (string | null);
 };
@@ -113,37 +297,25 @@ export type ValidationError = {
     };
 };
 
-export type ItemsReadItemsData = {
+export type CustomersReadCustomersData = {
     limit?: number;
     skip?: number;
 };
 
-export type ItemsReadItemsResponse = (ItemsPublic);
+export type CustomersReadCustomersResponse = (Array<CustomerPublic>);
 
-export type ItemsCreateItemData = {
-    requestBody: ItemCreate;
+export type CustomersCreateCustomerData = {
+    requestBody: CustomerCreate;
 };
 
-export type ItemsCreateItemResponse = (ItemPublic);
+export type CustomersCreateCustomerResponse = (CustomerPublic);
 
-export type ItemsReadItemData = {
-    id: string;
+export type CustomersUpdateCustomerData = {
+    customerId: string;
+    requestBody: CustomerUpdate;
 };
 
-export type ItemsReadItemResponse = (ItemPublic);
-
-export type ItemsUpdateItemData = {
-    id: string;
-    requestBody: ItemUpdate;
-};
-
-export type ItemsUpdateItemResponse = (ItemPublic);
-
-export type ItemsDeleteItemData = {
-    id: string;
-};
-
-export type ItemsDeleteItemResponse = (Message);
+export type CustomersUpdateCustomerResponse = (CustomerPublic);
 
 export type LoginLoginAccessTokenData = {
     formData: Body_login_login_access_token;
@@ -176,6 +348,96 @@ export type PrivateCreateUserData = {
 };
 
 export type PrivateCreateUserResponse = (UserPublic);
+
+export type ProductsReadProductsData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type ProductsReadProductsResponse = (Array<ProductPublic>);
+
+export type ProductsCreateProductData = {
+    requestBody: ProductCreate;
+};
+
+export type ProductsCreateProductResponse = (ProductPublic);
+
+export type ProductsUpdateProductData = {
+    productId: string;
+    requestBody: ProductUpdate;
+};
+
+export type ProductsUpdateProductResponse = (ProductPublic);
+
+export type ProductsReadPriceHistoryData = {
+    productId: string;
+};
+
+export type ProductsReadPriceHistoryResponse = (Array<PriceChangePublic>);
+
+export type ProjectsReadProjectsData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type ProjectsReadProjectsResponse = (Array<ProjectPublic>);
+
+export type ProjectsCreateProjectData = {
+    requestBody: ProjectCreate;
+};
+
+export type ProjectsCreateProjectResponse = (ProjectPublic);
+
+export type ProjectsUpdateProjectData = {
+    projectId: string;
+    requestBody: ProjectUpdate;
+};
+
+export type ProjectsUpdateProjectResponse = (ProjectPublic);
+
+export type ReceiptsReceiveSerializedData = {
+    requestBody: ReceiveSerializedRequest;
+};
+
+export type ReceiptsReceiveSerializedResponse = (ReceiveSerializedResponse);
+
+export type ReceiptsReadUnitLabelData = {
+    unitId: string;
+};
+
+export type ReceiptsReadUnitLabelResponse = (unknown);
+
+export type SalesCreateSaleData = {
+    requestBody: SaleCreateRequest;
+};
+
+export type SalesCreateSaleResponse = (SalePublic);
+
+export type SalesReadSaleReceiptData = {
+    saleId: string;
+};
+
+export type SalesReadSaleReceiptResponse = (unknown);
+
+export type SuppliersReadSuppliersData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type SuppliersReadSuppliersResponse = (Array<SupplierPublic>);
+
+export type SuppliersCreateSupplierData = {
+    requestBody: SupplierCreate;
+};
+
+export type SuppliersCreateSupplierResponse = (SupplierPublic);
+
+export type SuppliersUpdateSupplierData = {
+    requestBody: SupplierUpdate;
+    supplierId: string;
+};
+
+export type SuppliersUpdateSupplierResponse = (SupplierPublic);
 
 export type UsersReadUsersData = {
     limit?: number;

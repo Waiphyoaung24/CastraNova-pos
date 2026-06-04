@@ -57,6 +57,188 @@ export const Body_login_login_access_tokenSchema = {
     title: 'Body_login-login_access_token'
 } as const;
 
+export const CustomerCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        country: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Country'
+        },
+        contact: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Contact'
+        },
+        type: {
+            '$ref': '#/components/schemas/CustomerType',
+            default: 'END_CUSTOMER'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1024
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'CustomerCreate'
+} as const;
+
+export const CustomerPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        country: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Country'
+        },
+        contact: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Contact'
+        },
+        type: {
+            '$ref': '#/components/schemas/CustomerType',
+            default: 'END_CUSTOMER'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1024
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id'],
+    title: 'CustomerPublic'
+} as const;
+
+export const CustomerTypeSchema = {
+    type: 'string',
+    enum: ['DEALER', 'END_CUSTOMER'],
+    title: 'CustomerType'
+} as const;
+
+export const CustomerUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        country: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Country'
+        },
+        contact: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Contact'
+        },
+        type: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/CustomerType'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 1024
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    title: 'CustomerUpdate'
+} as const;
+
 export const HTTPValidationErrorSchema = {
     properties: {
         detail: {
@@ -69,131 +251,6 @@ export const HTTPValidationErrorSchema = {
     },
     type: 'object',
     title: 'HTTPValidationError'
-} as const;
-
-export const ItemCreateSchema = {
-    properties: {
-        title: {
-            type: 'string',
-            maxLength: 255,
-            minLength: 1,
-            title: 'Title'
-        },
-        description: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 255
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Description'
-        }
-    },
-    type: 'object',
-    required: ['title'],
-    title: 'ItemCreate'
-} as const;
-
-export const ItemPublicSchema = {
-    properties: {
-        title: {
-            type: 'string',
-            maxLength: 255,
-            minLength: 1,
-            title: 'Title'
-        },
-        description: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 255
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Description'
-        },
-        id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Id'
-        },
-        owner_id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Owner Id'
-        },
-        created_at: {
-            anyOf: [
-                {
-                    type: 'string',
-                    format: 'date-time'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Created At'
-        }
-    },
-    type: 'object',
-    required: ['title', 'id', 'owner_id'],
-    title: 'ItemPublic'
-} as const;
-
-export const ItemUpdateSchema = {
-    properties: {
-        title: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 255,
-                    minLength: 1
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Title'
-        },
-        description: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 255
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Description'
-        }
-    },
-    type: 'object',
-    title: 'ItemUpdate'
-} as const;
-
-export const ItemsPublicSchema = {
-    properties: {
-        data: {
-            items: {
-                '$ref': '#/components/schemas/ItemPublic'
-            },
-            type: 'array',
-            title: 'Data'
-        },
-        count: {
-            type: 'integer',
-            title: 'Count'
-        }
-    },
-    type: 'object',
-    required: ['data', 'count'],
-    title: 'ItemsPublic'
 } as const;
 
 export const MessageSchema = {
@@ -226,6 +283,68 @@ export const NewPasswordSchema = {
     title: 'NewPassword'
 } as const;
 
+export const PriceChangePublicSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        field: {
+            type: 'string',
+            maxLength: 32,
+            title: 'Field'
+        },
+        old_value: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Old Value'
+        },
+        new_value: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'New Value'
+        },
+        reason: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reason'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        changed_by_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Changed By User Id'
+        },
+        changed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Changed At'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'field', 'old_value', 'new_value', 'id', 'changed_by_user_id'],
+    title: 'PriceChangePublic'
+} as const;
+
 export const PrivateUserCreateSchema = {
     properties: {
         email: {
@@ -251,6 +370,903 @@ export const PrivateUserCreateSchema = {
     title: 'PrivateUserCreate'
 } as const;
 
+export const ProductCreateSchema = {
+    properties: {
+        sku: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Sku'
+        },
+        model_name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Model Name'
+        },
+        brand: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Brand'
+        },
+        category: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 128
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Category'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode',
+            default: 'QUANTITY'
+        },
+        specs: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Specs'
+        },
+        retail_price_thb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                }
+            ],
+            title: 'Retail Price Thb'
+        },
+        repair_price_thb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                }
+            ],
+            title: 'Repair Price Thb'
+        },
+        default_min_stock_level: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Min Stock Level'
+        },
+        is_active: {
+            type: 'boolean',
+            title: 'Is Active',
+            default: true
+        }
+    },
+    type: 'object',
+    required: ['sku', 'model_name', 'retail_price_thb', 'repair_price_thb'],
+    title: 'ProductCreate'
+} as const;
+
+export const ProductPublicSchema = {
+    properties: {
+        sku: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Sku'
+        },
+        model_name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Model Name'
+        },
+        brand: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Brand'
+        },
+        category: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 128
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Category'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode',
+            default: 'QUANTITY'
+        },
+        specs: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Specs'
+        },
+        retail_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Retail Price Thb'
+        },
+        repair_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Repair Price Thb'
+        },
+        default_min_stock_level: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Min Stock Level'
+        },
+        is_active: {
+            type: 'boolean',
+            title: 'Is Active',
+            default: true
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['sku', 'model_name', 'retail_price_thb', 'repair_price_thb', 'id'],
+    title: 'ProductPublic'
+} as const;
+
+export const ProductUpdateSchema = {
+    properties: {
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        },
+        brand: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Brand'
+        },
+        category: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 128
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Category'
+        },
+        tracking_mode: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/TrackingMode'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        specs: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Specs'
+        },
+        retail_price_thb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Retail Price Thb'
+        },
+        repair_price_thb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Repair Price Thb'
+        },
+        default_min_stock_level: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Default Min Stock Level'
+        },
+        is_active: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Is Active'
+        }
+    },
+    type: 'object',
+    title: 'ProductUpdate'
+} as const;
+
+export const ProjectCreateSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        start_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Start Date'
+        },
+        end_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'End Date'
+        },
+        status: {
+            '$ref': '#/components/schemas/ProjectStatus',
+            default: 'ACTIVE'
+        },
+        budget_thb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Budget Thb'
+        }
+    },
+    type: 'object',
+    required: ['code', 'name', 'customer_id'],
+    title: 'ProjectCreate'
+} as const;
+
+export const ProjectPublicSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        start_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Start Date'
+        },
+        end_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'End Date'
+        },
+        status: {
+            '$ref': '#/components/schemas/ProjectStatus',
+            default: 'ACTIVE'
+        },
+        budget_thb: {
+            anyOf: [
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Budget Thb'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['code', 'name', 'customer_id', 'id'],
+    title: 'ProjectPublic'
+} as const;
+
+export const ProjectStatusSchema = {
+    type: 'string',
+    enum: ['ACTIVE', 'CLOSED'],
+    title: 'ProjectStatus'
+} as const;
+
+export const ProjectUpdateSchema = {
+    properties: {
+        code: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Code'
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        customer_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Customer Id'
+        },
+        start_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Start Date'
+        },
+        end_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'End Date'
+        },
+        status: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ProjectStatus'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        budget_thb: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Budget Thb'
+        }
+    },
+    type: 'object',
+    title: 'ProjectUpdate'
+} as const;
+
+export const ReceivePieceSchema = {
+    properties: {
+        supplier_serial: {
+            type: 'string',
+            maxLength: 128,
+            title: 'Supplier Serial'
+        },
+        purchase_cost_thb: {
+            anyOf: [
+                {
+                    type: 'number',
+                    maximum: 9999999999.99,
+                    minimum: 0
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                }
+            ],
+            title: 'Purchase Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['supplier_serial', 'purchase_cost_thb'],
+    title: 'ReceivePiece'
+} as const;
+
+export const ReceiveSerializedRequestSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        supplier_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Supplier Id'
+        },
+        pieces: {
+            items: {
+                '$ref': '#/components/schemas/ReceivePiece'
+            },
+            type: 'array',
+            maxItems: 500,
+            minItems: 1,
+            title: 'Pieces'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'supplier_id', 'pieces', 'idempotency_key'],
+    title: 'ReceiveSerializedRequest'
+} as const;
+
+export const ReceiveSerializedResponseSchema = {
+    properties: {
+        units: {
+            items: {
+                '$ref': '#/components/schemas/UnitPublic'
+            },
+            type: 'array',
+            title: 'Units'
+        }
+    },
+    type: 'object',
+    required: ['units'],
+    title: 'ReceiveSerializedResponse'
+} as const;
+
+export const SaleCreateRequestSchema = {
+    properties: {
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleLineInput'
+            },
+            type: 'array',
+            maxItems: 100,
+            minItems: 1,
+            title: 'Lines'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        }
+    },
+    type: 'object',
+    required: ['customer_id', 'lines', 'idempotency_key'],
+    title: 'SaleCreateRequest'
+} as const;
+
+export const SaleLineInputSchema = {
+    properties: {
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        castranova_barcode: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Castranova Barcode'
+        },
+        sku: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sku'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity',
+            default: 1
+        }
+    },
+    type: 'object',
+    required: ['line_kind'],
+    title: 'SaleLineInput'
+} as const;
+
+export const SaleLineKindSchema = {
+    type: 'string',
+    enum: ['UNIT', 'PART'],
+    title: 'SaleLineKind'
+} as const;
+
+export const SaleLinePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        unit_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Id'
+        },
+        product_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Id'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        },
+        unit_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'line_kind', 'unit_id', 'product_id', 'quantity', 'unit_price_thb', 'unit_cost_thb'],
+    title: 'SaleLinePublic'
+} as const;
+
+export const SalePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        total_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Thb'
+        },
+        total_cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cogs Thb'
+        },
+        sold_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Sold At'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['id', 'customer_id', 'total_thb', 'total_cogs_thb', 'sold_at', 'lines'],
+    title: 'SalePublic'
+} as const;
+
+export const SupplierCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        country: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Country'
+        },
+        contact: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Contact'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'SupplierCreate'
+} as const;
+
+export const SupplierPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Name'
+        },
+        country: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Country'
+        },
+        contact: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Contact'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id'],
+    title: 'SupplierPublic'
+} as const;
+
+export const SupplierUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        country: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Country'
+        },
+        contact: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Contact'
+        }
+    },
+    type: 'object',
+    title: 'SupplierUpdate'
+} as const;
+
 export const TokenSchema = {
     properties: {
         access_token: {
@@ -266,6 +1282,81 @@ export const TokenSchema = {
     type: 'object',
     required: ['access_token'],
     title: 'Token'
+} as const;
+
+export const TrackingModeSchema = {
+    type: 'string',
+    enum: ['SERIALIZED', 'QUANTITY'],
+    title: 'TrackingMode'
+} as const;
+
+export const UnitPublicSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        supplier_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Supplier Id'
+        },
+        supplier_serial: {
+            type: 'string',
+            maxLength: 128,
+            title: 'Supplier Serial'
+        },
+        castranova_barcode: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Castranova Barcode'
+        },
+        current_state: {
+            '$ref': '#/components/schemas/UnitState'
+        },
+        current_location_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Current Location Id'
+        },
+        purchase_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Purchase Cost Thb'
+        },
+        received_by_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Received By User Id'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        received_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received At'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'supplier_id', 'supplier_serial', 'castranova_barcode', 'current_state', 'current_location_id', 'purchase_cost_thb', 'received_by_user_id', 'id'],
+    title: 'UnitPublic'
+} as const;
+
+export const UnitStateSchema = {
+    type: 'string',
+    enum: ['RECEIVED', 'IN_STOCK', 'SOLD', 'MAINTENANCE_OUT', 'PROJECT_OUT', 'ADJUSTED_OUT'],
+    title: 'UnitState'
 } as const;
 
 export const UpdatePasswordSchema = {
@@ -305,6 +1396,10 @@ export const UserCreateSchema = {
             type: 'boolean',
             title: 'Is Superuser',
             default: false
+        },
+        role: {
+            '$ref': '#/components/schemas/UserRole',
+            default: 'BKK_ADMIN'
         },
         full_name: {
             anyOf: [
@@ -347,6 +1442,10 @@ export const UserPublicSchema = {
             type: 'boolean',
             title: 'Is Superuser',
             default: false
+        },
+        role: {
+            '$ref': '#/components/schemas/UserRole',
+            default: 'BKK_ADMIN'
         },
         full_name: {
             anyOf: [
@@ -415,6 +1514,12 @@ export const UserRegisterSchema = {
     title: 'UserRegister'
 } as const;
 
+export const UserRoleSchema = {
+    type: 'string',
+    enum: ['BKK_ADMIN', 'YGN_STAFF'],
+    title: 'UserRole'
+} as const;
+
 export const UserUpdateSchema = {
     properties: {
         email: {
@@ -439,6 +1544,10 @@ export const UserUpdateSchema = {
             type: 'boolean',
             title: 'Is Superuser',
             default: false
+        },
+        role: {
+            '$ref': '#/components/schemas/UserRole',
+            default: 'BKK_ADMIN'
         },
         full_name: {
             anyOf: [

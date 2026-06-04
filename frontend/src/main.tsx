@@ -1,16 +1,14 @@
-import {
-  MutationCache,
-  QueryCache,
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query"
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client"
 import { createRouter, RouterProvider } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import ReactDOM from "react-dom/client"
-import { ApiError, OpenAPI } from "./client"
+import { OpenAPI } from "./client"
+import { OfflineIndicator } from "./components/OfflineIndicator"
+import { ReloadPrompt } from "./components/ReloadPrompt"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
 import "./index.css"
+import { persister, queryClient } from "./lib/query-client"
 import { routeTree } from "./routeTree.gen"
 
 OpenAPI.BASE = import.meta.env.VITE_API_URL
@@ -18,19 +16,9 @@ OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
 }
 
-const handleApiError = (error: Error) => {
-  if (error instanceof ApiError && [401, 403].includes(error.status)) {
-    localStorage.removeItem("access_token")
-    window.location.href = "/login"
-  }
-}
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: handleApiError,
-  }),
-  mutationCache: new MutationCache({
-    onError: handleApiError,
-  }),
+// Replay offline-queued mutations as soon as the network returns.
+window.addEventListener("online", () => {
+  queryClient.resumePausedMutations()
 })
 
 const router = createRouter({ routeTree })
@@ -43,10 +31,20 @@ declare module "@tanstack/react-router" {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <QueryClientProvider client={queryClient}>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{ persister }}
+        onSuccess={() => {
+          // Once the persisted cache is restored, resume any mutations that
+          // were paused while offline before the last reload.
+          queryClient.resumePausedMutations()
+        }}
+      >
         <RouterProvider router={router} />
+        <OfflineIndicator />
+        <ReloadPrompt />
         <Toaster richColors closeButton />
-      </QueryClientProvider>
+      </PersistQueryClientProvider>
     </ThemeProvider>
   </StrictMode>,
 )
