@@ -297,16 +297,25 @@ def get_unit(*, session: Session, unit_id: Any) -> Unit | None:
     return session.get(Unit, unit_id)
 
 
-def _units_for_movement_keys(
+def _units_by_movement_key(
     *, session: Session, move_keys: list[uuid.UUID]
-) -> list[Unit]:
-    existing = session.exec(
+) -> dict[uuid.UUID, Unit]:
+    """Map each existing movement idempotency_key -> its unit (for replay)."""
+    movements = session.exec(
         select(UnitMovement).where(col(UnitMovement.idempotency_key).in_(move_keys))
     ).all()
-    unit_ids = [m.unit_id for m in existing]
-    if not unit_ids:
-        return []
-    return list(session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all())
+    unit_id_by_key = {m.idempotency_key: m.unit_id for m in movements}
+    if not unit_id_by_key:
+        return {}
+    units = session.exec(
+        select(Unit).where(col(Unit.id).in_(list(unit_id_by_key.values())))
+    ).all()
+    unit_by_id = {u.id: u for u in units}
+    return {
+        key: unit_by_id[uid]
+        for key, uid in unit_id_by_key.items()
+        if uid in unit_by_id
+    }
 
 
 def receive_serialized(
@@ -330,13 +339,18 @@ def receive_serialized(
         raise HTTPException(status_code=500, detail="YGN_WH location not seeded")
 
     # Deterministic per-piece movement key so the whole request is replay-safe
-    # even though unit_movement.idempotency_key is UNIQUE per row.
+    # even though unit_movement.idempotency_key is UNIQUE per row. Bound to
+    # product_id so the key is collision-free if a request ever spans products.
     move_keys = [
-        uuid.uuid5(idempotency_key, p.supplier_serial) for p in pieces
+        uuid.uuid5(idempotency_key, f"{product_id}:{p.supplier_serial}")
+        for p in pieces
     ]
-    replay = _units_for_movement_keys(session=session, move_keys=move_keys)
-    if replay:
-        return replay
+    replay = _units_by_movement_key(session=session, move_keys=move_keys)
+    # Only treat as a replay when *every* piece is already present (the receive
+    # commit is atomic, so a partial match means a tampered/foreign row, not a
+    # legitimate prior receive — fall through and let UNIQUE catch it).
+    if len(replay) == len(move_keys):
+        return [replay[key] for key in move_keys]
 
     state = assert_unit_transition(UnitState.RECEIVED, MovementType.RECEIVED)
     units: list[Unit] = []
@@ -345,7 +359,7 @@ def receive_serialized(
             product_id=product_id,
             supplier_id=supplier_id,
             supplier_serial=piece.supplier_serial,
-            castranova_barcode="CN-" + uuid.uuid4().hex[:10].upper(),
+            castranova_barcode="CN-" + uuid.uuid4().hex[:16].upper(),
             current_state=state,
             current_location_id=ygn.id,
             purchase_cost_thb=piece.purchase_cost_thb,
@@ -367,9 +381,11 @@ def receive_serialized(
     try:
         session.commit()
     except IntegrityError:
-        # Concurrent replay landed first — return its units instead.
+        # Concurrent replay landed first — return its units instead (rollback
+        # already expires the in-memory objects we mutated).
         session.rollback()
-        return _units_for_movement_keys(session=session, move_keys=move_keys)
+        replay = _units_by_movement_key(session=session, move_keys=move_keys)
+        return [replay[key] for key in move_keys if key in replay]
     for unit in units:
         session.refresh(unit)
     return units
@@ -413,6 +429,31 @@ def create_sale(
     if not customer_loc:
         raise HTTPException(status_code=500, detail="CUSTOMER location not seeded")
 
+    # Validate every line and gather barcodes before writing anything (fail fast,
+    # no orphan sale row).
+    barcodes: list[str] = []
+    for line in lines:
+        if line.line_kind == SaleLineKind.PART:
+            raise HTTPException(
+                status_code=400, detail="QUANTITY parts not yet enabled"
+            )
+        if not line.castranova_barcode:
+            raise HTTPException(
+                status_code=422, detail="UNIT line requires castranova_barcode"
+            )
+        barcodes.append(line.castranova_barcode)
+
+    # Lock all target units up front in a single canonical (id-ordered) query so
+    # concurrent sales/pulls touching overlapping units acquire locks in the same
+    # order and cannot deadlock (§7).
+    locked = session.exec(
+        select(Unit)
+        .where(col(Unit.castranova_barcode).in_(barcodes))
+        .order_by(col(Unit.id))
+        .with_for_update()
+    ).all()
+    unit_by_barcode = {u.castranova_barcode: u for u in locked}
+
     sale = Sale(
         customer_id=customer_id,
         created_by_user_id=created_by_user_id,
@@ -425,21 +466,8 @@ def create_sale(
 
     total_thb = Decimal("0.00")
     total_cogs_thb = Decimal("0.00")
-    for line in lines:
-        if line.line_kind == SaleLineKind.PART:
-            raise HTTPException(
-                status_code=400, detail="QUANTITY parts not yet enabled"
-            )
-        if not line.castranova_barcode:
-            raise HTTPException(
-                status_code=422, detail="UNIT line requires castranova_barcode"
-            )
-        # Row lock so a concurrent sale/pull on the same unit serialises (§7).
-        unit = session.exec(
-            select(Unit)
-            .where(Unit.castranova_barcode == line.castranova_barcode)
-            .with_for_update()
-        ).first()
+    for barcode in barcodes:
+        unit = unit_by_barcode.get(barcode)
         if not unit:
             raise HTTPException(status_code=404, detail="Unit not found")
         try:

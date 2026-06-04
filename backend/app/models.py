@@ -398,9 +398,12 @@ class Unit(UnitBase, table=True):
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    received_at: datetime | None = Field(
+    # received_at is audit data — NOT NULL with a DB default so non-ORM inserts
+    # cannot leave it blank.
+    received_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
     )
     updated_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -466,13 +469,14 @@ class UnitMovementPublic(UnitMovementBase):
 
 class ReceivePiece(SQLModel):
     supplier_serial: str = Field(max_length=128)
-    purchase_cost_thb: Decimal
+    # Non-negative and bounded to the Numeric(12,2) range; ge also rejects NaN.
+    purchase_cost_thb: Decimal = Field(ge=0, le=9999999999.99)
 
 
 class ReceiveSerializedRequest(SQLModel):
     product_id: uuid.UUID
     supplier_id: uuid.UUID
-    pieces: list[ReceivePiece] = Field(min_length=1)
+    pieces: list[ReceivePiece] = Field(min_length=1, max_length=500)
     idempotency_key: uuid.UUID
 
 
@@ -491,7 +495,9 @@ class Sale(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     customer_id: uuid.UUID = Field(foreign_key="customer.id", nullable=False)
     created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
-    idempotency_key: uuid.UUID = Field(index=True)
+    # UNIQUE constraint already indexes this; no separate index=True (avoids a
+    # redundant B-tree).
+    idempotency_key: uuid.UUID
     total_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
     total_cogs_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
     receipt_pdf_path: str | None = Field(default=None, max_length=512)
@@ -543,7 +549,7 @@ class SaleLineInput(SQLModel):
 
 class SaleCreateRequest(SQLModel):
     customer_id: uuid.UUID
-    lines: list[SaleLineInput] = Field(min_length=1)
+    lines: list[SaleLineInput] = Field(min_length=1, max_length=100)
     idempotency_key: uuid.UUID
 
 
