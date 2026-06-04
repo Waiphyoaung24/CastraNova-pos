@@ -1299,6 +1299,191 @@ export const SalePublicSchema = {
     title: 'SalePublic'
 } as const;
 
+export const ServiceTicketCloseSchema = {
+    properties: {
+        resolution: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolution'
+        }
+    },
+    type: 'object',
+    title: 'ServiceTicketClose'
+} as const;
+
+export const ServiceTicketCreateSchema = {
+    properties: {
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        issue: {
+            type: 'string',
+            maxLength: 512,
+            title: 'Issue'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        }
+    },
+    type: 'object',
+    required: ['customer_id', 'issue', 'idempotency_key'],
+    title: 'ServiceTicketCreate'
+} as const;
+
+export const ServiceTicketPartCreateSchema = {
+    properties: {
+        sku: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Sku'
+        },
+        quantity: {
+            type: 'integer',
+            maximum: 1000000,
+            exclusiveMinimum: 0,
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            anyOf: [
+                {
+                    type: 'number',
+                    maximum: 9999999999.99,
+                    minimum: 0
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['sku', 'quantity'],
+    title: 'ServiceTicketPartCreate'
+} as const;
+
+export const ServiceTicketPartPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'product_id', 'quantity', 'unit_price_thb'],
+    title: 'ServiceTicketPartPublic'
+} as const;
+
+export const ServiceTicketPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        issue: {
+            type: 'string',
+            title: 'Issue'
+        },
+        resolution: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolution'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        opened_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Opened At'
+        },
+        closed_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Closed At'
+        },
+        parts: {
+            items: {
+                '$ref': '#/components/schemas/ServiceTicketPartPublic'
+            },
+            type: 'array',
+            title: 'Parts'
+        }
+    },
+    type: 'object',
+    required: ['id', 'customer_id', 'issue', 'resolution', 'notes', 'opened_at', 'closed_at', 'parts'],
+    title: 'ServiceTicketPublic'
+} as const;
+
 export const SupplierCreateSchema = {
     properties: {
         name: {

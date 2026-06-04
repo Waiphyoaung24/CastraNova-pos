@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, ServiceTicketsOpenServiceTicketData, ServiceTicketsOpenServiceTicketResponse, ServiceTicketsReadServiceTicketData, ServiceTicketsReadServiceTicketResponse, ServiceTicketsAddServiceTicketPartData, ServiceTicketsAddServiceTicketPartResponse, ServiceTicketsCloseServiceTicketData, ServiceTicketsCloseServiceTicketResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
 
 export class CustomersService {
     /**
@@ -436,6 +436,93 @@ export class SalesService {
             path: {
                 sale_id: data.saleId
             },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class ServiceTicketsService {
+    /**
+     * Open Service Ticket
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns ServiceTicketPublic Successful Response
+     * @throws ApiError
+     */
+    public static openServiceTicket(data: ServiceTicketsOpenServiceTicketData): CancelablePromise<ServiceTicketsOpenServiceTicketResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/service-tickets',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read Service Ticket
+     * @param data The data for the request.
+     * @param data.ticketId
+     * @returns ServiceTicketPublic Successful Response
+     * @throws ApiError
+     */
+    public static readServiceTicket(data: ServiceTicketsReadServiceTicketData): CancelablePromise<ServiceTicketsReadServiceTicketResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/service-tickets/{ticket_id}',
+            path: {
+                ticket_id: data.ticketId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Add Service Ticket Part
+     * @param data The data for the request.
+     * @param data.ticketId
+     * @param data.requestBody
+     * @returns ServiceTicketPartPublic Successful Response
+     * @throws ApiError
+     */
+    public static addServiceTicketPart(data: ServiceTicketsAddServiceTicketPartData): CancelablePromise<ServiceTicketsAddServiceTicketPartResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/service-tickets/{ticket_id}/parts',
+            path: {
+                ticket_id: data.ticketId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Close Service Ticket
+     * @param data The data for the request.
+     * @param data.ticketId
+     * @param data.requestBody
+     * @returns ServiceTicketPublic Successful Response
+     * @throws ApiError
+     */
+    public static closeServiceTicket(data: ServiceTicketsCloseServiceTicketData): CancelablePromise<ServiceTicketsCloseServiceTicketResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/service-tickets/{ticket_id}/close',
+            path: {
+                ticket_id: data.ticketId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }

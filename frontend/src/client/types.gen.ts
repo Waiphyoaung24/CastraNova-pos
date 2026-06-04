@@ -220,6 +220,41 @@ export type SalePublic = {
     lines: Array<SaleLinePublic>;
 };
 
+export type ServiceTicketClose = {
+    resolution?: (string | null);
+};
+
+export type ServiceTicketCreate = {
+    customer_id: string;
+    issue: string;
+    notes?: (string | null);
+    idempotency_key: string;
+};
+
+export type ServiceTicketPartCreate = {
+    sku: string;
+    quantity: number;
+    unit_price_thb?: (number | string | null);
+};
+
+export type ServiceTicketPartPublic = {
+    id: string;
+    product_id: string;
+    quantity: number;
+    unit_price_thb: string;
+};
+
+export type ServiceTicketPublic = {
+    id: string;
+    customer_id: string;
+    issue: string;
+    resolution: (string | null);
+    notes: (string | null);
+    opened_at: string;
+    closed_at: (string | null);
+    parts: Array<ServiceTicketPartPublic>;
+};
+
 export type SupplierCreate = {
     name: string;
     country?: (string | null);
@@ -449,6 +484,32 @@ export type SalesReadSaleReceiptData = {
 };
 
 export type SalesReadSaleReceiptResponse = (unknown);
+
+export type ServiceTicketsOpenServiceTicketData = {
+    requestBody: ServiceTicketCreate;
+};
+
+export type ServiceTicketsOpenServiceTicketResponse = (ServiceTicketPublic);
+
+export type ServiceTicketsReadServiceTicketData = {
+    ticketId: string;
+};
+
+export type ServiceTicketsReadServiceTicketResponse = (ServiceTicketPublic);
+
+export type ServiceTicketsAddServiceTicketPartData = {
+    requestBody: ServiceTicketPartCreate;
+    ticketId: string;
+};
+
+export type ServiceTicketsAddServiceTicketPartResponse = (ServiceTicketPartPublic);
+
+export type ServiceTicketsCloseServiceTicketData = {
+    requestBody: ServiceTicketClose;
+    ticketId: string;
+};
+
+export type ServiceTicketsCloseServiceTicketResponse = (ServiceTicketPublic);
 
 export type SuppliersReadSuppliersData = {
     limit?: number;

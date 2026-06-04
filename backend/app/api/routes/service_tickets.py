@@ -1,0 +1,100 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import select
+
+from app import crud
+from app.api.deps import CurrentUser, SessionDep, get_current_user
+from app.models import (
+    ServiceTicket,
+    ServiceTicketClose,
+    ServiceTicketCreate,
+    ServiceTicketPart,
+    ServiceTicketPartCreate,
+    ServiceTicketPartPublic,
+    ServiceTicketPublic,
+)
+
+router = APIRouter(prefix="/service-tickets", tags=["service-tickets"])
+
+
+def _to_public(*, session: SessionDep, ticket: ServiceTicket) -> ServiceTicketPublic:
+    parts = session.exec(
+        select(ServiceTicketPart).where(
+            ServiceTicketPart.service_ticket_id == ticket.id
+        )
+    ).all()
+    return ServiceTicketPublic(
+        id=ticket.id,
+        customer_id=ticket.customer_id,
+        issue=ticket.issue,
+        resolution=ticket.resolution,
+        notes=ticket.notes,
+        opened_at=ticket.opened_at,
+        closed_at=ticket.closed_at,
+        parts=[ServiceTicketPartPublic.model_validate(p) for p in parts],
+    )
+
+
+@router.post("", response_model=ServiceTicketPublic)
+def open_service_ticket(
+    *, session: SessionDep, current_user: CurrentUser, payload: ServiceTicketCreate
+) -> ServiceTicketPublic:
+    ticket = crud.open_service_ticket(
+        session=session,
+        customer_id=payload.customer_id,
+        issue=payload.issue,
+        notes=payload.notes,
+        idempotency_key=payload.idempotency_key,
+        created_by_user_id=current_user.id,
+    )
+    return _to_public(session=session, ticket=ticket)
+
+
+@router.get(
+    "/{ticket_id}",
+    response_model=ServiceTicketPublic,
+    dependencies=[Depends(get_current_user)],
+)
+def read_service_ticket(
+    *, session: SessionDep, ticket_id: uuid.UUID
+) -> ServiceTicketPublic:
+    ticket = crud.get_service_ticket(session=session, ticket_id=ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Service ticket not found")
+    return _to_public(session=session, ticket=ticket)
+
+
+@router.post(
+    "/{ticket_id}/parts",
+    response_model=ServiceTicketPartPublic,
+    dependencies=[Depends(get_current_user)],
+)
+def add_service_ticket_part(
+    *, session: SessionDep, ticket_id: uuid.UUID, payload: ServiceTicketPartCreate
+) -> ServiceTicketPartPublic:
+    part = crud.add_service_ticket_part(
+        session=session,
+        ticket_id=ticket_id,
+        sku=payload.sku,
+        quantity=payload.quantity,
+        unit_price_thb=payload.unit_price_thb,
+    )
+    return ServiceTicketPartPublic.model_validate(part)
+
+
+@router.post("/{ticket_id}/close", response_model=ServiceTicketPublic)
+def close_service_ticket(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    ticket_id: uuid.UUID,
+    payload: ServiceTicketClose,
+) -> ServiceTicketPublic:
+    ticket = crud.close_service_ticket(
+        session=session,
+        ticket_id=ticket_id,
+        actor_user_id=current_user.id,
+        resolution=payload.resolution,
+    )
+    return _to_public(session=session, ticket=ticket)

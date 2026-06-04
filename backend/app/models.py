@@ -727,6 +727,87 @@ class SaleCreateRequest(SQLModel):
     idempotency_key: uuid.UUID
 
 
+# --- Service ticket (Maintenance, FR-008; M011) -------------------------------
+
+
+class ServiceTicket(SQLModel, table=True):
+    # Opened + closed at the warehouse (D26); UNIQUE(idempotency_key) covers
+    # offline ticket-open replay (S6). Mutable until close; FIFO consumption for
+    # its parts is written at close (Flow C).
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key", name="uq_service_ticket_idempotency_key"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    customer_id: uuid.UUID = Field(foreign_key="customer.id", nullable=False)
+    issue: str = Field(max_length=512)
+    resolution: str | None = Field(default=None, max_length=512)
+    # Captures the whole-machine-swap → original-sale linkage (notes only, §Flow C.5).
+    notes: str | None = Field(default=None, max_length=512)
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    idempotency_key: uuid.UUID
+    opened_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    closed_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class ServiceTicketPart(SQLModel, table=True):
+    # Mutable until ticket close, then immutable (consumption rows written then).
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    service_ticket_id: uuid.UUID = Field(
+        foreign_key="serviceticket.id", nullable=False, index=True
+    )
+    product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
+    quantity: int
+    unit_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    # FK wired in M013 (pricing_override_request); bare-nullable until then.
+    pricing_override_request_id: uuid.UUID | None = Field(default=None)
+
+
+class ServiceTicketPartPublic(SQLModel):
+    id: uuid.UUID
+    product_id: uuid.UUID
+    quantity: int
+    unit_price_thb: Decimal
+
+
+class ServiceTicketPublic(SQLModel):
+    id: uuid.UUID
+    customer_id: uuid.UUID
+    issue: str
+    resolution: str | None
+    notes: str | None
+    opened_at: datetime
+    closed_at: datetime | None
+    parts: list[ServiceTicketPartPublic]
+
+
+class ServiceTicketCreate(SQLModel):
+    customer_id: uuid.UUID
+    issue: str = Field(max_length=512)
+    notes: str | None = Field(default=None, max_length=512)
+    idempotency_key: uuid.UUID
+
+
+class ServiceTicketPartCreate(SQLModel):
+    sku: str = Field(max_length=64)
+    quantity: int = Field(gt=0, le=1_000_000)
+    # Optional repair-price override; defaults to product.repair_price_thb.
+    unit_price_thb: Decimal | None = Field(default=None, ge=0, le=9999999999.99)
+
+
+class ServiceTicketClose(SQLModel):
+    resolution: str | None = Field(default=None, max_length=512)
+
+
 # Generic message
 class Message(SQLModel):
     message: str

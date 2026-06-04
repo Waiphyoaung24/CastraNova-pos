@@ -34,6 +34,8 @@ from app.models import (
     SaleLine,
     SaleLineInput,
     SaleLineKind,
+    ServiceTicket,
+    ServiceTicketPart,
     Supplier,
     SupplierCreate,
     SupplierUpdate,
@@ -805,6 +807,150 @@ def create_sale(
         return winner
     session.refresh(sale)
     return sale
+
+
+# --- Maintenance / service tickets (FR-008) -----------------------------------
+
+
+def get_service_ticket(
+    *, session: Session, ticket_id: Any
+) -> ServiceTicket | None:
+    return session.get(ServiceTicket, ticket_id)
+
+
+def open_service_ticket(
+    *,
+    session: Session,
+    customer_id: uuid.UUID,
+    issue: str,
+    idempotency_key: uuid.UUID,
+    created_by_user_id: uuid.UUID,
+    notes: str | None = None,
+) -> ServiceTicket:
+    """Open a maintenance ticket. Idempotent on idempotency_key — replaying an
+    offline ticket-open returns the existing ticket (FR-008, S6)."""
+    if not session.get(Customer, customer_id):
+        raise HTTPException(status_code=404, detail="Customer not found")
+    ticket, _ = get_or_replay(
+        session=session,
+        statement=select(ServiceTicket).where(
+            ServiceTicket.idempotency_key == idempotency_key
+        ),
+        build=lambda: ServiceTicket(
+            customer_id=customer_id,
+            issue=issue,
+            notes=notes,
+            created_by_user_id=created_by_user_id,
+            idempotency_key=idempotency_key,
+        ),
+    )
+    return ticket
+
+
+def add_service_ticket_part(
+    *,
+    session: Session,
+    ticket_id: uuid.UUID,
+    sku: str,
+    quantity: int,
+    unit_price_thb: Decimal | None = None,
+) -> ServiceTicketPart:
+    """Add a part line to an open ticket. Price defaults to the product's
+    repair_price_thb unless an override is supplied (FR-008 / Flow C.3). Rejected
+    once the ticket is closed (its parts are immutable then)."""
+    ticket = session.get(ServiceTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Service ticket not found")
+    if ticket.closed_at is not None:
+        raise HTTPException(status_code=409, detail="Service ticket is closed")
+    product = session.exec(select(Product).where(Product.sku == sku)).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.tracking_mode != TrackingMode.QUANTITY:
+        raise HTTPException(
+            status_code=400, detail="Service part requires a QUANTITY-tracked product"
+        )
+    part = ServiceTicketPart(
+        service_ticket_id=ticket.id,
+        product_id=product.id,
+        quantity=quantity,
+        unit_price_thb=(
+            unit_price_thb if unit_price_thb is not None else product.repair_price_thb
+        ),
+    )
+    session.add(part)
+    session.commit()
+    session.refresh(part)
+    return part
+
+
+def close_service_ticket(
+    *,
+    session: Session,
+    ticket_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    resolution: str | None = None,
+) -> ServiceTicket:
+    """Close a ticket: FIFO-consume each part line, writing one
+    part_movement(MAINTENANCE_OUT) + cost_line[] per line, and stamp closed_at —
+    all in one transaction (Flow C.4). The ticket row is locked FOR UPDATE and a
+    re-close is idempotent (already-closed tickets return unchanged, never
+    re-consume). 409 on insufficient stock leaves the ticket open."""
+    ticket = session.exec(
+        select(ServiceTicket)
+        .where(ServiceTicket.id == ticket_id)
+        .with_for_update()
+    ).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Service ticket not found")
+    if ticket.closed_at is not None:
+        return ticket  # idempotent: already closed, do not re-consume
+
+    customer_loc = session.exec(
+        select(Location).where(Location.code == "CUSTOMER")
+    ).first()
+    ygn_loc = session.exec(
+        select(Location).where(Location.code == "YGN_WH")
+    ).first()
+    if not customer_loc or not ygn_loc:
+        raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    parts = session.exec(
+        select(ServiceTicketPart).where(
+            ServiceTicketPart.service_ticket_id == ticket_id
+        )
+    ).all()
+    # Consume in deterministic product order so concurrent consumption (across
+    # tickets/sales) acquires batch locks in the same order and cannot deadlock.
+    for part in sorted(parts, key=lambda p: str(p.product_id)):
+        cost_lines = consume_quantity_fifo(
+            session=session,
+            product_id=part.product_id,
+            quantity_needed=part.quantity,
+        )
+        movement = PartMovement(
+            product_id=part.product_id,
+            event_type=MovementType.MAINTENANCE_OUT,
+            quantity=part.quantity,
+            from_location_id=ygn_loc.id,
+            to_location_id=customer_loc.id,
+            service_ticket_id=ticket.id,
+            actor_user_id=actor_user_id,
+            idempotency_key=uuid.uuid5(ticket.id, f"maint:{part.id}"),
+        )
+        session.add(movement)
+        session.flush()
+        for cost_line in cost_lines:
+            cost_line.part_movement_id = movement.id
+            session.add(cost_line)
+
+    ticket.closed_at = get_datetime_utc()
+    if resolution is not None:
+        ticket.resolution = resolution
+    session.add(ticket)
+    session.commit()
+    session.refresh(ticket)
+    return ticket
 
 
 # Dummy hash to use for timing attack prevention when user is not found
