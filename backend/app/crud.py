@@ -6,11 +6,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from app.core.security import get_password_hash, verify_password
+from app.core.state_machine import assert_unit_transition
 from app.models import (
     Customer,
     CustomerCreate,
     CustomerUpdate,
     Location,
+    MovementType,
     PriceChange,
     Product,
     ProductCreate,
@@ -18,9 +20,13 @@ from app.models import (
     Project,
     ProjectCreate,
     ProjectUpdate,
+    ReceivePiece,
     Supplier,
     SupplierCreate,
     SupplierUpdate,
+    Unit,
+    UnitMovement,
+    UnitState,
     User,
     UserCreate,
     UserUpdate,
@@ -242,6 +248,91 @@ def list_price_history(*, session: Session, product_id: Any) -> list[PriceChange
             .order_by(col(PriceChange.changed_at).desc())
         ).all()
     )
+
+
+# --- Serialized receive (FR-005) ----------------------------------------------
+
+
+def get_unit(*, session: Session, unit_id: Any) -> Unit | None:
+    return session.get(Unit, unit_id)
+
+
+def _units_for_movement_keys(
+    *, session: Session, move_keys: list[uuid.UUID]
+) -> list[Unit]:
+    existing = session.exec(
+        select(UnitMovement).where(col(UnitMovement.idempotency_key).in_(move_keys))
+    ).all()
+    unit_ids = [m.unit_id for m in existing]
+    if not unit_ids:
+        return []
+    return list(session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all())
+
+
+def receive_serialized(
+    *,
+    session: Session,
+    product_id: uuid.UUID,
+    supplier_id: uuid.UUID,
+    pieces: list[ReceivePiece],
+    idempotency_key: uuid.UUID,
+    received_by_user_id: uuid.UUID,
+) -> list[Unit]:
+    """Receive SERIALIZED pieces: one unit + one RECEIVED movement each, in one
+    transaction. Idempotent per request — replaying the same idempotency_key
+    returns the already-created units without inserting duplicates (FR-005, S5)."""
+    if not session.get(Product, product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
+    if not session.get(Supplier, supplier_id):
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
+    if not ygn:
+        raise HTTPException(status_code=500, detail="YGN_WH location not seeded")
+
+    # Deterministic per-piece movement key so the whole request is replay-safe
+    # even though unit_movement.idempotency_key is UNIQUE per row.
+    move_keys = [
+        uuid.uuid5(idempotency_key, p.supplier_serial) for p in pieces
+    ]
+    replay = _units_for_movement_keys(session=session, move_keys=move_keys)
+    if replay:
+        return replay
+
+    state = assert_unit_transition(UnitState.RECEIVED, MovementType.RECEIVED)
+    units: list[Unit] = []
+    for piece, move_key in zip(pieces, move_keys, strict=True):
+        unit = Unit(
+            product_id=product_id,
+            supplier_id=supplier_id,
+            supplier_serial=piece.supplier_serial,
+            castranova_barcode="CN-" + uuid.uuid4().hex[:10].upper(),
+            current_state=state,
+            current_location_id=ygn.id,
+            purchase_cost_thb=piece.purchase_cost_thb,
+            received_by_user_id=received_by_user_id,
+        )
+        session.add(unit)
+        session.flush()
+        session.add(
+            UnitMovement(
+                unit_id=unit.id,
+                event_type=MovementType.RECEIVED,
+                from_location_id=None,
+                to_location_id=ygn.id,
+                actor_user_id=received_by_user_id,
+                idempotency_key=move_key,
+            )
+        )
+        units.append(unit)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Concurrent replay landed first — return its units instead.
+        session.rollback()
+        return _units_for_movement_keys(session=session, move_keys=move_keys)
+    for unit in units:
+        session.refresh(unit)
+    return units
 
 
 # Dummy hash to use for timing attack prevention when user is not found

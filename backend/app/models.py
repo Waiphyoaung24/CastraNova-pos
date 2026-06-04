@@ -456,6 +456,25 @@ class UnitMovementPublic(UnitMovementBase):
     occurred_at: datetime
 
 
+# --- Serialized receive (FR-005) request/response -----------------------------
+
+
+class ReceivePiece(SQLModel):
+    supplier_serial: str = Field(max_length=128)
+    purchase_cost_thb: Decimal
+
+
+class ReceiveSerializedRequest(SQLModel):
+    product_id: uuid.UUID
+    supplier_id: uuid.UUID
+    pieces: list[ReceivePiece] = Field(min_length=1)
+    idempotency_key: uuid.UUID
+
+
+class ReceiveSerializedResponse(SQLModel):
+    units: list[UnitPublic]
+
+
 # Generic message
 class Message(SQLModel):
     message: str
