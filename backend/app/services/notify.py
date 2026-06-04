@@ -15,7 +15,8 @@ import uuid
 from typing import Any
 
 import httpx
-from sqlmodel import Session, select
+from sqlalchemy import func
+from sqlmodel import Session, col, select
 from tenacity import (
     Retrying,
     retry_if_exception_type,
@@ -32,8 +33,13 @@ from app.models import (
     NotificationLog,
     NotificationPreference,
     NotificationStatus,
+    PartBatch,
+    Product,
     ProjectPull,
     ProjectPullLine,
+    TrackingMode,
+    Unit,
+    UnitState,
     User,
     UserRole,
 )
@@ -219,6 +225,11 @@ def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> s
             f"Project pull {payload.get('pull_id')} settled SHORT "
             f"({payload.get('short_line_count')} line(s) short)."
         )
+    if event_type == NotificationEvent.LOW_STOCK:
+        return (
+            f"Low stock: {payload.get('sku')} — {payload.get('on_hand')} left "
+            f"(min {payload.get('min_stock_level')})."
+        )
     # Never push a raw payload (may carry financial fields). Each new event must
     # add an explicit, safe template here.
     raise NotImplementedError(f"No render template for {event_type!r}")
@@ -247,6 +258,83 @@ def notify_pull_short(
         recipients=recipients,
         payload=payload,
     )
+
+
+def _on_hand(session: Session, product: Product) -> int:
+    if product.tracking_mode == TrackingMode.QUANTITY:
+        total = session.exec(
+            select(func.coalesce(func.sum(PartBatch.remaining_qty), 0)).where(
+                PartBatch.product_id == product.id
+            )
+        ).one()
+        return int(total)
+    count = session.exec(
+        select(func.count()).where(
+            Unit.product_id == product.id,
+            Unit.current_state == UnitState.IN_STOCK,
+        )
+    ).one()
+    return int(count)
+
+
+def notify_low_stock(
+    *, session: Session, product_ids: list[uuid.UUID]
+) -> list[NotificationLog]:
+    """Notify every user opted into LOW_STOCK that a SKU dropped below its
+    threshold (FR-016). Re-checks on-hand < threshold per product to guard
+    against a replenishment between the consuming commit and dispatch; recipients
+    are any-role users with an enabled LOW_STOCK preference (opt-in driven)."""
+    recipients = list(
+        session.exec(
+            select(User)
+            .join(
+                NotificationPreference,
+                col(NotificationPreference.user_id) == col(User.id),
+            )
+            .where(
+                NotificationPreference.event_type == NotificationEvent.LOW_STOCK,
+                col(NotificationPreference.enabled).is_(True),
+            )
+            .distinct()
+        ).all()
+    )
+
+    logs: list[NotificationLog] = []
+    for product_id in product_ids:
+        product = session.get(Product, product_id)
+        if product is None:
+            continue
+        threshold = product.default_min_stock_level
+        if threshold is None:
+            continue
+        on_hand = _on_hand(session, product)
+        if on_hand >= threshold:
+            continue  # replenished since the crossing — no longer low
+        payload: dict[str, Any] = {
+            "product_id": str(product.id),
+            "sku": product.sku,
+            "on_hand": on_hand,
+            "min_stock_level": threshold,
+        }
+        logs.extend(
+            notify(
+                session=session,
+                event_type=NotificationEvent.LOW_STOCK,
+                recipients=recipients,
+                payload=payload,
+            )
+        )
+    return logs
+
+
+def notify_low_stock_bg(*, product_ids: list[uuid.UUID]) -> None:
+    """BackgroundTasks entrypoint for low-stock alerts. Opens its OWN session
+    and can never raise out of the background task (best-effort)."""
+    try:
+        with Session(engine) as session:
+            notify_low_stock(session=session, product_ids=product_ids)
+    except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
+        logger.exception("notify_low_stock_bg failed for product_ids=%s", product_ids)
 
 
 def notify_pull_short_bg(*, pull_id: uuid.UUID) -> None:

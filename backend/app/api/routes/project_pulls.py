@@ -103,6 +103,10 @@ def fulfill_project_pull(
     # block the request or turn a successful fulfill into a 500.
     if pull.state == ProjectPullState.SHORT:
         background_tasks.add_task(notify.notify_pull_short_bg, pull_id=pull.id)
+    # FR-016: alert when fulfillment dropped a SKU below its low-stock threshold.
+    crossed = crud.pop_low_stock_crossed(session)
+    if crossed:
+        background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, pull=pull)
 
 

@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlmodel import select
 
 from app import crud
@@ -12,6 +12,7 @@ from app.models import (
     SaleLinePublic,
     SalePublic,
 )
+from app.services import notify
 from app.services.receipt_pdf import render_sale_receipt
 
 router = APIRouter(prefix="/sales", tags=["sales"])
@@ -31,7 +32,11 @@ def _to_public(*, session: SessionDep, sale: Sale) -> SalePublic:
 
 @router.post("", response_model=SalePublic)
 def create_sale(
-    *, session: SessionDep, current_user: CurrentUser, payload: SaleCreateRequest
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    payload: SaleCreateRequest,
 ) -> SalePublic:
     sale = crud.create_sale(
         session=session,
@@ -40,6 +45,10 @@ def create_sale(
         idempotency_key=payload.idempotency_key,
         created_by_user_id=current_user.id,
     )
+    # FR-016: alert when consumption dropped a SKU below its low-stock threshold.
+    crossed = crud.pop_low_stock_crossed(session)
+    if crossed:
+        background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, sale=sale)
 
 

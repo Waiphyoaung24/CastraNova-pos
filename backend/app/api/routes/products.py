@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app import crud
 from app.api.deps import AdminUser, SessionDep, get_admin, get_current_user
 from app.models import (
+    MinStockLevelUpdate,
     PriceChangePublic,
     ProductCreate,
     ProductPublic,
@@ -44,6 +45,24 @@ def update_product(
         db_product=db_product,
         product_in=product_in,
         changed_by_user_id=current_user.id,
+    )
+
+
+@router.patch(
+    "/{product_id}/min-stock-level",
+    response_model=ProductPublic,
+    dependencies=[Depends(get_admin)],
+)
+def set_min_stock_level(
+    *,
+    session: SessionDep,
+    product_id: uuid.UUID,
+    payload: MinStockLevelUpdate,
+) -> ProductPublic:
+    return crud.set_min_stock_level(  # type: ignore[return-value]
+        session=session,
+        product_id=product_id,
+        min_stock_level=payload.min_stock_level,
     )
 
 

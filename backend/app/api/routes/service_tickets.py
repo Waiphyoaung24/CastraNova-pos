@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_user
@@ -12,6 +12,7 @@ from app.models import (
     ServiceTicketPartPublic,
     ServiceTicketPublic,
 )
+from app.services import notify
 
 router = APIRouter(prefix="/service-tickets", tags=["service-tickets"])
 
@@ -82,6 +83,7 @@ def close_service_ticket(
     *,
     session: SessionDep,
     current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
     ticket_id: uuid.UUID,
     payload: ServiceTicketClose,
 ) -> ServiceTicketPublic:
@@ -91,4 +93,8 @@ def close_service_ticket(
         actor_user_id=current_user.id,
         resolution=payload.resolution,
     )
+    # FR-016: alert when consumption dropped a SKU below its low-stock threshold.
+    crossed = crud.pop_low_stock_crossed(session)
+    if crossed:
+        background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, ticket=ticket)

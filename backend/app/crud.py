@@ -24,6 +24,7 @@ from app.models import (
     CustomerUpdate,
     LineState,
     Location,
+    LowStockItemPublic,
     MovementType,
     NotificationPreference,
     NotificationPreferenceUpdate,
@@ -610,7 +611,109 @@ def consume_quantity_fifo(
             )
         )
         remaining -= take
+
+    # FR-016 low-stock crossing: flag a FRESH downward crossing below the per-SKU
+    # threshold (was at/above before, now below). Read-only product fetch + a set
+    # insert — no new locks, no change to FIFO/409 semantics. The route pops these
+    # post-commit and dispatches a background alert.
+    after = total_available - quantity_needed
+    product = session.get(Product, product_id)
+    threshold = product.default_min_stock_level if product else None
+    if threshold is not None and total_available >= threshold and after < threshold:
+        session.info.setdefault("low_stock_crossed", set()).add(product_id)
+
     return cost_lines
+
+
+def pop_low_stock_crossed(session: Session) -> set[uuid.UUID]:
+    """Return and clear the product_ids flagged as crossing below their low-stock
+    threshold during this session's consumption (FR-016)."""
+    crossed: set[uuid.UUID] = session.info.get("low_stock_crossed", set())
+    session.info["low_stock_crossed"] = set()
+    return crossed
+
+
+# --- Low-stock min levels + list (FR-016) -------------------------------------
+
+
+def _on_hand(session: Session, product: Product) -> int:
+    """Current on-hand for a product: sum of batch remaining_qty (QUANTITY) or
+    count of IN_STOCK units (SERIALIZED)."""
+    if product.tracking_mode == TrackingMode.QUANTITY:
+        total = session.exec(
+            select(func.coalesce(func.sum(PartBatch.remaining_qty), 0)).where(
+                PartBatch.product_id == product.id
+            )
+        ).one()
+        return int(total)
+    count = session.exec(
+        select(func.count()).where(
+            Unit.product_id == product.id,
+            Unit.current_state == UnitState.IN_STOCK,
+        )
+    ).one()
+    return int(count)
+
+
+def list_low_stock(session: Session) -> list[LowStockItemPublic]:
+    """Products with a non-null threshold whose on-hand is below it (FR-016)."""
+    products = session.exec(
+        select(Product).where(col(Product.default_min_stock_level).is_not(None))
+    ).all()
+    items: list[LowStockItemPublic] = []
+    for product in products:
+        threshold = product.default_min_stock_level
+        assert threshold is not None  # WHERE guarantees this
+        on_hand = _on_hand(session, product)
+        if on_hand < threshold:
+            items.append(
+                LowStockItemPublic(
+                    product_id=product.id,
+                    sku=product.sku,
+                    model_name=product.model_name,
+                    tracking_mode=product.tracking_mode,
+                    on_hand=on_hand,
+                    min_stock_level=threshold,
+                )
+            )
+    return items
+
+
+def set_min_stock_level(
+    *, session: Session, product_id: uuid.UUID, min_stock_level: int | None
+) -> Product:
+    """Set (or clear, with None) a product's per-SKU low-stock threshold."""
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product.default_min_stock_level = min_stock_level
+    product.updated_at = get_datetime_utc()
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+    return product
+
+
+def bulk_set_min_stock_level(
+    *, session: Session, items: list[tuple[uuid.UUID, int | None]]
+) -> list[Product]:
+    """Set many per-SKU thresholds in one transaction. 404 if any product is
+    missing (whole batch fails, no partial apply)."""
+    products: list[Product] = []
+    for product_id, level in items:
+        product = session.get(Product, product_id)
+        if not product:
+            raise HTTPException(
+                status_code=404, detail=f"Product {product_id} not found"
+            )
+        product.default_min_stock_level = level
+        product.updated_at = get_datetime_utc()
+        session.add(product)
+        products.append(product)
+    session.commit()
+    for product in products:
+        session.refresh(product)
+    return products
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------

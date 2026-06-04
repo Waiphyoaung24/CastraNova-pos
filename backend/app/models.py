@@ -370,6 +370,40 @@ class ProductPublic(ProductBase):
     id: uuid.UUID
 
 
+# --- Low-stock alerts (FR-016) ------------------------------------------------
+
+
+class LowStockItemPublic(SQLModel):
+    product_id: uuid.UUID
+    sku: str
+    model_name: str
+    tracking_mode: TrackingMode
+    on_hand: int
+    min_stock_level: int
+
+
+class MinStockLevelUpdate(SQLModel):
+    min_stock_level: int | None = Field(default=None, ge=0)
+
+
+class BulkMinStockItem(SQLModel):
+    product_id: uuid.UUID
+    min_stock_level: int | None = Field(default=None, ge=0)
+
+
+class BulkMinStockUpdate(SQLModel):
+    items: list[BulkMinStockItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _no_duplicate_product_ids(self) -> "BulkMinStockUpdate":
+        seen: set[uuid.UUID] = set()
+        for item in self.items:
+            if item.product_id in seen:
+                raise ValueError(f"duplicate product_id: {item.product_id}")
+            seen.add(item.product_id)
+        return self
+
+
 # --- Price change (append-only history; FR-002) -------------------------------
 
 
