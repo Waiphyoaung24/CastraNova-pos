@@ -1,3 +1,4 @@
+import enum
 import uuid
 from datetime import datetime, timezone
 
@@ -8,6 +9,73 @@ from sqlmodel import Field, Relationship, SQLModel
 
 def get_datetime_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# --- CastraNova domain enums ---------------------------------------------------
+
+
+class UserRole(str, enum.Enum):
+    BKK_ADMIN = "BKK_ADMIN"
+    YGN_STAFF = "YGN_STAFF"
+
+
+class TrackingMode(str, enum.Enum):
+    SERIALIZED = "SERIALIZED"
+    QUANTITY = "QUANTITY"
+
+
+class Channel(str, enum.Enum):
+    SALE = "SALE"
+    MAINTENANCE = "MAINTENANCE"
+    PROJECT = "PROJECT"
+
+
+class UnitState(str, enum.Enum):
+    RECEIVED = "RECEIVED"
+    IN_STOCK = "IN_STOCK"
+    SOLD = "SOLD"
+    MAINTENANCE_OUT = "MAINTENANCE_OUT"
+    PROJECT_OUT = "PROJECT_OUT"
+    ADJUSTED_OUT = "ADJUSTED_OUT"
+
+
+class MovementType(str, enum.Enum):
+    RECEIVED = "RECEIVED"
+    SOLD = "SOLD"
+    MAINTENANCE_OUT = "MAINTENANCE_OUT"
+    PROJECT_OUT = "PROJECT_OUT"
+    ADJUSTED_OUT = "ADJUSTED_OUT"
+
+
+class ProjectPullState(str, enum.Enum):
+    PENDING = "PENDING"
+    FULFILLED = "FULFILLED"
+    SHORT = "SHORT"
+    CANCELLED = "CANCELLED"
+
+
+class LineState(str, enum.Enum):
+    PENDING = "PENDING"
+    FULFILLED = "FULFILLED"
+    SHORT = "SHORT"
+    CANCELLED = "CANCELLED"
+
+
+class OverrideState(str, enum.Enum):
+    AUTO_APPROVED = "AUTO_APPROVED"
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class AdjustmentTarget(str, enum.Enum):
+    UNIT = "UNIT"
+    QUANTITY = "QUANTITY"
+
+
+class CustomerType(str, enum.Enum):
+    DEALER = "DEALER"
+    END_CUSTOMER = "END_CUSTOMER"
 
 
 # Shared properties
