@@ -15,7 +15,6 @@ import uuid
 from typing import Any
 
 import httpx
-from sqlalchemy import func
 from sqlmodel import Session, col, select
 from tenacity import (
     Retrying,
@@ -24,6 +23,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from app import crud
 from app.core.config import settings
 from app.core.db import engine
 from app.models import (
@@ -33,13 +33,9 @@ from app.models import (
     NotificationLog,
     NotificationPreference,
     NotificationStatus,
-    PartBatch,
     Product,
     ProjectPull,
     ProjectPullLine,
-    TrackingMode,
-    Unit,
-    UnitState,
     User,
     UserRole,
 )
@@ -260,23 +256,6 @@ def notify_pull_short(
     )
 
 
-def _on_hand(session: Session, product: Product) -> int:
-    if product.tracking_mode == TrackingMode.QUANTITY:
-        total = session.exec(
-            select(func.coalesce(func.sum(PartBatch.remaining_qty), 0)).where(
-                PartBatch.product_id == product.id
-            )
-        ).one()
-        return int(total)
-    count = session.exec(
-        select(func.count()).where(
-            Unit.product_id == product.id,
-            Unit.current_state == UnitState.IN_STOCK,
-        )
-    ).one()
-    return int(count)
-
-
 def notify_low_stock(
     *, session: Session, product_ids: list[uuid.UUID]
 ) -> list[NotificationLog]:
@@ -307,7 +286,7 @@ def notify_low_stock(
         threshold = product.default_min_stock_level
         if threshold is None:
             continue
-        on_hand = _on_hand(session, product)
+        on_hand = crud._on_hand(session, product)
         if on_hand >= threshold:
             continue  # replenished since the crossing — no longer low
         payload: dict[str, Any] = {

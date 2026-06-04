@@ -14,7 +14,7 @@ router = APIRouter(prefix="/low-stock", tags=["low-stock"])
 @router.get(
     "", response_model=list[LowStockItemPublic], dependencies=[Depends(get_current_user)]
 )
-def read_low_stock(session: SessionDep) -> list[LowStockItemPublic]:
+def read_low_stock(*, session: SessionDep) -> list[LowStockItemPublic]:
     return crud.list_low_stock(session)
 
 

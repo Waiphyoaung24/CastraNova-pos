@@ -383,16 +383,16 @@ class LowStockItemPublic(SQLModel):
 
 
 class MinStockLevelUpdate(SQLModel):
-    min_stock_level: int | None = Field(default=None, ge=0)
+    min_stock_level: int | None = Field(default=None, ge=0, le=1_000_000)
 
 
 class BulkMinStockItem(SQLModel):
     product_id: uuid.UUID
-    min_stock_level: int | None = Field(default=None, ge=0)
+    min_stock_level: int | None = Field(default=None, ge=0, le=1_000_000)
 
 
 class BulkMinStockUpdate(SQLModel):
-    items: list[BulkMinStockItem] = Field(min_length=1)
+    items: list[BulkMinStockItem] = Field(min_length=1, max_length=500)
 
     @model_validator(mode="after")
     def _no_duplicate_product_ids(self) -> "BulkMinStockUpdate":

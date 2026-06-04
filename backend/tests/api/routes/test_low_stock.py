@@ -341,6 +341,22 @@ def test_bulk_set_duplicate_product_422(
     assert r.status_code == 422
 
 
+def test_bulk_set_over_500_items_422(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    # The schema caps items at 500; an oversized batch is rejected before any DB
+    # access (distinct product_ids so the duplicate guard is not what trips it).
+    items = [
+        {"product_id": str(uuid.uuid4()), "min_stock_level": 1} for _ in range(501)
+    ]
+    r = client.patch(
+        f"{PREFIX}/low-stock/bulk",
+        headers=superuser_token_headers,
+        json={"items": items},
+    )
+    assert r.status_code == 422
+
+
 # --- cross-threshold alert ----------------------------------------------------
 
 

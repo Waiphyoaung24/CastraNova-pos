@@ -663,7 +663,8 @@ def list_low_stock(session: Session) -> list[LowStockItemPublic]:
     items: list[LowStockItemPublic] = []
     for product in products:
         threshold = product.default_min_stock_level
-        assert threshold is not None  # WHERE guarantees this
+        if threshold is None:  # WHERE guarantees non-null; explicit guard for -O
+            continue
         on_hand = _on_hand(session, product)
         if on_hand < threshold:
             items.append(
@@ -923,6 +924,10 @@ def create_sale(
     except IntegrityError:
         # Lost the idempotency race — return the winner's sale.
         session.rollback()
+        # session.info is NOT transactional: discard the low-stock crossings
+        # recorded during the rolled-back consume so the route does not dispatch
+        # a duplicate alert (the winning request already alerts).
+        session.info["low_stock_crossed"] = set()
         winner = _sale_by_key(session=session, idempotency_key=idempotency_key)
         if winner is None:
             raise
