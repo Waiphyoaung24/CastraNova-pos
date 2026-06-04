@@ -48,20 +48,22 @@ For multi-step tasks, state a brief plan with verification per step.
 
 **Every non-trivial feature follows this skill-driven loop.** Skills are invoked via the Skill tool (or `/<skill-name>`). This loop operationalizes §1–§4 above; don't skip stages on inventory/financial code.
 
-| Stage | Skill | When | Why it's critical here |
+**Division of labor:** superpowers skills own the workflow *loop*; ECC provides stack-specific specialist agents and skills invoked *within* each stage. They compose — ECC never replaces a stage, it deepens it. ECC agents are dispatched via the Agent tool; ECC skills via `/ecc:<name>`.
+
+| Stage | superpowers skill (loop driver) | When | ECC specialists (invoked within the stage) |
 |---|---|---|---|
-| 1. Plan | `writing-plans` | Before touching code, once per feature/group | Produces bite-sized, DRY tasks → enforces §2 Simplicity & §3 Surgical Changes (no speculative code). Plans live in `docs/plans/`. |
-| 2. Build | `subagent-driven-development` | Executing a plan with independent tasks | Dispatches a fresh subagent per task across the stack (model → crud → route → SDK → UI); review between tasks. |
-| 3. Test-first | `test-driven-development` | Inside every build task | Red → green → commit. Prevents regressions in FIFO/ledger/margin logic. pytest (backend) + Playwright (E2E) already integrated. |
-| 4. Debug | `systematic-debugging` | Any failing/flaky test or wrong stock total | Root-cause **before** fixing. POS cannot afford "ghost inventory" patches — no symptom-chasing on stock movements, FIFO, or money. |
-| 5. Review | `requesting-code-review` | Before opening a PR | Independent check that the change obeys §2 Simplicity First & §3 Surgical Changes and the conventions below. |
+| 1. Plan | `writing-plans` | Before touching code, once per feature/group | `ecc:architect` (system-design calls), `ecc:code-explorer` (trace existing FIFO/ledger/stock-movement code before designing) |
+| 2. Build | `subagent-driven-development` | Executing a plan with independent tasks | skills: `ecc:fastapi-patterns`, `ecc:postgres-patterns`, `ecc:database-migrations`, `ecc:react-patterns`, `ecc:api-design`; resolver agents: `ecc:build-error-resolver`, `ecc:react-build-resolver` |
+| 3. Test-first | `test-driven-development` | Inside every build task | `ecc:e2e-testing` skill + `ecc:e2e-runner` agent (Playwright) alongside pytest |
+| 4. Debug | `systematic-debugging` | Any failing/flaky test or wrong stock total | `ecc:silent-failure-hunter`, `ecc:performance-optimizer` |
+| 5. Review | `requesting-code-review` (orchestrator) | Before opening a PR | dispatches `ecc:fastapi-reviewer`, `ecc:python-reviewer`, `ecc:react-reviewer`, `ecc:typescript-reviewer`, `ecc:database-reviewer`, `ecc:security-reviewer` |
 | 6. Ship | `create-pr` (+ `git-pushing`) | After review passes | Clean, scoped PRs — one feature/task group per PR; never push to `master` directly. |
 
 **The loop:** `writing-plans` (once) → for each task: `subagent-driven-development` → `test-driven-development` → `systematic-debugging` (only if a test resists) → `requesting-code-review` → `create-pr`.
 
 - **Active plan:** `docs/plans/2026-06-04-castranova-pos-implementation.md` (Parts 0–2 are fully bite-sized; Parts 3–5 are a roadmap to expand on demand).
-- **Append-only / FIFO / role-tiering changes are "high-risk"** — always run stages 3–5; the FIFO concurrency test (plan Task 2.3) is mandatory before any PR that touches consumption.
-- **Skill availability:** stages 1–5 use installed superpowers skills. `github-pr-workflow` is **not installed** — use the installed `create-pr` / `git-pr-workflows-git-workflow` / `git-pushing` instead. (A Hermes `github-pr-workflow` skill is referenced at https://hermes-agent.nousresearch.com/docs/skills; install it explicitly before swapping it into stage 6.)
+- **Append-only / FIFO / role-tiering changes are "high-risk"** — always run stages 3–5; the FIFO concurrency test (plan Task 2.3) is mandatory before any PR that touches consumption. On these changes the Review stage **must** also run `ecc:database-reviewer` + `ecc:security-reviewer` (in addition to `requesting-code-review`) — belt-and-suspenders on stock movements, ledgers, and money.
+- **Skill availability:** stages 1–5 use installed superpowers skills for the loop; ECC (plugin `ecc@ecc`) is installed and supplies the specialist agents/skills in the right-hand column above (Agent tool for `ecc:*` agents, `/ecc:<name>` for skills). `github-pr-workflow` is **not installed** — use the installed `create-pr` / `git-pr-workflows-git-workflow` / `git-pushing` instead. (A Hermes `github-pr-workflow` skill is referenced at https://hermes-agent.nousresearch.com/docs/skills; install it explicitly before swapping it into stage 6.)
 
 ---
 
