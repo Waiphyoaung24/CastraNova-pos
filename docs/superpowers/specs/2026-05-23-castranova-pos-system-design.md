@@ -145,7 +145,7 @@ All tables use UUID primary keys + `created_at` (`TIMESTAMPTZ NOT NULL DEFAULT n
 
 | # | Table | Mutable? | Key columns | Notes |
 |---|---|---|---|---|
-| 1 | `user` | yes | id, email, hashed_pw, role (`BKK_ADMIN`/`YGN_STAFF`), is_active | Existing template table — adds `role` enum, drops `is_superuser` reliance |
+| 1 | `user` | yes | id, email, hashed_pw, role (`BKK_ADMIN`/`YGN_STAFF`), is_active, is_superuser | Existing template table — adds `role` enum for domain authorization. **`is_superuser` is retained** for the template's `/users` + `/items` admin guards and the bootstrap superuser (who gets `role=BKK_ADMIN` **and** `is_superuser=True`); new CastraNova routes authorize via `role` (S7 / `get_admin`) |
 | 2 | `notification_preference` | yes | user_id (FK), channel (`LINE`/`VIBER`), event_type, enabled | M2M opt-in; covers FR-018 |
 | 3 | `location` | yes (admin) | id, code (unique), name, country, is_active | Flat. Seed rows: `YGN_WH`, `CUSTOMER` (virtual), `ADJUSTED_OUT` (virtual). Extensible to multi-branch in v2 |
 | 4 | `supplier` | yes (admin) | id, name, country, contact | Per FR-003 |
@@ -160,7 +160,7 @@ All tables use UUID primary keys + `created_at` (`TIMESTAMPTZ NOT NULL DEFAULT n
 | 13 | `cost_line` ⭐ | **append-only** | id, part_movement_id (FK), part_batch_id (FK), quantity, unit_cost_thb, total_cost_thb (computed) | One row per batch a `part_movement` drew from. Closes the FIFO audit chain: `part_movement → cost_line → part_batch → receipt`. A movement consuming 5 units across 2 batches has 2 `cost_line` rows (S1) |
 | 14 | `sale` | yes | id, customer_id (FK, NOT NULL), sold_at, receipt_pdf_path?, total_thb, total_cogs_thb, created_by_user_id, idempotency_key (unique) | Per FR-007. `customer_id NOT NULL` enforces D25 |
 | 15 | `sale_line` | yes (price-set) | id, sale_id (FK), line_kind (`UNIT`/`PART`), unit_id?, product_id?, quantity, unit_price_thb (sold-at), unit_cost_thb (snapshotted; sum of cost_lines for PART), pricing_override_request_id? | Either `unit_id` or `product_id` is set, never both |
-| 16 | `service_ticket` | yes | id, customer_id (FK, NOT NULL), opened_at, closed_at?, issue, resolution?, notes, created_by_user_id | Per FR-008. Opened and closed at the warehouse (D26) |
+| 16 | `service_ticket` | yes | id, customer_id (FK, NOT NULL), opened_at, closed_at?, issue, resolution?, notes, created_by_user_id, idempotency_key (unique) | Per FR-008. Opened and closed at the warehouse (D26); `idempotency_key` covers offline ticket-open replay (S6) |
 | 17 | `service_ticket_part` | yes (until close) | id, service_ticket_id (FK), product_id (FK), quantity, unit_price_thb (repair price, possibly overridden), pricing_override_request_id? | Becomes immutable after ticket close; consumption rows are written then |
 | 18 | `project_pull` ⭐ | yes (state) | id, project_id (FK), customer_id (denormalised), state (`PENDING`/`FULFILLED`/`SHORT`/`CANCELLED`), admin_notes?, created_by_user_id, created_at, fulfilled_at?, fulfilled_by_user_id?, cancelled_at?, cancelled_by_user_id? | Per FR-009 + D27. State machine in §4.5 |
 | 19 | `project_pull_line` | yes (state) | id, project_pull_id (FK), line_kind (`UNIT`/`PART`), product_id (FK), unit_serial?, requested_qty?, fulfilled_qty?, line_state (`PENDING`/`FULFILLED`/`SHORT`/`CANCELLED`) | One line per requested item. `unit_serial` set for SERIALIZED, `requested_qty`+`fulfilled_qty` for QUANTITY |
@@ -183,6 +183,7 @@ All tables use UUID primary keys + `created_at` (`TIMESTAMPTZ NOT NULL DEFAULT n
 | `part_movement` | `UNIQUE (idempotency_key)`; index on `(product_id, occurred_at DESC)`; `CHECK (quantity > 0)` |
 | `cost_line` | `UNIQUE (part_movement_id, part_batch_id)`; `CHECK (quantity > 0 AND total_cost_thb = quantity * unit_cost_thb)` |
 | `sale` | `UNIQUE (idempotency_key)`; `customer_id NOT NULL` |
+| `service_ticket` | `UNIQUE (idempotency_key)`; `customer_id NOT NULL` |
 | `project_pull` | Index on `(state, created_at)` for the staff queue |
 | `pricing_override_request` | Index on `(state, created_at)` for the admin queue |
 | `notification_log` | Index on `(status, created_at)` for the weekly failure review |
@@ -241,7 +242,7 @@ State transitions are atomic with the `part_movement` / `unit_movement` writes t
 
 ### Flow B: Sale at YGN (FR-007)
 
-1. Staff picks customer (required; can create inline) → selects two-tag channel **Sale** (default) or Maintenance.
+1. Staff picks customer (required; can create inline). **Channel is derived from the flow, not a free-form tag**: this Sale screen always produces `SALE`-channel rows. Maintenance is the separate `service_ticket` flow (Flow C); Project is the Project Pull flow (Flow D). The margin report (FR-013) groups by movement `event_type` (`SOLD`/`MAINTENANCE_OUT`/`PROJECT_OUT`) + source table — **no explicit `channel` column is stored** (the `Channel` enum is reporting-only).
 2. For Sale, staff scans/enters items. Each item becomes a `sale_line`:
    - **UNIT line**: scan barcode → server verifies `unit.current_state = IN_STOCK` → snapshot `unit_cost_thb = unit.purchase_cost_thb`, `unit_price_thb = product.retail_price_thb` (or override).
    - **PART line**: scan SKU + enter quantity → server runs **FIFO consumption** (see §6.3), snapshotting `unit_cost_thb = total_cogs / quantity`.
@@ -324,7 +325,7 @@ The Hostinger KVM 8 sizing (8 vCPU / 16 GB / 100 GB) gives comfortable headroom 
 
 - JWT via PyJWT (template existing). Access 30 min; refresh 7 days.
 - Refresh token in `httpOnly`, `secure`, `sameSite=lax` cookie.
-- Auth endpoints rate-limited 5/15min/IP via `slowapi`.
+- Auth endpoints rate-limited **5 per 15 minutes** per IP via `slowapi`. The `limits` rate-string is `"5 per 15 minutes"` (**not** `"5/15min"`, which does not parse); the rate-limited route must accept a `request: Request` param and the `@router.post` decorator sits **above** `@limiter.limit`.
 - Two roles: `BKK_ADMIN` (full surface) and `YGN_STAFF` (warehouse surface + customer dashboard transactions-only). Enforced via `deps.py`:
 
 ```python
@@ -457,7 +458,7 @@ class SaleCreate(SQLModel):
     idempotency_key: UUID                                # required, client-generated
 ```
 
-DB enforces `UNIQUE (idempotency_key)` on `sale`, `service_ticket`, `unit_movement`, `part_movement`, `project_pull`. On replay, server returns the existing row (200 OK, not 409) so the offline client doesn't loop.
+DB enforces `UNIQUE (idempotency_key)` on `sale`, `service_ticket`, `unit_movement`, `part_movement`. On replay, server returns the existing row (200 OK, not 409) so the offline client doesn't loop. **`project_pull` carries no idempotency key** — it is admin-created online (BKK); its offline-capable *fulfill* action writes idempotent `unit_movement` / `part_movement` rows, which is where replay safety lives.
 
 ### 6.7 Offline persistence — no app-level encryption (S4, was old D35; reversed per v2.6 D32)
 
@@ -586,7 +587,7 @@ Coverage target: 80%+ on `crud.py` + route handlers (per template baseline).
 
 ## 10. Migration Order (Alembic)
 
-Migrations must run in this order to satisfy FK constraints. Each is one Alembic revision.
+Migrations must run in this order to satisfy FK constraints. Each is one Alembic revision. **The M-numbers are logical FK-ordering labels, not the Alembic chain order** — the build order (Parts 1–2 of the implementation plan) creates revisions in a different sequence (e.g. `notification_preference` is built in Task 2.7). That is fine: only FK dependencies must be satisfied at each revision, which this ordering guarantees.
 
 ```
 1.  M001_user_add_role            # adds `role` enum to existing `user`; default BKK_ADMIN for first superuser
@@ -606,15 +607,15 @@ Migrations must run in this order to satisfy FK constraints. Each is one Alembic
 15. M015_unit_movement             # FK unit, sale, service_ticket, project_pull, stock_adjustment
 16. M016_part_movement             # FK product, sale, service_ticket, project_pull, stock_adjustment
 17. M017_cost_line                 # FK part_movement, part_batch
-18. M018_price_change              # FK product
+18. M018_price_change              # FK product — ⚠️ CREATE WITH M005 (Part 1): FR-002 writes price history on PATCH /products/{id} in Group 1, so this table must exist before Part 2
 19. M019_notification_log          # append-only delivery log
 20. M020_sync_review_item          # offline STALE/conflict admin-review queue
 21. M021_revoke_ledger_writes      # REVOKE UPDATE, DELETE ON unit_movement, part_movement, cost_line, price_change, notification_log
 ```
 
 **Build grouping** (logical, maps onto the compressed 2–4 week rollout in §11):
-- **Group 1** (catalog + serialized receive + sale): M001–M008 + M010 + M015.
-- **Group 2** (FIFO + maintenance + project pull + price/notify audit): M009 + M011–M013 + M016–M019.
+- **Group 1** (catalog + serialized receive + sale): M001–M008 + M010 + M015 + **M018 (price_change — required by the FR-002 product-price write)**.
+- **Group 2** (FIFO + maintenance + project pull + price/notify audit): M009 + M011–M013 + M016–M017 + M019.
 - **Group 3** (settings + stock adjustment): M006 + M014.
 - **Group 4** (read-only dashboards): no new migrations.
 

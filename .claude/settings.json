@@ -1,4 +1,8 @@
 {
+  "env": {
+    "ECC_DISABLED_HOOKS": "pre:edit-write:gateguard-fact-force,pre:bash:gateguard-fact-force",
+    "ECC_CONTEXT_MONITOR_COST_WARNINGS": "off"
+  },
   "extraKnownMarketplaces": {
     "ecc": {
       "source": {

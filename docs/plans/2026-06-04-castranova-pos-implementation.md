@@ -6,7 +6,7 @@
 
 **Architecture:** Append-only movement ledgers (`unit_movement`, `part_movement`, `cost_line`) are the source of truth; cached state columns (`unit.current_state`, `part_batch.remaining_qty`) are updated in the same transaction. SERIALIZED stock is one row per piece with a server-enforced state machine; QUANTITY stock is FIFO purchase batches consumed oldest-first under row locks, splitting cost across `cost_line` rows. Every offline-originating mutation is idempotent (client UUID + `UNIQUE` constraint). Two roles (`BKK_ADMIN`, `YGN_STAFF`) enforced server-side; financial fields redacted for staff via separate Pydantic schemas.
 
-**Tech Stack:** FastAPI ≥0.114, SQLModel ≥0.0.21, Postgres (psycopg3), Alembic, PyJWT, pwdlib(argon2); React + Vite + TanStack Router/Query + shadcn/ui; `reportlab` (PDF), `openpyxl` (Excel), `tenacity` (notify retry), `slowapi` (rate limit), `vite-plugin-pwa` + `idb-keyval` (offline). Reference: system design spec `docs/superpowers/specs/2026-05-23-castranova-pos-system-design.md`.
+**Tech Stack:** FastAPI ≥0.114, SQLModel ≥0.0.21, Postgres (psycopg3), Alembic, PyJWT, pwdlib(argon2); React + Vite + TanStack Router/Query + shadcn/ui; `reportlab` (PDF), `openpyxl` (Excel), `tenacity` (notify retry), `slowapi` (rate limit), `vite-plugin-pwa` + `idb-keyval` (offline), `html5-qrcode` (phone-camera barcode fallback). Reference: system design spec `docs/superpowers/specs/2026-05-23-castranova-pos-system-design.md`.
 
 ---
 
@@ -29,7 +29,7 @@ The remaining work is a **structured task roadmap** (Part 3–5): each task list
 - All DB access in `backend/app/crud.py`; functions are keyword-only: `def fn(*, session: Session, ...)`.
 - Routes: one file per resource in `backend/app/api/routes/`, `APIRouter(prefix=…, tags=[…])`, registered in `backend/app/api/main.py`. Deps from `app.api.deps`: `SessionDep`, `CurrentUser`.
 - Tests under `backend/tests/` mirroring `app/` (`backend/tests/crud/…`, `backend/tests/api/routes/…`). Fixtures from `backend/tests/conftest.py`: `db` (Session), `client` (TestClient), `superuser_token_headers`, `normal_user_token_headers`.
-- **Run tests:** `cd backend && uv run pytest <path>::<test> -v` (or `bash scripts/test.sh` for the full suite). **Migrations:** `cd backend && uv run alembic revision --autogenerate -m "…"` then `uv run alembic upgrade head`. **Lint/type:** `uv run ruff check . && uv run mypy app`.
+- **Run tests:** `cd backend && uv run pytest <path>::<test> -v` (or `bash scripts/test.sh` for the full suite). **Migrations:** `cd backend && uv run alembic revision --autogenerate -m "…"` then `uv run alembic upgrade head`. The spec's **M-numbers are logical FK-order labels, not the Alembic chain order** — create each revision when its task runs; FK deps are satisfied by the build order. **Lint/type:** `uv run ruff check . && uv run mypy app`.
 - **Commit cadence:** one commit per task (after its tests pass). Branch off `master` first: `git switch -c feat/castranova-pos`.
 
 ---
@@ -257,6 +257,8 @@ def get_admin(current_user: CurrentUser) -> User:
 AdminUser = Annotated[User, Depends(get_admin)]
 ```
 
+> **`is_superuser` is retained** (design decision): the bootstrap superuser keeps `is_superuser=True` **and** gets `role=BKK_ADMIN`. Template `/users` + `/items` guards stay on `is_superuser` (no rewrite); all new CastraNova routes authorize via `get_admin` (`role`). Do not remove `is_superuser`.
+
 **Step 4: Run → PASS. Step 5: Commit.**
 
 ---
@@ -272,6 +274,19 @@ AdminUser = Annotated[User, Depends(get_admin)]
 **Step 2:** Smoke test: `uv run pytest tests/ -k token -q` collects without error.
 
 **Step 3: Commit.** `git commit -m "test: add staff_token_headers fixture"`
+
+---
+
+### Task 0.6: Remove (or retire) the template `Item` entity
+
+**Files (blast radius = 7, verified against the repo):** `backend/app/models.py`, `backend/app/crud.py`, `backend/app/api/routes/items.py`, `backend/app/api/main.py`, `backend/tests/conftest.py` (teardown references `Item`), `backend/tests/utils/item.py`, `backend/tests/api/routes/test_items.py`.
+
+The template ships an `Item` model unused by this domain; the catalog migration (M005) replaces it. Pick one:
+
+- **Remove (recommended):** delete the `Item*` models + `create_item` crud + `routes/items.py`, unregister its router in `api/main.py`, drop the `Item` cleanup in `conftest.py` teardown, and delete `tests/utils/item.py` + `tests/api/routes/test_items.py`. Generate a migration that drops the `item` table. Run the full suite → green.
+- **Keep dormant:** leave it untouched (no migration). Acceptable, but it is dead code — note it per CLAUDE.md §3.
+
+Do this **before** Task 1.3 (M005), since the autogenerate diff for `product` will otherwise also try to drop `item` implicitly. Commit either way.
 
 ---
 
@@ -380,7 +395,7 @@ def test_duplicate_sku_rejected(client, superuser_token_headers):
 
 **Step 2: Run → FAIL. Step 3: Implement** model per spec §4.2 (note: **no `purchase_cost` column** — SERIALIZED cost lives on `unit`, QUANTITY cost derived from `part_batch`). Add `__table_args__` with `UniqueConstraint("sku")` (autogenerate also catches `unique=True` on the field). Money fields `Decimal` + `Numeric(12,2)`. crud raises `HTTPException(409)` on `IntegrityError` for duplicate SKU.
 
-**Step 4: Price-history (FR-002):** add `price_change` table now (or defer to M018 — but the *write* on `PATCH /products/{id}` must record old→new for `retail_price_thb`/`repair_price_thb`). Wire `crud.update_product` to insert a `PriceChange` row inside the same transaction when a price field changes. Test `test_price_change_recorded_on_update`.
+**Step 4: Price-history (FR-002):** add the `price_change` table **now, in Part 1** (do **NOT** defer to M018 — the *write* on `PATCH /products/{id}` records old→new for `retail_price_thb`/`repair_price_thb` in this group, so the table must already exist). Wire `crud.update_product` to insert a `PriceChange` row inside the same transaction when a price field changes. Test `test_price_change_recorded_on_update`. Also expose **`GET /products/{id}/price-history`** (admin, §8) returning the `price_change` rows newest-first; test `test_price_history_lists_changes`.
 
 **Step 5: Migration M005 + (price_change). Run → PASS. Commit.**
 
@@ -524,6 +539,19 @@ Wrap the app in `PersistQueryClientProvider` with `onSuccess={() => queryClient.
 
 ---
 
+### Task 1.9: Barcode scan input + camera fallback (frontend)
+
+**Files:** `frontend/src/hooks/useScanner.ts` (new), `frontend/src/components/ScanInput.tsx` (new), `frontend/src/components/CameraScanFallback.tsx` (new); wired into the receive, sale, and pull-fulfill screens.
+
+Spec §3 / §6.11 require two scan paths sharing one commit contract (each emits a decoded code string to the focused flow):
+
+- **BT scanner (primary, HID keyboard-wedge):** the scanner types characters into the focused input terminated by CR. `useScanner` buffers keystrokes and **commits only on the CR terminator**, ignoring stray/mistimed keystrokes (debounce by inter-key timing). Reference scanners: TYSSO BCP-2DC, Posiflex CD-3870.
+- **Camera fallback (`html5-qrcode`):** when no BT scanner is paired, a "Scan with camera" control opens an in-browser scanner; on decode it emits the same code string (slower; not the primary path). The native `BarcodeDetector` API is a lighter modern alternative where supported — engineer's choice; `html5-qrcode` is the cross-browser default.
+
+**Test (Playwright):** simulate keyboard-wedge keystrokes + CR → input commits once; stray keystrokes without CR → no commit. Camera path is manual-verified. **Commit.**
+
+---
+
 # Part 2 — FIFO Core (the crown jewel)
 
 > Migrations M009 (part_batch) + M016 (part_movement) + M017 (cost_line). Build the FIFO consumer with full concurrency tests before wiring it into sale/maintenance/pull.
@@ -605,11 +633,11 @@ Each is a CRUD+ledger task using the patterns from Part 1–2. Migrations M011�
 
 | Task | Builds | Files | Test focus |
 |---|---|---|---|
-| 2.5 Maintenance (FR-008) | `service_ticket` + `service_ticket_part` (M011); `POST /service-tickets`, `PATCH`, `POST /{id}/close` → close runs FIFO per part line, writes `part_movement(MAINTENANCE_OUT)` + `cost_line[]`, sets `closed_at`, transitions any whole-unit swap | `routes/service_tickets.py`, crud | Open→add parts→close atomic; repair-price default; machine-swap note |
-| 2.6 Project Pull (FR-009) | `project_pull` + `project_pull_line` (M012); admin `POST /project-pulls`, staff `GET ?state=PENDING`, `POST /{id}/fulfill`, admin `POST /{id}/cancel`; pull state machine (§4.5); revenue=0 cost-only; dual audit (`created_by` + `fulfilled_by`) | `routes/project_pulls.py`, `core/state_machine.py` (add pull transitions), crud | Fulfill all→FULFILLED; partial→SHORT + notify; cancel PENDING/SHORT; unit race first-write-wins |
+| 2.5 Maintenance (FR-008) | `service_ticket` (with `idempotency_key` UNIQUE — offline ticket-open replay) + `service_ticket_part` (M011); `POST /service-tickets`, `PATCH`, `POST /{id}/close` → close runs FIFO per part line, writes `part_movement(MAINTENANCE_OUT)` + `cost_line[]`, sets `closed_at`, transitions any whole-unit swap | `routes/service_tickets.py`, crud | Open→add parts→close atomic; repair-price default; machine-swap note |
+| 2.6 Project Pull (FR-009) | `project_pull` + `project_pull_line` (M012); admin `POST /project-pulls`, staff `GET ?state=PENDING`, `POST /{id}/fulfill`, admin `POST /{id}/cancel`; pull state machine (§4.5); revenue=0 cost-only; dual audit (`created_by` + `fulfilled_by`); **no `idempotency_key` on `project_pull`** (admin-created online — the offline-capable fulfill writes idempotent `unit_movement`/`part_movement` rows) | `routes/project_pulls.py`, `core/state_machine.py` (add pull transitions), crud | Fulfill all→FULFILLED; partial→SHORT + notify; cancel PENDING/SHORT; unit race first-write-wins |
 | 2.7 Notifications (FR-018) | `notification_preference` (M007 — move earlier if needed) + `notification_log` (M019); `services/notify.py` LINE Messaging + Viber Bot clients with `tenacity` retry; per-user opt-in; `GET/PATCH /notifications/preferences` | `routes/notifications.py`, `services/notify.py` | Mock LINE/Viber; trigger on pull-short & low-stock; retry on 5xx; opt-out respected; failure → `notification_log` |
 | 2.8 Low-stock (FR-016) | `GET /low-stock`, `PATCH /products/{id}/min-stock-level`, `PATCH /low-stock/bulk`; alert fires via notify when `sum(remaining_qty)` drops below threshold | `routes/low_stock.py`, crud, hook in `consume_quantity_fifo` | Cross-threshold fires alert; bulk-edit sets 20 SKUs |
-| 2.9 Channel margin report (FR-013) | `GET /reports/channel-margin?month=` server-side aggregation: revenue from `sale_line`, COGS from `cost_line` via `part_movement`, grouped by channel | `routes/reports.py`, crud aggregation | Hand-calc vs report for mixed Sale/Maint/Project month |
+| 2.9 Channel margin report (FR-013) | `GET /reports/channel-margin?month=` server-side aggregation: revenue from `sale_line`, COGS from `cost_line` via `part_movement`, grouped by channel (**derived from movement `event_type` / source table — there is no `channel` column**) | `routes/reports.py`, crud aggregation | Hand-calc vs report for mixed Sale/Maint/Project month |
 | 2.10 Append-only enforcement (M021) | `REVOKE UPDATE, DELETE` on the 5 ledger tables for the app DB role; `GET /audit` filterable | migration M021, `routes/audit.py` | DB integration test: app role cannot UPDATE `unit_movement` |
 
 ---
@@ -620,7 +648,7 @@ Migrations M006 (system_setting), M013 (pricing_override_request — if not in 2
 
 | Task | Builds | Test focus |
 |---|---|---|
-| 3.1 Pricing overrides (FR-010) | `pricing_override_request` + `system_setting` threshold; deviation ≤ threshold → `AUTO_APPROVED`, else `PENDING`; `GET /pricing-overrides?state=PENDING`, `POST /{id}/decide`; sale/ticket line blocked until approved | 3% auto-approves; 10% routes to queue; approve→completes; reject→blocked |
+| 3.1 Pricing overrides (FR-010) | `pricing_override_request` + `system_setting` threshold; deviation ≤ threshold → `AUTO_APPROVED`, else `PENDING`; `GET /pricing-overrides?state=PENDING`, `POST /{id}/decide`; sale/ticket line blocked until approved; **`GET /reports/override-exceptions?month=` (+`.pdf`/`.xlsx`) monthly report (§8)** | 3% auto-approves; 10% routes to queue; approve→completes; reject→blocked; monthly exceptions report shape |
 | 3.2 Stock Adjustment (FR-011) | `stock_adjustment` (M014); admin-only; SERIALIZED→`unit_movement(ADJUSTED_OUT)`; QUANTITY−→FIFO consume; QUANTITY+→new `ADJ-###` batch (reuse `next_batch_no(adj=True)`) | Negative spans 2 batches; positive creates ADJ batch; staff 403 |
 | 3.3 Holding period (FR-014) | `GET /reports/holding-period`; `now()-received_at`; threshold from `system_setting` (default 90d) | Flags >threshold; SKU rollup oldest batch |
 | 3.4 Search (FR-015) | `GET /search/serial/{barcode}` (full `unit_movement` lifecycle), `GET /search/sku/{sku}` (batch + cost_line history + QOH) | Serial chronological; SKU batch attribution |
@@ -635,7 +663,7 @@ No new schema except `sync_review_item` (M020).
 | Task | Builds | Test focus |
 |---|---|---|
 | 4.1 Stock-on-Hand dashboard (FR-012) | `GET /dashboards/stock-on-hand?category=&supplier=&customer=`; QUANTITY `sum(remaining_qty)`, SERIALIZED active units; per-batch drill | P95 <10s at 500 SKUs/5000 batches (perf test) |
-| 4.2 Role-tiered customer/project dashboards (FR-020, S7) | `CustomerDashboardStaffPublic` vs `…AdminPublic`; route dispatches by `current_user.role`; financial fields **absent** for staff | **Raw HTTP inspection**: staff response has no cost/margin keys; export disabled for staff |
+| 4.2 Role-tiered customer/project dashboards (FR-020, S7) | `CustomerDashboardStaffPublic` vs `…AdminPublic` (`GET /customers/{id}/dashboard`) **and** a parallel `ProjectDashboardStaffPublic`/`…AdminPublic` pair (`GET /projects/{id}/dashboard` — admin sees budget + consumed cost, staff sees neither), both mirroring §6.5; route dispatches by `current_user.role`; financial fields **absent** for staff | **Raw HTTP inspection**: staff response has no cost/margin keys on either dashboard; export disabled for staff |
 | 4.3 Sync-review queue (95% smooth-sync goal) | `sync_review_item` (M020); `STALE`/`CONFLICT` mutations recorded; `GET /sync-review?state=PENDING`, `POST /{id}/resolve` (admin) | STALE>7d routed; conflict on replay logged; admin resolve/discard |
 | 4.4 AI integration (S11, §7) | **Scope finalized at signing.** Scaffold only: `routes/assistant.py` + provider client in `core/`, behind JWT + role guard, role-tiered (no cost to staff), graceful degradation | Stub returns 501 until feature locked; role guard test |
 
@@ -645,7 +673,7 @@ No new schema except `sync_review_item` (M020).
 
 | Task | Builds | Test focus |
 |---|---|---|
-| 5.1 Auth hardening | `slowapi` rate-limit 5/15min on `/login`; refresh cookie `httpOnly secure sameSite=lax` | 6th login attempt in window → 429 |
+| 5.1 Auth hardening | `slowapi` rate-limit **`"5 per 15 minutes"`** on `/login` (route needs a `request: Request` param; `@router.post` decorator above `@limiter.limit`); refresh cookie `httpOnly secure sameSite=lax` | 6th login attempt in window → 429 |
 | 5.2 Playwright E2E | 5 paths: receive (serial+qty), sale online, **sale offline→reconnect→replay**, ticket close, pull fulfill (with short) | Offline queue survives reload; no dup on replay |
 | 5.3 Frontend SDK + screens | `bun run generate-client` after backend stable; admin + staff role-shells; offline indicator + queue counter | SDK regenerates; staff cannot see admin routes |
 | 5.4 Deploy | Hostinger KVM 8: Traefik + Let's Encrypt + `pg_dump` cron + Sentry DSN; seed import; LINE/Viber bot enroll 10 users; BT scanner (TYSSO/Posiflex) tuning | Restore drill on staging; 8h offline drill |
