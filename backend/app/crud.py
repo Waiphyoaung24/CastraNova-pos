@@ -139,6 +139,8 @@ def update_customer(
 
 
 def create_project(*, session: Session, project_in: ProjectCreate) -> Project:
+    if not session.get(Customer, project_in.customer_id):
+        raise HTTPException(status_code=404, detail="Customer not found")
     db_obj = Project.model_validate(project_in)
     session.add(db_obj)
     try:

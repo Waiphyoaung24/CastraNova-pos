@@ -55,4 +55,6 @@ def update_product(
 def read_price_history(
     *, session: SessionDep, product_id: uuid.UUID
 ) -> list[PriceChangePublic]:
+    if not crud.get_product(session=session, product_id=product_id):
+        raise HTTPException(status_code=404, detail="Product not found")
     return crud.list_price_history(session=session, product_id=product_id)  # type: ignore[return-value]

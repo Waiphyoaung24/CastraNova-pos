@@ -110,3 +110,13 @@ def test_price_history_staff_forbidden(
         f"{PREFIX}/products/{pid}/price-history", headers=staff_token_headers
     )
     assert r.status_code == 403
+
+
+def test_price_history_unknown_product_404(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    r = client.get(
+        f"{PREFIX}/products/{uuid.uuid4()}/price-history",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 404

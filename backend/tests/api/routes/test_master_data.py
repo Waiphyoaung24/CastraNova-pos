@@ -115,3 +115,15 @@ def test_admin_creates_project_and_duplicate_code_409(
     assert r.status_code == 200
     r2 = client.post(f"{PREFIX}/projects/", headers=superuser_token_headers, json=body)
     assert r2.status_code == 409
+
+
+def test_create_project_unknown_customer_404(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    body = {
+        "code": f"PRJ-{uuid.uuid4().hex[:8]}",
+        "name": "Orphan",
+        "customer_id": str(uuid.uuid4()),
+    }
+    r = client.post(f"{PREFIX}/projects/", headers=superuser_token_headers, json=body)
+    assert r.status_code == 404

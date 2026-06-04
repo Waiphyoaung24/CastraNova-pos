@@ -245,7 +245,9 @@ class CustomerPublic(CustomerBase):
 class ProjectBase(SQLModel):
     code: str = Field(unique=True, index=True, max_length=64)
     name: str = Field(max_length=255)
-    customer_id: uuid.UUID = Field(foreign_key="customer.id", nullable=False)
+    customer_id: uuid.UUID = Field(
+        foreign_key="customer.id", nullable=False, index=True
+    )
     start_date: date | None = Field(default=None)
     end_date: date | None = Field(default=None)
     status: ProjectStatus = Field(default=ProjectStatus.ACTIVE)
@@ -292,13 +294,13 @@ class ProductBase(SQLModel):
     model_name: str = Field(max_length=255)
     brand: str | None = Field(default=None, max_length=255)
     category: str | None = Field(default=None, index=True, max_length=128)
-    tracking_mode: TrackingMode = Field(default=TrackingMode.QUANTITY)
+    tracking_mode: TrackingMode = Field(default=TrackingMode.QUANTITY, index=True)
     specs: dict[str, Any] | None = Field(default=None, sa_type=JSONB)
     # No purchase_cost: SERIALIZED cost lives on unit, QUANTITY on part_batch.
     retail_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
     repair_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
     default_min_stock_level: int | None = Field(default=None)
-    is_active: bool = True
+    is_active: bool = Field(default=True, index=True)
 
 
 class Product(ProductBase, table=True):
@@ -348,7 +350,9 @@ class PriceChangeBase(SQLModel):
 
 class PriceChange(PriceChangeBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    changed_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    changed_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True
+    )
     changed_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
