@@ -2,9 +2,11 @@ import enum
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 from pydantic import EmailStr
 from sqlalchemy import Column, DateTime, Numeric
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
@@ -280,6 +282,83 @@ class ProjectUpdate(SQLModel):
 
 class ProjectPublic(ProjectBase):
     id: uuid.UUID
+
+
+# --- Product ------------------------------------------------------------------
+
+
+class ProductBase(SQLModel):
+    sku: str = Field(unique=True, index=True, max_length=64)
+    model_name: str = Field(max_length=255)
+    brand: str | None = Field(default=None, max_length=255)
+    category: str | None = Field(default=None, index=True, max_length=128)
+    tracking_mode: TrackingMode = Field(default=TrackingMode.QUANTITY)
+    specs: dict[str, Any] | None = Field(default=None, sa_type=JSONB)
+    # No purchase_cost: SERIALIZED cost lives on unit, QUANTITY on part_batch.
+    retail_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    repair_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    default_min_stock_level: int | None = Field(default=None)
+    is_active: bool = True
+
+
+class Product(ProductBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class ProductCreate(ProductBase):
+    pass
+
+
+class ProductUpdate(SQLModel):
+    model_name: str | None = Field(default=None, max_length=255)
+    brand: str | None = Field(default=None, max_length=255)
+    category: str | None = Field(default=None, max_length=128)
+    tracking_mode: TrackingMode | None = Field(default=None)
+    specs: dict[str, Any] | None = Field(default=None)
+    retail_price_thb: Decimal | None = Field(default=None)
+    repair_price_thb: Decimal | None = Field(default=None)
+    default_min_stock_level: int | None = Field(default=None)
+    is_active: bool | None = Field(default=None)
+
+
+class ProductPublic(ProductBase):
+    id: uuid.UUID
+
+
+# --- Price change (append-only history; FR-002) -------------------------------
+
+
+class PriceChangeBase(SQLModel):
+    product_id: uuid.UUID = Field(
+        foreign_key="product.id", nullable=False, index=True
+    )
+    field: str = Field(max_length=32)  # retail_price_thb | repair_price_thb
+    old_value: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    new_value: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    reason: str | None = Field(default=None, max_length=512)
+
+
+class PriceChange(PriceChangeBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    changed_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    changed_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class PriceChangePublic(PriceChangeBase):
+    id: uuid.UUID
+    changed_by_user_id: uuid.UUID
+    changed_at: datetime | None = None
 
 
 # Generic message

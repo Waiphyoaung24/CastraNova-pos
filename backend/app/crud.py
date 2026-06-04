@@ -1,8 +1,9 @@
+import uuid
 from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.security import get_password_hash, verify_password
 from app.models import (
@@ -10,6 +11,10 @@ from app.models import (
     CustomerCreate,
     CustomerUpdate,
     Location,
+    PriceChange,
+    Product,
+    ProductCreate,
+    ProductUpdate,
     Project,
     ProjectCreate,
     ProjectUpdate,
@@ -168,6 +173,73 @@ def update_project(
         raise HTTPException(status_code=409, detail="Project code already exists")
     session.refresh(db_project)
     return db_project
+
+
+# --- Product + price history --------------------------------------------------
+
+_PRICE_FIELDS = ("retail_price_thb", "repair_price_thb")
+
+
+def create_product(*, session: Session, product_in: ProductCreate) -> Product:
+    db_obj = Product.model_validate(product_in)
+    session.add(db_obj)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="SKU already exists")
+    session.refresh(db_obj)
+    return db_obj
+
+
+def get_product(*, session: Session, product_id: Any) -> Product | None:
+    return session.get(Product, product_id)
+
+
+def list_products(
+    *, session: Session, skip: int = 0, limit: int = 100
+) -> list[Product]:
+    return list(session.exec(select(Product).offset(skip).limit(limit)).all())
+
+
+def update_product(
+    *,
+    session: Session,
+    db_product: Product,
+    product_in: ProductUpdate,
+    changed_by_user_id: uuid.UUID,
+) -> Product:
+    data = product_in.model_dump(exclude_unset=True)
+    # Record a price_change row for each price field that actually changes (FR-002),
+    # in the same transaction as the product update.
+    for field in _PRICE_FIELDS:
+        new_value = data.get(field)
+        if new_value is not None and new_value != getattr(db_product, field):
+            session.add(
+                PriceChange(
+                    product_id=db_product.id,
+                    field=field,
+                    old_value=getattr(db_product, field),
+                    new_value=new_value,
+                    changed_by_user_id=changed_by_user_id,
+                )
+            )
+    db_product.sqlmodel_update(data)
+    db_product.updated_at = get_datetime_utc()
+    session.add(db_product)
+    session.commit()
+    session.refresh(db_product)
+    return db_product
+
+
+def list_price_history(*, session: Session, product_id: Any) -> list[PriceChange]:
+    return list(
+        session.exec(
+            select(PriceChange)
+            .where(PriceChange.product_id == product_id)
+            .order_by(col(PriceChange.changed_at).desc())
+        ).all()
+    )
 
 
 # Dummy hash to use for timing attack prevention when user is not found
