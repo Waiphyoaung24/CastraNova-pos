@@ -1,9 +1,10 @@
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime, Numeric
 from sqlmodel import Field, SQLModel
 
 
@@ -76,6 +77,11 @@ class AdjustmentTarget(str, enum.Enum):
 class CustomerType(str, enum.Enum):
     DEALER = "DEALER"
     END_CUSTOMER = "END_CUSTOMER"
+
+
+class ProjectStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    CLOSED = "CLOSED"
 
 
 # Shared properties
@@ -154,6 +160,125 @@ class Location(LocationBase, table=True):
 
 
 class LocationPublic(LocationBase):
+    id: uuid.UUID
+
+
+# --- Supplier -----------------------------------------------------------------
+
+
+class SupplierBase(SQLModel):
+    name: str = Field(max_length=255)
+    country: str | None = Field(default=None, max_length=64)
+    contact: str | None = Field(default=None, max_length=255)
+
+
+class Supplier(SupplierBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class SupplierCreate(SupplierBase):
+    pass
+
+
+class SupplierUpdate(SQLModel):
+    name: str | None = Field(default=None, max_length=255)
+    country: str | None = Field(default=None, max_length=64)
+    contact: str | None = Field(default=None, max_length=255)
+
+
+class SupplierPublic(SupplierBase):
+    id: uuid.UUID
+
+
+# --- Customer -----------------------------------------------------------------
+
+
+class CustomerBase(SQLModel):
+    name: str = Field(max_length=255)
+    country: str | None = Field(default=None, max_length=64)
+    contact: str | None = Field(default=None, max_length=255)
+    type: CustomerType = Field(default=CustomerType.END_CUSTOMER)
+    notes: str | None = Field(default=None, max_length=1024)
+
+
+class Customer(CustomerBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class CustomerCreate(CustomerBase):
+    pass
+
+
+class CustomerUpdate(SQLModel):
+    name: str | None = Field(default=None, max_length=255)
+    country: str | None = Field(default=None, max_length=64)
+    contact: str | None = Field(default=None, max_length=255)
+    type: CustomerType | None = Field(default=None)
+    notes: str | None = Field(default=None, max_length=1024)
+
+
+class CustomerPublic(CustomerBase):
+    id: uuid.UUID
+
+
+# --- Project ------------------------------------------------------------------
+
+
+class ProjectBase(SQLModel):
+    code: str = Field(unique=True, index=True, max_length=64)
+    name: str = Field(max_length=255)
+    customer_id: uuid.UUID = Field(foreign_key="customer.id", nullable=False)
+    start_date: date | None = Field(default=None)
+    end_date: date | None = Field(default=None)
+    status: ProjectStatus = Field(default=ProjectStatus.ACTIVE)
+    budget_thb: Decimal | None = Field(
+        default=None, sa_column=Column(Numeric(12, 2), nullable=True)
+    )
+
+
+class Project(ProjectBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class ProjectCreate(ProjectBase):
+    pass
+
+
+class ProjectUpdate(SQLModel):
+    code: str | None = Field(default=None, max_length=64)
+    name: str | None = Field(default=None, max_length=255)
+    customer_id: uuid.UUID | None = Field(default=None)
+    start_date: date | None = Field(default=None)
+    end_date: date | None = Field(default=None)
+    status: ProjectStatus | None = Field(default=None)
+    budget_thb: Decimal | None = Field(default=None)
+
+
+class ProjectPublic(ProjectBase):
     id: uuid.UUID
 
 

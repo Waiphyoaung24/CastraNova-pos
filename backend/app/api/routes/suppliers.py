@@ -1,0 +1,47 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from app import crud
+from app.api.deps import SessionDep, get_admin, get_current_user
+from app.models import SupplierCreate, SupplierPublic, SupplierUpdate
+
+router = APIRouter(prefix="/suppliers", tags=["suppliers"])
+
+
+@router.get(
+    "/",
+    response_model=list[SupplierPublic],
+    dependencies=[Depends(get_current_user)],
+)
+def read_suppliers(
+    session: SessionDep,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[SupplierPublic]:
+    return crud.list_suppliers(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+
+
+@router.post(
+    "/", response_model=SupplierPublic, dependencies=[Depends(get_admin)]
+)
+def create_supplier(
+    *, session: SessionDep, supplier_in: SupplierCreate
+) -> SupplierPublic:
+    return crud.create_supplier(session=session, supplier_in=supplier_in)  # type: ignore[return-value]
+
+
+@router.patch(
+    "/{supplier_id}",
+    response_model=SupplierPublic,
+    dependencies=[Depends(get_admin)],
+)
+def update_supplier(
+    *, session: SessionDep, supplier_id: uuid.UUID, supplier_in: SupplierUpdate
+) -> SupplierPublic:
+    db_supplier = crud.get_supplier(session=session, supplier_id=supplier_id)
+    if not db_supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return crud.update_supplier(  # type: ignore[return-value]
+        session=session, db_supplier=db_supplier, supplier_in=supplier_in
+    )
