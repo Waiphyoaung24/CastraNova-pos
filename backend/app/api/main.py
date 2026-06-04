@@ -7,6 +7,7 @@ from app.api.routes import (
     products,
     projects,
     receipts,
+    sales,
     suppliers,
     users,
     utils,
@@ -22,6 +23,7 @@ api_router.include_router(customers.router)
 api_router.include_router(projects.router)
 api_router.include_router(products.router)
 api_router.include_router(receipts.router)
+api_router.include_router(sales.router)
 
 
 if settings.ENVIRONMENT == "local":

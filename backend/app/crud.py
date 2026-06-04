@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any, TypeVar
 
 from fastapi import HTTPException
@@ -8,7 +9,7 @@ from sqlmodel import Session, SQLModel, col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.security import get_password_hash, verify_password
-from app.core.state_machine import assert_unit_transition
+from app.core.state_machine import IllegalTransition, assert_unit_transition
 from app.models import (
     Customer,
     CustomerCreate,
@@ -23,6 +24,10 @@ from app.models import (
     ProjectCreate,
     ProjectUpdate,
     ReceivePiece,
+    Sale,
+    SaleLine,
+    SaleLineInput,
+    SaleLineKind,
     Supplier,
     SupplierCreate,
     SupplierUpdate,
@@ -368,6 +373,133 @@ def receive_serialized(
     for unit in units:
         session.refresh(unit)
     return units
+
+
+# --- Serialized sale (FR-007) -------------------------------------------------
+
+
+def get_sale(*, session: Session, sale_id: Any) -> Sale | None:
+    return session.get(Sale, sale_id)
+
+
+def _sale_by_key(*, session: Session, idempotency_key: uuid.UUID) -> Sale | None:
+    return session.exec(
+        select(Sale).where(Sale.idempotency_key == idempotency_key)
+    ).first()
+
+
+def create_sale(
+    *,
+    session: Session,
+    customer_id: uuid.UUID,
+    lines: list[SaleLineInput],
+    idempotency_key: uuid.UUID,
+    created_by_user_id: uuid.UUID,
+) -> Sale:
+    """Sell SERIALIZED units in one transaction (FR-007, UNIT lines only).
+
+    Locks each unit row, asserts IN_STOCK -> SOLD via the state machine, snapshots
+    price/cost, and writes sale + sale_line + unit_movement(SOLD). Idempotent on
+    sale.idempotency_key (offline replay returns the existing sale, S6)."""
+    replay = _sale_by_key(session=session, idempotency_key=idempotency_key)
+    if replay is not None:
+        return replay
+
+    if not session.get(Customer, customer_id):
+        raise HTTPException(status_code=404, detail="Customer not found")
+    customer_loc = session.exec(
+        select(Location).where(Location.code == "CUSTOMER")
+    ).first()
+    if not customer_loc:
+        raise HTTPException(status_code=500, detail="CUSTOMER location not seeded")
+
+    sale = Sale(
+        customer_id=customer_id,
+        created_by_user_id=created_by_user_id,
+        idempotency_key=idempotency_key,
+        total_thb=Decimal("0.00"),
+        total_cogs_thb=Decimal("0.00"),
+    )
+    session.add(sale)
+    session.flush()
+
+    total_thb = Decimal("0.00")
+    total_cogs_thb = Decimal("0.00")
+    for line in lines:
+        if line.line_kind == SaleLineKind.PART:
+            raise HTTPException(
+                status_code=400, detail="QUANTITY parts not yet enabled"
+            )
+        if not line.castranova_barcode:
+            raise HTTPException(
+                status_code=422, detail="UNIT line requires castranova_barcode"
+            )
+        # Row lock so a concurrent sale/pull on the same unit serialises (§7).
+        unit = session.exec(
+            select(Unit)
+            .where(Unit.castranova_barcode == line.castranova_barcode)
+            .with_for_update()
+        ).first()
+        if not unit:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        try:
+            new_state = assert_unit_transition(
+                unit.current_state, MovementType.SOLD
+            )
+        except IllegalTransition:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Unit already {unit.current_state.value}",
+            )
+        product = session.get(Product, unit.product_id)
+        assert product is not None  # FK guarantees existence
+        unit_price = product.retail_price_thb  # override hook lands in Part 4
+        unit_cost = unit.purchase_cost_thb
+
+        session.add(
+            SaleLine(
+                sale_id=sale.id,
+                line_kind=SaleLineKind.UNIT,
+                unit_id=unit.id,
+                quantity=1,
+                unit_price_thb=unit_price,
+                unit_cost_thb=unit_cost,
+            )
+        )
+        session.add(
+            UnitMovement(
+                unit_id=unit.id,
+                event_type=MovementType.SOLD,
+                from_location_id=unit.current_location_id,
+                to_location_id=customer_loc.id,
+                sale_id=sale.id,
+                actor_user_id=created_by_user_id,
+                idempotency_key=uuid.uuid5(
+                    idempotency_key, str(unit.id)
+                ),
+            )
+        )
+        unit.current_state = new_state
+        unit.current_location_id = customer_loc.id
+        unit.updated_at = get_datetime_utc()
+        session.add(unit)
+        total_thb += unit_price
+        total_cogs_thb += unit_cost
+
+    sale.total_thb = total_thb
+    sale.total_cogs_thb = total_cogs_thb
+    session.add(sale)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Lost the idempotency race — return the winner's sale.
+        session.rollback()
+        winner = _sale_by_key(session=session, idempotency_key=idempotency_key)
+        if winner is None:
+            raise
+        return winner
+    session.refresh(sale)
+    return sale
 
 
 # Dummy hash to use for timing attack prevention when user is not found

@@ -76,6 +76,11 @@ class AdjustmentTarget(str, enum.Enum):
     QUANTITY = "QUANTITY"
 
 
+class SaleLineKind(str, enum.Enum):
+    UNIT = "UNIT"
+    PART = "PART"
+
+
 class CustomerType(str, enum.Enum):
     DEALER = "DEALER"
     END_CUSTOMER = "END_CUSTOMER"
@@ -418,10 +423,10 @@ class UnitMovementBase(SQLModel):
         default=None, foreign_key="location.id"
     )
     to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
-    # FK targets (sale/service_ticket/project_pull/stock_adjustment) are introduced
-    # in later migrations; columns stay nullable and the FK constraints are wired
-    # when each table lands (M010, M013, M012, M014).
-    sale_id: uuid.UUID | None = Field(default=None)
+    # FK targets (service_ticket/project_pull/stock_adjustment) are introduced
+    # in later migrations; those columns stay bare-nullable and their FK
+    # constraints are wired when each table lands (M013, M012, M014).
+    sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
     service_ticket_id: uuid.UUID | None = Field(default=None)
     project_pull_id: uuid.UUID | None = Field(default=None)
     stock_adjustment_id: uuid.UUID | None = Field(default=None)
@@ -473,6 +478,73 @@ class ReceiveSerializedRequest(SQLModel):
 
 class ReceiveSerializedResponse(SQLModel):
     units: list[UnitPublic]
+
+
+# --- Sale + sale_line (FR-007; M010) ------------------------------------------
+
+
+class Sale(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_sale_idempotency_key"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    customer_id: uuid.UUID = Field(foreign_key="customer.id", nullable=False)
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    idempotency_key: uuid.UUID = Field(index=True)
+    total_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    total_cogs_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    receipt_pdf_path: str | None = Field(default=None, max_length=512)
+    sold_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+
+
+class SaleLine(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sale_id: uuid.UUID = Field(foreign_key="sale.id", nullable=False, index=True)
+    line_kind: SaleLineKind
+    unit_id: uuid.UUID | None = Field(default=None, foreign_key="unit.id")
+    product_id: uuid.UUID | None = Field(default=None, foreign_key="product.id")
+    quantity: int
+    unit_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    unit_cost_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    # FK wired in M013 (pricing_override_request); bare-nullable until then.
+    pricing_override_request_id: uuid.UUID | None = Field(default=None)
+
+
+class SaleLinePublic(SQLModel):
+    id: uuid.UUID
+    line_kind: SaleLineKind
+    unit_id: uuid.UUID | None
+    product_id: uuid.UUID | None
+    quantity: int
+    unit_price_thb: Decimal
+    unit_cost_thb: Decimal
+
+
+class SalePublic(SQLModel):
+    id: uuid.UUID
+    customer_id: uuid.UUID
+    total_thb: Decimal
+    total_cogs_thb: Decimal
+    sold_at: datetime
+    lines: list[SaleLinePublic]
+
+
+class SaleLineInput(SQLModel):
+    line_kind: SaleLineKind
+    castranova_barcode: str | None = None  # UNIT lines
+    sku: str | None = None  # PART lines (Part 2)
+    quantity: int = 1
+
+
+class SaleCreateRequest(SQLModel):
+    customer_id: uuid.UUID
+    lines: list[SaleLineInput] = Field(min_length=1)
+    idempotency_key: uuid.UUID
 
 
 # Generic message
