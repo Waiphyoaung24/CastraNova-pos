@@ -5,7 +5,7 @@ through ``assert_unit_transition`` so illegal lifecycle moves are rejected
 before any row is written.
 """
 
-from app.models import MovementType, UnitState
+from app.models import MovementType, ProjectPullState, UnitState
 
 
 class IllegalTransition(Exception):
@@ -32,3 +32,25 @@ def assert_unit_transition(current: UnitState, event: MovementType) -> UnitState
         return _TABLE[(current, event)]
     except KeyError:
         raise IllegalTransition(f"{current.value} -[{event.value}]-> illegal") from None
+
+
+# (current_state, target_state) legal pull transitions. Exactly spec §4.5.
+_PULL_TABLE: set[tuple[ProjectPullState, ProjectPullState]] = {
+    (ProjectPullState.PENDING, ProjectPullState.FULFILLED),
+    (ProjectPullState.PENDING, ProjectPullState.SHORT),
+    (ProjectPullState.PENDING, ProjectPullState.CANCELLED),
+    (ProjectPullState.SHORT, ProjectPullState.CANCELLED),
+}
+
+
+def assert_pull_transition(
+    current: ProjectPullState, target: ProjectPullState
+) -> ProjectPullState:
+    """Return ``target`` for a legal project-pull transition, else raise.
+
+    Raises:
+        IllegalTransition: if ``(current, target)`` is not a legal edge (§4.5).
+    """
+    if (current, target) not in _PULL_TABLE:
+        raise IllegalTransition(f"{current.value} -> {target.value} illegal")
+    return target

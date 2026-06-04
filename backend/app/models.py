@@ -816,6 +816,116 @@ class ServiceTicketClose(SQLModel):
     resolution: str | None = Field(default=None, max_length=512)
 
 
+# --- Project pull (FR-009; M012) ----------------------------------------------
+
+
+class ProjectPull(SQLModel, table=True):
+    # Admin-created online, fulfilled at the warehouse (Flow D). No
+    # idempotency_key: replay safety lives in the deterministic movement keys
+    # written at fulfill (§7, spec line 461). Index (state, created_at) drives the
+    # staff queue.
+    __table_args__ = (
+        Index("ix_project_pull_state_created", "state", "created_at"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(foreign_key="project.id", nullable=False)
+    # Denormalised from project.customer_id at create time (spec §4.3).
+    customer_id: uuid.UUID = Field(foreign_key="customer.id", nullable=False)
+    state: ProjectPullState = Field(default=ProjectPullState.PENDING)
+    admin_notes: str | None = Field(default=None, max_length=512)
+    created_by_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    fulfilled_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    fulfilled_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id"
+    )
+    cancelled_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    cancelled_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id"
+    )
+
+
+class ProjectPullLine(SQLModel, table=True):
+    # CHECK keeps requested_qty positive when present (PART lines); UNIT lines
+    # carry unit_serial instead. Indexed by parent pull for fetch-with-lines.
+    __table_args__ = (
+        CheckConstraint(
+            "requested_qty IS NULL OR requested_qty > 0",
+            name="ck_project_pull_line_requested_qty_positive",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_pull_id: uuid.UUID = Field(
+        foreign_key="projectpull.id", nullable=False, index=True
+    )
+    line_kind: SaleLineKind
+    product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
+    # UNIT lines: the unit.castranova_barcode to scan. PART lines: requested_qty.
+    unit_serial: str | None = Field(default=None, max_length=64)
+    requested_qty: int | None = Field(default=None)
+    fulfilled_qty: int = Field(default=0)
+    line_state: LineState = Field(default=LineState.PENDING)
+
+
+class ProjectPullLineCreate(SQLModel):
+    line_kind: SaleLineKind
+    product_id: uuid.UUID
+    unit_serial: str | None = Field(default=None, max_length=64)  # UNIT lines
+    requested_qty: int | None = Field(default=None, gt=0, le=1_000_000)  # PART lines
+
+
+class ProjectPullCreate(SQLModel):
+    project_id: uuid.UUID
+    admin_notes: str | None = Field(default=None, max_length=512)
+    lines: list[ProjectPullLineCreate] = Field(min_length=1, max_length=200)
+
+
+class ProjectPullFulfillLine(SQLModel):
+    line_id: uuid.UUID
+    fulfilled_qty: int = Field(ge=0, le=1_000_000)
+
+
+class ProjectPullFulfill(SQLModel):
+    lines: list[ProjectPullFulfillLine] = Field(default_factory=list, max_length=200)
+
+
+class ProjectPullLinePublic(SQLModel):
+    id: uuid.UUID
+    line_kind: SaleLineKind
+    product_id: uuid.UUID
+    unit_serial: str | None
+    requested_qty: int | None
+    fulfilled_qty: int
+    line_state: LineState
+
+
+class ProjectPullPublic(SQLModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    customer_id: uuid.UUID
+    state: ProjectPullState
+    admin_notes: str | None
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+    fulfilled_at: datetime | None
+    fulfilled_by_user_id: uuid.UUID | None
+    cancelled_at: datetime | None
+    cancelled_by_user_id: uuid.UUID | None
+    lines: list[ProjectPullLinePublic]
+
+
 # Generic message
 class Message(SQLModel):
     message: str

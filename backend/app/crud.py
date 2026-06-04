@@ -12,12 +12,17 @@ from sqlmodel import Session, SQLModel, col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.security import get_password_hash, verify_password
-from app.core.state_machine import IllegalTransition, assert_unit_transition
+from app.core.state_machine import (
+    IllegalTransition,
+    assert_pull_transition,
+    assert_unit_transition,
+)
 from app.models import (
     CostLine,
     Customer,
     CustomerCreate,
     CustomerUpdate,
+    LineState,
     Location,
     MovementType,
     PartBatch,
@@ -28,6 +33,11 @@ from app.models import (
     ProductUpdate,
     Project,
     ProjectCreate,
+    ProjectPull,
+    ProjectPullCreate,
+    ProjectPullFulfillLine,
+    ProjectPullLine,
+    ProjectPullState,
     ProjectUpdate,
     ReceivePiece,
     Sale,
@@ -984,6 +994,306 @@ def close_service_ticket(
     session.commit()
     session.refresh(ticket)
     return ticket
+
+
+# --- Project pull (FR-009; Flow D) --------------------------------------------
+
+
+def get_project_pull(
+    *, session: Session, pull_id: Any
+) -> ProjectPull | None:
+    return session.get(ProjectPull, pull_id)
+
+
+def list_project_pull_lines(
+    *, session: Session, pull_id: uuid.UUID
+) -> list[ProjectPullLine]:
+    return list(
+        session.exec(
+            select(ProjectPullLine)
+            .where(ProjectPullLine.project_pull_id == pull_id)
+            .order_by(col(ProjectPullLine.id))
+        ).all()
+    )
+
+
+def list_project_pulls(
+    *,
+    session: Session,
+    state: ProjectPullState | None = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[ProjectPull]:
+    """List pulls newest-first, optionally filtered by state (the staff queue
+    uses ``state=PENDING``; the (state, created_at) index serves it)."""
+    statement = select(ProjectPull)
+    if state is not None:
+        statement = statement.where(ProjectPull.state == state)
+    statement = (
+        statement.order_by(col(ProjectPull.created_at).desc()).offset(skip).limit(limit)
+    )
+    return list(session.exec(statement).all())
+
+
+def create_project_pull(
+    *,
+    session: Session,
+    pull_in: ProjectPullCreate,
+    created_by_user_id: uuid.UUID,
+) -> ProjectPull:
+    """Admin creates a PENDING pull + its lines in one transaction (Flow D.1).
+
+    customer_id is denormalised from the project. Each UNIT line requires a
+    unit_serial on a SERIALIZED product; each PART line requires requested_qty on
+    a QUANTITY product. 404 on a missing project/product, 400 on a tracking_mode
+    mismatch, 422 on a malformed line."""
+    project = session.get(Project, pull_in.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    pull = ProjectPull(
+        project_id=project.id,
+        customer_id=project.customer_id,
+        admin_notes=pull_in.admin_notes,
+        created_by_user_id=created_by_user_id,
+    )
+    session.add(pull)
+    session.flush()
+
+    for line in pull_in.lines:
+        product = session.get(Product, line.product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        if line.line_kind == SaleLineKind.UNIT:
+            if not line.unit_serial:
+                raise HTTPException(
+                    status_code=422, detail="UNIT line requires unit_serial"
+                )
+            if product.tracking_mode != TrackingMode.SERIALIZED:
+                raise HTTPException(
+                    status_code=400,
+                    detail="UNIT line requires a SERIALIZED product",
+                )
+        else:  # PART
+            if line.requested_qty is None or line.requested_qty <= 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail="PART line requires a positive requested_qty",
+                )
+            if product.tracking_mode != TrackingMode.QUANTITY:
+                raise HTTPException(
+                    status_code=400,
+                    detail="PART line requires a QUANTITY-tracked product",
+                )
+        session.add(
+            ProjectPullLine(
+                project_pull_id=pull.id,
+                line_kind=line.line_kind,
+                product_id=product.id,
+                unit_serial=line.unit_serial,
+                requested_qty=line.requested_qty,
+            )
+        )
+
+    session.commit()
+    session.refresh(pull)
+    return pull
+
+
+def fulfill_project_pull(
+    *,
+    session: Session,
+    pull_id: uuid.UUID,
+    fulfill_lines: list[ProjectPullFulfillLine],
+    actor_user_id: uuid.UUID,
+) -> ProjectPull:
+    """Staff fulfills a PENDING pull at the warehouse (Flow D.2), consuming
+    SERIALIZED units (PROJECT_OUT) and QUANTITY parts (FIFO), cost-only.
+
+    One-shot and PENDING-only: the pull is locked FOR UPDATE; a FULFILLED/SHORT
+    pull returns unchanged (idempotent — never re-consume), a CANCELLED pull
+    raises 409. Per line the requested amount defaults from the line (UNIT->1,
+    PART->requested_qty) unless overridden in ``fulfill_lines``. UNIT lines that
+    lost the race (missing/not IN_STOCK) become SHORT with no movement; PART
+    lines fulfilled below request become SHORT. The pull settles FULFILLED iff
+    every line is FULFILLED, else SHORT — all atomic with the movement writes
+    (409 on insufficient stock rolls the whole thing back)."""
+    pull = session.exec(
+        select(ProjectPull)
+        .where(ProjectPull.id == pull_id)
+        .with_for_update()
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="Project pull not found")
+    if pull.state == ProjectPullState.CANCELLED:
+        raise HTTPException(status_code=409, detail="Project pull is cancelled")
+    if pull.state != ProjectPullState.PENDING:
+        return pull  # idempotent: already settled (FULFILLED/SHORT), do not re-consume
+
+    customer_loc = session.exec(
+        select(Location).where(Location.code == "CUSTOMER")
+    ).first()
+    ygn_loc = session.exec(
+        select(Location).where(Location.code == "YGN_WH")
+    ).first()
+    if not customer_loc or not ygn_loc:
+        raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    lines = session.exec(
+        select(ProjectPullLine)
+        .where(ProjectPullLine.project_pull_id == pull.id)
+        .order_by(col(ProjectPullLine.id))
+    ).all()
+    qty_by_line = {fl.line_id: fl.fulfilled_qty for fl in fulfill_lines}
+
+    # Lock all target units up front in a single canonical (id-ordered) query so
+    # concurrent sales/pulls touching overlapping units acquire locks in the same
+    # order and cannot deadlock (§7).
+    unit_serials = [
+        ln.unit_serial
+        for ln in lines
+        if ln.line_kind == SaleLineKind.UNIT and ln.unit_serial
+    ]
+    unit_by_barcode: dict[str, Unit] = {}
+    if unit_serials:
+        locked = session.exec(
+            select(Unit)
+            .where(col(Unit.castranova_barcode).in_(unit_serials))
+            .order_by(col(Unit.id))
+            .with_for_update()
+        ).all()
+        unit_by_barcode = {u.castranova_barcode: u for u in locked}
+
+    # UNIT lines first, then PART lines in deterministic product order so
+    # concurrent consumers acquire batch locks in the same order (§7).
+    unit_lines = [ln for ln in lines if ln.line_kind == SaleLineKind.UNIT]
+    part_lines = sorted(
+        (ln for ln in lines if ln.line_kind == SaleLineKind.PART),
+        key=lambda ln: str(ln.product_id),
+    )
+
+    for line in unit_lines:
+        requested = qty_by_line.get(line.id, 1)
+        unit = unit_by_barcode.get(line.unit_serial) if line.unit_serial else None
+        if requested < 1 or unit is None:
+            line.line_state = LineState.SHORT
+            line.fulfilled_qty = 0
+            session.add(line)
+            continue
+        try:
+            new_state = assert_unit_transition(
+                unit.current_state, MovementType.PROJECT_OUT
+            )
+        except IllegalTransition:
+            # Lost the race (already SOLD/PROJECT_OUT/etc.) — first-write-wins.
+            line.line_state = LineState.SHORT
+            line.fulfilled_qty = 0
+            session.add(line)
+            continue
+        session.add(
+            UnitMovement(
+                unit_id=unit.id,
+                event_type=MovementType.PROJECT_OUT,
+                from_location_id=unit.current_location_id,
+                to_location_id=customer_loc.id,
+                project_pull_id=pull.id,
+                actor_user_id=actor_user_id,
+                idempotency_key=uuid.uuid5(pull.id, f"unit:{line.id}"),
+            )
+        )
+        unit.current_state = new_state
+        unit.current_location_id = customer_loc.id
+        unit.updated_at = get_datetime_utc()
+        session.add(unit)
+        line.line_state = LineState.FULFILLED
+        line.fulfilled_qty = 1
+        session.add(line)
+
+    for line in part_lines:
+        requested_qty = line.requested_qty or 0
+        wanted = qty_by_line.get(line.id, requested_qty)
+        actual = min(wanted, requested_qty)
+        if actual <= 0:
+            line.line_state = LineState.SHORT
+            line.fulfilled_qty = 0
+            session.add(line)
+            continue
+        cost_lines = consume_quantity_fifo(
+            session=session, product_id=line.product_id, quantity_needed=actual
+        )
+        movement = PartMovement(
+            product_id=line.product_id,
+            event_type=MovementType.PROJECT_OUT,
+            quantity=actual,
+            from_location_id=ygn_loc.id,
+            to_location_id=customer_loc.id,
+            project_pull_id=pull.id,
+            actor_user_id=actor_user_id,
+            idempotency_key=uuid.uuid5(pull.id, f"part:{line.id}"),
+        )
+        session.add(movement)
+        session.flush()
+        for cost_line in cost_lines:
+            cost_line.part_movement_id = movement.id
+            session.add(cost_line)
+        line.line_state = (
+            LineState.FULFILLED if actual == requested_qty else LineState.SHORT
+        )
+        line.fulfilled_qty = actual
+        session.add(line)
+
+    all_fulfilled = all(ln.line_state == LineState.FULFILLED for ln in lines)
+    target = ProjectPullState.FULFILLED if all_fulfilled else ProjectPullState.SHORT
+    pull.state = assert_pull_transition(pull.state, target)
+    pull.fulfilled_at = get_datetime_utc()
+    pull.fulfilled_by_user_id = actor_user_id
+    session.add(pull)
+    # FR-018: notify admin on SHORT pull — wired in Task 2.7.
+    session.commit()
+    session.refresh(pull)
+    return pull
+
+
+def cancel_project_pull(
+    *,
+    session: Session,
+    pull_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> ProjectPull:
+    """Admin cancels a PENDING or SHORT pull (Flow D.3): mark CANCELLED, flip
+    still-PENDING lines to CANCELLED, write no movements. The pull is locked FOR
+    UPDATE; an already-CANCELLED pull returns unchanged (idempotent); a FULFILLED
+    pull raises 409."""
+    pull = session.exec(
+        select(ProjectPull)
+        .where(ProjectPull.id == pull_id)
+        .with_for_update()
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="Project pull not found")
+    if pull.state == ProjectPullState.CANCELLED:
+        return pull  # idempotent
+    if pull.state == ProjectPullState.FULFILLED:
+        raise HTTPException(
+            status_code=409, detail="Cannot cancel a fulfilled pull"
+        )
+
+    pull.state = assert_pull_transition(pull.state, ProjectPullState.CANCELLED)
+    pull.cancelled_at = get_datetime_utc()
+    pull.cancelled_by_user_id = actor_user_id
+    session.add(pull)
+
+    lines = session.exec(
+        select(ProjectPullLine).where(ProjectPullLine.project_pull_id == pull.id)
+    ).all()
+    for line in lines:
+        if line.line_state == LineState.PENDING:
+            line.line_state = LineState.CANCELLED
+            session.add(line)
+
+    session.commit()
+    session.refresh(pull)
+    return pull
 
 
 # Dummy hash to use for timing attack prevention when user is not found

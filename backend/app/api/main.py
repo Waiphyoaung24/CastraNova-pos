@@ -5,6 +5,7 @@ from app.api.routes import (
     login,
     private,
     products,
+    project_pulls,
     projects,
     receipts,
     sales,
@@ -22,6 +23,7 @@ api_router.include_router(utils.router)
 api_router.include_router(suppliers.router)
 api_router.include_router(customers.router)
 api_router.include_router(projects.router)
+api_router.include_router(project_pulls.router)
 api_router.include_router(products.router)
 api_router.include_router(receipts.router)
 api_router.include_router(sales.router)
