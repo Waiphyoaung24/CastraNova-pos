@@ -1336,17 +1336,17 @@ def upsert_notification_preferences(
     """Insert-or-update each (channel, event_type) opt-in for the user, then
     return the user's full preference list. Idempotent."""
     for upd in updates:
-        existing = session.exec(
-            select(NotificationPreference).where(
-                NotificationPreference.user_id == user_id,
-                NotificationPreference.channel == upd.channel,
-                NotificationPreference.event_type == upd.event_type,
-            )
-        ).first()
+        stmt = select(NotificationPreference).where(
+            NotificationPreference.user_id == user_id,
+            NotificationPreference.channel == upd.channel,
+            NotificationPreference.event_type == upd.event_type,
+        )
+        existing = session.exec(stmt).first()
         if existing:
             existing.enabled = upd.enabled
             existing.updated_at = get_datetime_utc()
             session.add(existing)
+            session.flush()
         else:
             session.add(
                 NotificationPreference(
@@ -1356,6 +1356,19 @@ def upsert_notification_preferences(
                     enabled=upd.enabled,
                 )
             )
+            try:
+                # Flush per-row so a concurrent insert racing the
+                # UNIQUE(user_id, channel, event_type) is isolated to this row.
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                existing = session.exec(stmt).first()
+                if existing is None:
+                    raise
+                existing.enabled = upd.enabled
+                existing.updated_at = get_datetime_utc()
+                session.add(existing)
+                session.flush()
     session.commit()
     return list_notification_preferences(session=session, user_id=user_id)
 

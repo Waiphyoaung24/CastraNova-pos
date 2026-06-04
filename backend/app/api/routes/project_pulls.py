@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_admin, get_current_user
@@ -88,6 +88,7 @@ def fulfill_project_pull(
     *,
     session: SessionDep,
     current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
     pull_id: uuid.UUID,
     payload: ProjectPullFulfill,
 ) -> ProjectPullPublic:
@@ -97,11 +98,11 @@ def fulfill_project_pull(
         fulfill_lines=payload.lines,
         actor_user_id=current_user.id,
     )
-    # FR-018: notify BKK admins on a SHORT settlement. Post-commit, best-effort —
-    # notify swallows send errors so it can never turn a successful fulfill into
-    # a 500.
+    # FR-018: notify BKK admins on a SHORT settlement. Dispatched to a background
+    # task (its own session, swallows errors) so outbound HTTP + retries never
+    # block the request or turn a successful fulfill into a 500.
     if pull.state == ProjectPullState.SHORT:
-        notify.notify_pull_short(session=session, pull=pull)
+        background_tasks.add_task(notify.notify_pull_short_bg, pull_id=pull.id)
     return _to_public(session=session, pull=pull)
 
 

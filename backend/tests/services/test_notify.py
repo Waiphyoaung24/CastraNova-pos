@@ -110,7 +110,6 @@ def test_send_line_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(notify, "_post", fake_post)
     notify.send_line(to="L-abc", text="hi")
 
-    assert notify.send_line.statistics["attempt_number"] == 1  # type: ignore[attr-defined]
     assert len(calls) == 1
     assert calls[0]["headers"]["Authorization"] == f"Bearer {LINE_TOKEN}"
     assert calls[0]["json"] == {
@@ -119,9 +118,10 @@ def test_send_line_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> No
     }
 
 
-def test_send_line_5xx_retries_three_times_then_raises(
+def test_send_line_5xx_raises_retryable_single_raw_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The raw send is a single attempt now; retry lives in notify().
     attempts = {"n": 0}
 
     def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
@@ -131,7 +131,7 @@ def test_send_line_5xx_retries_three_times_then_raises(
     monkeypatch.setattr(notify, "_post", fake_post)
     with pytest.raises(notify.RetryableNotifyError):
         notify.send_line(to="L-abc", text="hi")
-    assert attempts["n"] == 3
+    assert attempts["n"] == 1
 
 
 def test_send_line_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -205,10 +205,16 @@ def test_notify_line_success_one_sent_log(
     assert fetched is not None and fetched.status == NotificationStatus.SENT
 
 
-def test_notify_line_5xx_failed_log_attempts_three_no_token(
+def test_notify_line_5xx_failed_log_attempts_four_no_token(
     db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(503))
+    sent: list[Any] = []
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        sent.append(1)
+        return _resp(503)
+
+    monkeypatch.setattr(notify, "_post", fake_post)
     user = _make_user(db)
     _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
 
@@ -222,7 +228,9 @@ def test_notify_line_5xx_failed_log_attempts_three_no_token(
     assert len(line_logs) == 1
     log = line_logs[0]
     assert log.status == NotificationStatus.FAILED
-    assert log.attempts == 3
+    # 4 attempts / 3 retries (waits 1s, 5s, 25s).
+    assert log.attempts == 4
+    assert len(sent) == 4
     assert log.last_error
     assert LINE_TOKEN not in (log.last_error or "")
 
@@ -309,6 +317,92 @@ def test_notify_never_raises_on_transport_error(
     line_logs = [log for log in logs if log.channel == NotificationChannel.LINE]
     assert len(line_logs) == 1
     assert line_logs[0].status == NotificationStatus.FAILED
+
+
+def test_notify_concurrent_attempts_not_clobbered(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two concurrent notify() calls — one persistently-5xx, one success — must
+    each log their own attempt count (regression for the shared-statistics
+    race fixed by the per-call Retrying controller)."""
+    import threading
+
+    fail_user = _make_user(db, line_user_id="L-fail")
+    ok_user = _make_user(db, line_user_id="L-ok")
+    _opt_in(db, fail_user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
+    _opt_in(db, ok_user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
+
+    start = threading.Barrier(2)
+    seen_threads: set[int] = set()
+    lock = threading.Lock()
+
+    def fake_post(*_args: Any, **kwargs: Any) -> httpx.Response:
+        # Sync both threads on each thread's first send so the calls interleave;
+        # a shared attempt counter would then clobber across the two notify()s.
+        tid = threading.get_ident()
+        with lock:
+            first = tid not in seen_threads
+            seen_threads.add(tid)
+        if first:
+            start.wait(timeout=5)
+        if kwargs["json"]["to"] == fail_user.line_user_id:
+            return _resp(503)
+        return _resp(200)
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+
+    results: dict[str, list[NotificationLog]] = {}
+
+    def run(key: str, user: User) -> None:
+        from app.core.db import engine as _engine
+
+        with Session(_engine) as s:
+            results[key] = notify.notify(
+                session=s,
+                event_type=NotificationEvent.PULL_SHORT,
+                recipients=[user],
+                payload={},
+            )
+
+    t_fail = threading.Thread(target=run, args=("fail", fail_user))
+    t_ok = threading.Thread(target=run, args=("ok", ok_user))
+    t_fail.start()
+    t_ok.start()
+    t_fail.join(timeout=10)
+    t_ok.join(timeout=10)
+
+    fail_log = next(
+        log for log in results["fail"] if log.channel == NotificationChannel.LINE
+    )
+    ok_log = next(
+        log for log in results["ok"] if log.channel == NotificationChannel.LINE
+    )
+    assert fail_log.status == NotificationStatus.FAILED
+    assert fail_log.attempts == 4  # not clobbered by the concurrent success
+    assert ok_log.status == NotificationStatus.SENT
+    assert ok_log.attempts == 1
+
+
+def test_send_line_unset_token_raises_permanent_no_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[Any] = []
+    monkeypatch.setattr(notify, "_post", _recording_post(sent))
+    monkeypatch.setattr(settings, "LINE_CHANNEL_ACCESS_TOKEN", "")
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.send_line(to="L-abc", text="hi")
+    assert sent == []  # fail-fast: no outbound call
+
+
+def test_send_viber_unset_token_raises_permanent_no_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[Any] = []
+    monkeypatch.setattr(notify, "_post", _recording_post(sent))
+    monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", None)
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.send_viber(to="V-abc", text="hi")
+    assert sent == []
 
 
 # --- notify_pull_short helper -------------------------------------------------

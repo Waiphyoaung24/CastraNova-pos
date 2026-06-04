@@ -28,10 +28,12 @@ def upgrade():
     sa.Column('attempts', sa.Integer(), nullable=False),
     sa.Column('last_error', sqlmodel.sql.sqltypes.AutoString(length=1024), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint('attempts >= 0', name='ck_notification_log_attempts_nn'),
     sa.ForeignKeyConstraint(['target_user_id'], ['user.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_notification_log_status_created', 'notificationlog', ['status', 'created_at'], unique=False)
+    op.create_index('ix_notification_log_target_user_id', 'notificationlog', ['target_user_id'], unique=False)
     op.create_table('notificationpreference',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('user_id', sa.Uuid(), nullable=False),
@@ -53,7 +55,9 @@ def downgrade():
     op.drop_column('user', 'line_user_id')
     op.drop_index(op.f('ix_notificationpreference_user_id'), table_name='notificationpreference')
     op.drop_table('notificationpreference')
+    op.drop_index('ix_notification_log_target_user_id', table_name='notificationlog')
     op.drop_index('ix_notification_log_status_created', table_name='notificationlog')
+    # Irreversible by design: dropping notificationlog discards delivery history.
     op.drop_table('notificationlog')
     # Drop the enum types these tables introduced (mirrors the sibling M012
     # downgrade pattern). REVOKE for append-only enforcement is deferred to M021.

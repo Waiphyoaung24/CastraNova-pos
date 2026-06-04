@@ -47,15 +47,24 @@ def test_get_preferences_returns_current_user_prefs(
 ) -> None:
     admin = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
     assert admin is not None
-    db.add(
-        NotificationPreference(
-            user_id=admin.id,
-            channel=NotificationChannel.LINE,
-            event_type=NotificationEvent.PULL_SHORT,
-            enabled=True,
+    # Query-or-create so this doesn't leak a duplicate that the UNIQUE constraint
+    # would reject on a sibling test that reuses the seed admin.
+    if not db.exec(
+        select(NotificationPreference).where(
+            NotificationPreference.user_id == admin.id,
+            NotificationPreference.channel == NotificationChannel.LINE,
+            NotificationPreference.event_type == NotificationEvent.PULL_SHORT,
         )
-    )
-    db.commit()
+    ).first():
+        db.add(
+            NotificationPreference(
+                user_id=admin.id,
+                channel=NotificationChannel.LINE,
+                event_type=NotificationEvent.PULL_SHORT,
+                enabled=True,
+            )
+        )
+        db.commit()
     r = client.get(f"{PREFIX}/notifications/preferences", headers=superuser_token_headers)
     assert r.status_code == 200, r.text
     rows = r.json()
@@ -115,6 +124,23 @@ def test_patch_preferences_upsert_idempotent(
         )
     ).all()
     assert len(rows) == 1
+
+
+def test_patch_preferences_rejects_duplicate_pair(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    body = {
+        "preferences": [
+            {"channel": "LINE", "event_type": "PULL_SHORT", "enabled": True},
+            {"channel": "LINE", "event_type": "PULL_SHORT", "enabled": False},
+        ]
+    }
+    r = client.patch(
+        f"{PREFIX}/notifications/preferences",
+        headers=superuser_token_headers,
+        json=body,
+    )
+    assert r.status_code == 422, r.text
 
 
 def test_preferences_isolated_between_users(
@@ -247,6 +273,7 @@ def test_short_fulfill_writes_pull_short_log(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("tenacity.nap.time.sleep", lambda *_: None)
+    monkeypatch.setattr(settings, "LINE_CHANNEL_ACCESS_TOKEN", "line-test-token")
     monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
     pull = _create_pull(
         client, superuser_token_headers, short_pull_ctx, part_qty=3
@@ -314,6 +341,7 @@ def test_notify_failure_does_not_break_fulfill(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("tenacity.nap.time.sleep", lambda *_: None)
+    monkeypatch.setattr(settings, "LINE_CHANNEL_ACCESS_TOKEN", "line-test-token")
 
     def boom(*_args: Any, **_kwargs: Any) -> httpx.Response:
         return _resp(503)
@@ -341,3 +369,5 @@ def test_notify_failure_does_not_break_fulfill(
     relevant = [log for log in logs if log.payload.get("pull_id") == pull["id"]]
     assert len(relevant) == 1
     assert relevant[0].status == NotificationStatus.FAILED
+    # 4 attempts / 3 retries on persistent 5xx (regression for FIX 3/4).
+    assert relevant[0].attempts == 4

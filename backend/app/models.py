@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from pydantic import EmailStr
+from pydantic import EmailStr, model_validator
 from sqlalchemy import (
     CheckConstraint,
     Column,
@@ -983,12 +983,17 @@ class NotificationLog(SQLModel, table=True):
         Index(
             "ix_notification_log_status_created", "status", "created_at"
         ),
+        CheckConstraint(
+            "attempts >= 0", name="ck_notification_log_attempts_nn"
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     channel: NotificationChannel
     event_type: NotificationEvent
-    target_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    target_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True
+    )
     payload: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
     status: NotificationStatus
     attempts: int
@@ -1017,6 +1022,19 @@ class NotificationPreferencesUpdate(SQLModel):
     preferences: list[NotificationPreferenceUpdate] = Field(
         min_length=1, max_length=100
     )
+
+    @model_validator(mode="after")
+    def _no_duplicate_pairs(self) -> "NotificationPreferencesUpdate":
+        seen: set[tuple[NotificationChannel, NotificationEvent]] = set()
+        for upd in self.preferences:
+            key = (upd.channel, upd.event_type)
+            if key in seen:
+                raise ValueError(
+                    f"duplicate (channel, event_type) pair: "
+                    f"{upd.channel.value}/{upd.event_type.value}"
+                )
+            seen.add(key)
+        return self
 
 
 # Generic message

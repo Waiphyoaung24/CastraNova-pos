@@ -1,27 +1,30 @@
 """Outbound LINE + Viber push notifications (FR-018).
 
-Outbound only. Each channel send retries 3x with exponential backoff (1s, 5s,
-25s) on transient failures (5xx / transport errors); 4xx and Viber ``status != 0``
-are permanent and never retried. ``notify`` is best-effort: it never raises to
-its caller — every send outcome (including failures and un-enrolled recipients)
-lands as one append-only ``notification_log`` row for weekly admin review.
+Outbound only. Each channel send runs 4 attempts / 3 retries with exponential
+backoff (waits 1s, 5s, 25s) on transient failures (5xx / transport errors); 4xx
+and Viber ``status != 0`` are permanent and never retried. ``notify`` is
+best-effort: it never raises to its caller — every send outcome (including
+failures and un-enrolled recipients) lands as one append-only
+``notification_log`` row for weekly admin review.
 
 Tokens are read from settings and sent in headers; they are never logged.
 """
 
+import logging
 import uuid
 from typing import Any
 
 import httpx
 from sqlmodel import Session, select
 from tenacity import (
-    retry,
+    Retrying,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
 
 from app.core.config import settings
+from app.core.db import engine
 from app.models import (
     LineState,
     NotificationChannel,
@@ -40,6 +43,8 @@ VIBER_SEND_URL = "https://chatapi.viber.com/pa/send_message"
 
 _TIMEOUT = 10.0
 
+logger = logging.getLogger(__name__)
+
 
 class RetryableNotifyError(Exception):
     """A transient send failure (HTTP 5xx or transport error) — retry."""
@@ -51,7 +56,9 @@ class PermanentNotifyError(Exception):
 
 def _post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
     """The single network seam — monkeypatched in tests."""
-    return httpx.post(url, headers=headers, json=json, timeout=_TIMEOUT)
+    return httpx.post(
+        url, headers=headers, json=json, timeout=_TIMEOUT, trust_env=False
+    )
 
 
 def _classify(response: httpx.Response) -> None:
@@ -62,14 +69,10 @@ def _classify(response: httpx.Response) -> None:
         raise PermanentNotifyError(f"HTTP {response.status_code}")
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, exp_base=5, max=25),
-    retry=retry_if_exception_type((RetryableNotifyError, httpx.TransportError)),
-    reraise=True,
-)
 def send_line(*, to: str, text: str) -> None:
-    """Push a text message via the LINE Messaging API."""
+    """Push a text message via the LINE Messaging API (single raw attempt)."""
+    if not settings.LINE_CHANNEL_ACCESS_TOKEN:
+        raise PermanentNotifyError("LINE_TOKEN not configured")
     try:
         response = _post(
             LINE_PUSH_URL,
@@ -84,19 +87,15 @@ def send_line(*, to: str, text: str) -> None:
     _classify(response)
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, exp_base=5, max=25),
-    retry=retry_if_exception_type((RetryableNotifyError, httpx.TransportError)),
-    reraise=True,
-)
 def send_viber(*, to: str, text: str) -> None:
-    """Push a text message via the Viber REST API."""
+    """Push a text message via the Viber REST API (single raw attempt)."""
+    if not settings.VIBER_AUTH_TOKEN:
+        raise PermanentNotifyError("VIBER_TOKEN not configured")
     try:
         response = _post(
             VIBER_SEND_URL,
             headers={
-                "X-Viber-Auth-Token": settings.VIBER_AUTH_TOKEN or "",
+                "X-Viber-Auth-Token": settings.VIBER_AUTH_TOKEN,
                 "Content-Type": "application/json",
             },
             json={"receiver": to, "type": "text", "text": text},
@@ -104,8 +103,9 @@ def send_viber(*, to: str, text: str) -> None:
     except httpx.TransportError as exc:
         raise RetryableNotifyError("transport error") from exc
     _classify(response)
-    # Viber returns 200 with a body status code; non-zero is a permanent failure.
-    status = response.json().get("status")
+    # Viber returns 200 with a body status code; an explicit non-zero status is a
+    # permanent failure. An absent key on a 200 is treated as success (status 0).
+    status = response.json().get("status", 0)
     if status != 0:
         raise PermanentNotifyError(f"viber status {status}")
 
@@ -142,7 +142,7 @@ def notify(
     payload: dict[str, Any],
 ) -> list[NotificationLog]:
     """Best-effort fan-out: for each opted-in (recipient, channel), send and
-    record exactly one append-only log row. Never raises."""
+    record exactly one append-only log row. Never raises a notify failure."""
     text = _render_text(event_type=event_type, payload=payload)
     logs: list[NotificationLog] = []
 
@@ -173,10 +173,15 @@ def notify(
                 )
                 continue
 
+            retryer = Retrying(
+                stop=stop_after_attempt(4),
+                wait=wait_exponential(multiplier=1, exp_base=5, max=25),
+                retry=retry_if_exception_type(RetryableNotifyError),
+                reraise=True,
+            )
             try:
-                send_fn(to=address, text=text)
-            except Exception as exc:
-                attempts = int(send_fn.statistics.get("attempt_number", 1))
+                retryer(send_fn, to=address, text=text)
+            except (RetryableNotifyError, PermanentNotifyError) as exc:
                 logs.append(
                     NotificationLog(
                         channel=channel,
@@ -184,12 +189,11 @@ def notify(
                         target_user_id=user.id,
                         payload=payload,
                         status=NotificationStatus.FAILED,
-                        attempts=attempts,
+                        attempts=int(retryer.statistics.get("attempt_number", 1)),
                         last_error=str(exc)[:1024],
                     )
                 )
             else:
-                attempts = int(send_fn.statistics.get("attempt_number", 1))
                 logs.append(
                     NotificationLog(
                         channel=channel,
@@ -197,7 +201,7 @@ def notify(
                         target_user_id=user.id,
                         payload=payload,
                         status=NotificationStatus.SENT,
-                        attempts=attempts,
+                        attempts=int(retryer.statistics.get("attempt_number", 1)),
                     )
                 )
 
@@ -215,7 +219,9 @@ def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> s
             f"Project pull {payload.get('pull_id')} settled SHORT "
             f"({payload.get('short_line_count')} line(s) short)."
         )
-    return f"{event_type.value}: {payload}"
+    # Never push a raw payload (may carry financial fields). Each new event must
+    # add an explicit, safe template here.
+    raise NotImplementedError(f"No render template for {event_type!r}")
 
 
 def notify_pull_short(
@@ -241,3 +247,20 @@ def notify_pull_short(
         recipients=recipients,
         payload=payload,
     )
+
+
+def notify_pull_short_bg(*, pull_id: uuid.UUID) -> None:
+    """BackgroundTasks entrypoint: notify off the request hot path.
+
+    Opens its OWN session (the request session is closed once the response is
+    sent) and can never raise out of the background task — a notify failure must
+    not affect the already-committed fulfill.
+    """
+    try:
+        with Session(engine) as session:
+            pull = session.get(ProjectPull, pull_id)
+            if pull is None:
+                return
+            notify_pull_short(session=session, pull=pull)
+    except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
+        logger.exception("notify_pull_short_bg failed for pull_id=%s", pull_id)
