@@ -172,11 +172,13 @@ def test_sale_receipt_pdf(
     assert r.content[:4] == b"%PDF"
 
 
-def test_sale_part_line_not_enabled(
+def test_sale_part_line_unknown_sku_404(
     client: TestClient,
     staff_token_headers: dict[str, str],
     seed_sale_unit: tuple[str, uuid.UUID],
 ) -> None:
+    # PART lines are enabled (Task 2.4); an unknown SKU now resolves to 404
+    # rather than the old "not enabled" 400. Happy-path FIFO is in test_sales_part.
     _, customer_id = seed_sale_unit
     body = {
         "customer_id": str(customer_id),
@@ -184,5 +186,5 @@ def test_sale_part_line_not_enabled(
         "idempotency_key": str(uuid.uuid4()),
     }
     r = client.post(f"{PREFIX}/sales", headers=staff_token_headers, json=body)
-    assert r.status_code == 400
-    assert "QUANTITY" in r.json()["detail"]
+    assert r.status_code == 404
+    assert "Product" in r.json()["detail"]

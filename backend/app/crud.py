@@ -620,11 +620,14 @@ def create_sale(
     idempotency_key: uuid.UUID,
     created_by_user_id: uuid.UUID,
 ) -> Sale:
-    """Sell SERIALIZED units in one transaction (FR-007, UNIT lines only).
+    """Sell SERIALIZED units and QUANTITY parts in one transaction (FR-007).
 
-    Locks each unit row, asserts IN_STOCK -> SOLD via the state machine, snapshots
-    price/cost, and writes sale + sale_line + unit_movement(SOLD). Idempotent on
-    sale.idempotency_key (offline replay returns the existing sale, S6)."""
+    UNIT lines lock the unit row, assert IN_STOCK -> SOLD, and write a
+    unit_movement(SOLD). PART lines FIFO-consume stock (consume_quantity_fifo),
+    writing a part_movement(SOLD) + cost_line[] and snapshotting the per-unit
+    cost onto the sale_line. Price/cost are snapshotted; everything commits
+    atomically. Idempotent on sale.idempotency_key (offline replay returns the
+    existing sale, S6)."""
     replay = _sale_by_key(session=session, idempotency_key=idempotency_key)
     if replay is not None:
         return replay
@@ -637,19 +640,44 @@ def create_sale(
     if not customer_loc:
         raise HTTPException(status_code=500, detail="CUSTOMER location not seeded")
 
-    # Validate every line and gather barcodes before writing anything (fail fast,
-    # no orphan sale row).
+    # Validate every line up front (fail fast, no orphan sale row). UNIT lines
+    # carry a barcode; PART lines carry a SKU + positive quantity resolved to a
+    # QUANTITY-tracked product.
     barcodes: list[str] = []
+    part_reqs: list[tuple[Product, int]] = []
     for line in lines:
-        if line.line_kind == SaleLineKind.PART:
-            raise HTTPException(
-                status_code=400, detail="QUANTITY parts not yet enabled"
-            )
-        if not line.castranova_barcode:
-            raise HTTPException(
-                status_code=422, detail="UNIT line requires castranova_barcode"
-            )
-        barcodes.append(line.castranova_barcode)
+        if line.line_kind == SaleLineKind.UNIT:
+            if not line.castranova_barcode:
+                raise HTTPException(
+                    status_code=422, detail="UNIT line requires castranova_barcode"
+                )
+            barcodes.append(line.castranova_barcode)
+        else:  # PART
+            if not line.sku:
+                raise HTTPException(status_code=422, detail="PART line requires sku")
+            if line.quantity <= 0:
+                raise HTTPException(
+                    status_code=422, detail="PART line quantity must be positive"
+                )
+            product = session.exec(
+                select(Product).where(Product.sku == line.sku)
+            ).first()
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
+            if product.tracking_mode != TrackingMode.QUANTITY:
+                raise HTTPException(
+                    status_code=400,
+                    detail="PART line requires a QUANTITY-tracked product",
+                )
+            part_reqs.append((product, line.quantity))
+
+    ygn_loc = None
+    if part_reqs:
+        ygn_loc = session.exec(
+            select(Location).where(Location.code == "YGN_WH")
+        ).first()
+        if not ygn_loc:
+            raise HTTPException(status_code=500, detail="YGN_WH location not seeded")
 
     # Lock all target units up front in a single canonical (id-ordered) query so
     # concurrent sales/pulls touching overlapping units acquire locks in the same
@@ -721,6 +749,47 @@ def create_sale(
         session.add(unit)
         total_thb += unit_price
         total_cogs_thb += unit_cost
+
+    # PART lines: FIFO-consume in deterministic product order (by id) so
+    # concurrent sales acquire batch locks in the same order and cannot deadlock
+    # (§7). Each line writes one SOLD part_movement + its cost_line[] and snapshots
+    # the per-unit average cost onto the sale_line (authoritative COGS stays on
+    # cost_line / sale.total_cogs_thb).
+    for idx, (product, qty) in enumerate(
+        sorted(part_reqs, key=lambda pr: str(pr[0].id))
+    ):
+        cost_lines = consume_quantity_fifo(
+            session=session, product_id=product.id, quantity_needed=qty
+        )
+        line_cogs = sum((cl.total_cost_thb for cl in cost_lines), Decimal("0.00"))
+        movement = PartMovement(
+            product_id=product.id,
+            event_type=MovementType.SOLD,
+            quantity=qty,
+            from_location_id=ygn_loc.id if ygn_loc else None,
+            to_location_id=customer_loc.id,
+            sale_id=sale.id,
+            actor_user_id=created_by_user_id,
+            idempotency_key=uuid.uuid5(idempotency_key, f"part:{idx}:{product.id}"),
+        )
+        session.add(movement)
+        session.flush()
+        for cost_line in cost_lines:
+            cost_line.part_movement_id = movement.id
+            session.add(cost_line)
+        unit_price = product.retail_price_thb  # override hook lands in Part 4
+        session.add(
+            SaleLine(
+                sale_id=sale.id,
+                line_kind=SaleLineKind.PART,
+                product_id=product.id,
+                quantity=qty,
+                unit_price_thb=unit_price,
+                unit_cost_thb=(line_cogs / qty).quantize(Decimal("0.01")),
+            )
+        )
+        total_thb += unit_price * qty
+        total_cogs_thb += line_cogs
 
     sale.total_thb = total_thb
     sale.total_cogs_thb = total_cogs_thb
