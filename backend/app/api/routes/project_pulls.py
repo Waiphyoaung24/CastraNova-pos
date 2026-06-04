@@ -76,7 +76,13 @@ def read_project_pull(
     return _to_public(session=session, pull=pull)
 
 
-@router.post("/{pull_id}/fulfill", response_model=ProjectPullPublic)
+# Open to any authenticated user (consistent with close_service_ticket);
+# staff-only role-tiering is deferred to Part 4 (Task 4.2).
+@router.post(
+    "/{pull_id}/fulfill",
+    response_model=ProjectPullPublic,
+    dependencies=[Depends(get_current_user)],
+)
 def fulfill_project_pull(
     *,
     session: SessionDep,

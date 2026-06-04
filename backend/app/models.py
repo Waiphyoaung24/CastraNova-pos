@@ -864,6 +864,9 @@ class ProjectPullLine(SQLModel, table=True):
             "requested_qty IS NULL OR requested_qty > 0",
             name="ck_project_pull_line_requested_qty_positive",
         ),
+        CheckConstraint(
+            "fulfilled_qty >= 0", name="ck_project_pull_line_fulfilled_qty_nn"
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

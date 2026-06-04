@@ -1144,6 +1144,21 @@ def fulfill_project_pull(
         .where(ProjectPullLine.project_pull_id == pull.id)
         .order_by(col(ProjectPullLine.id))
     ).all()
+
+    # Validate payload line_ids before any write so a bad payload aborts the
+    # whole transaction cleanly (nothing consumed/moved).
+    payload_ids = [fl.line_id for fl in fulfill_lines]
+    if len(payload_ids) != len(set(payload_ids)):
+        dupes = {lid for lid in payload_ids if payload_ids.count(lid) > 1}
+        raise HTTPException(
+            status_code=422, detail=f"Duplicate line_id in payload: {dupes}"
+        )
+    known_ids = {ln.id for ln in lines}
+    unknown = set(payload_ids) - known_ids
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown line_id for this pull: {unknown}"
+        )
     qty_by_line = {fl.line_id: fl.fulfilled_qty for fl in fulfill_lines}
 
     # Lock all target units up front in a single canonical (id-ordered) query so
