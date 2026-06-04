@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routes import (
+    audit,
     customers,
     login,
     low_stock,
@@ -34,6 +35,7 @@ api_router.include_router(service_tickets.router)
 api_router.include_router(notifications.router)
 api_router.include_router(low_stock.router)
 api_router.include_router(reports.router)
+api_router.include_router(audit.router)
 
 
 if settings.ENVIRONMENT == "local":

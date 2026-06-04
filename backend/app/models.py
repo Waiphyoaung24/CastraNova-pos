@@ -459,6 +459,9 @@ class Unit(UnitBase, table=True):
             "supplier_id", "supplier_serial", name="uq_unit_supplier_serial"
         ),
         Index("ix_unit_state_product", "current_state", "product_id"),
+        CheckConstraint(
+            "purchase_cost_thb >= 0", name="ck_unit_purchase_cost_nonneg"
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -526,6 +529,25 @@ class UnitMovementPublic(UnitMovementBase):
     id: uuid.UUID
     idempotency_key: uuid.UUID
     occurred_at: datetime
+
+
+# --- Unified audit view over the two movement ledgers (FR-019) ----------------
+
+
+class AuditEntryPublic(SQLModel):
+    id: uuid.UUID
+    ledger: str  # "UNIT" | "PART"
+    event_type: MovementType
+    occurred_at: datetime
+    actor_user_id: uuid.UUID
+    quantity: int  # 1 for unit movements; part_movement.quantity for parts
+    product_id: uuid.UUID | None  # set for PART; None for UNIT
+    unit_id: uuid.UUID | None  # set for UNIT; None for PART
+    sale_id: uuid.UUID | None
+    service_ticket_id: uuid.UUID | None
+    project_pull_id: uuid.UUID | None
+    stock_adjustment_id: uuid.UUID | None
+    notes: str | None
 
 
 # --- Serialized receive (FR-005) request/response -----------------------------
@@ -738,6 +760,16 @@ class Sale(SQLModel, table=True):
 
 
 class SaleLine(SQLModel, table=True):
+    __table_args__ = (
+        CheckConstraint(
+            "unit_cost_thb >= 0", name="ck_saleline_unit_cost_nonneg"
+        ),
+        CheckConstraint(
+            "line_kind != 'UNIT' OR unit_id IS NOT NULL",
+            name="ck_saleline_unit_requires_unit_id",
+        ),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     sale_id: uuid.UUID = Field(foreign_key="sale.id", nullable=False, index=True)
     line_kind: SaleLineKind

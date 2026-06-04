@@ -18,6 +18,7 @@ from app.core.state_machine import (
     assert_unit_transition,
 )
 from app.models import (
+    AuditEntryPublic,
     Channel,
     ChannelMarginReport,
     ChannelMarginRow,
@@ -1612,3 +1613,109 @@ def channel_margin_report(
         total_cogs_thb=total_cogs,
         total_margin_thb=total_rev - total_cogs,
     )
+
+
+# --- Audit trail (FR-019) -----------------------------------------------------
+
+
+def list_audit(
+    *,
+    session: Session,
+    event_type: MovementType | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    product_id: uuid.UUID | None = None,
+    unit_id: uuid.UUID | None = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[AuditEntryPublic]:
+    """Unified, chronological (occurred_at DESC) view over the two append-only
+    movement ledgers (unit_movement + part_movement).
+
+    Filter semantics: ``product_id`` only ever matches PART rows and ``unit_id``
+    only ever matches UNIT rows, so supplying one restricts the result to that
+    ledger (supplying both yields nothing, since no row is in both). The shared
+    filters (event_type, [from_date, to_date), actor_user_id) apply to both.
+
+    Implementation: each ledger is queried filtered + ordered DESC and bounded
+    to ``skip + limit`` rows, the two bounded sets are merge-sorted in Python,
+    then sliced — never an unbounded fetch.
+    """
+    bound = skip + limit
+
+    audit_unit = product_id is None
+    audit_part = unit_id is None
+
+    rows: list[AuditEntryPublic] = []
+
+    if audit_unit:
+        u_stmt = select(UnitMovement)
+        if event_type is not None:
+            u_stmt = u_stmt.where(UnitMovement.event_type == event_type)
+        if from_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
+        if unit_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        u_stmt = u_stmt.order_by(
+            col(UnitMovement.occurred_at).desc(), col(UnitMovement.id).desc()
+        ).limit(bound)
+        rows.extend(
+            AuditEntryPublic(
+                id=m.id,
+                ledger="UNIT",
+                event_type=m.event_type,
+                occurred_at=m.occurred_at,
+                actor_user_id=m.actor_user_id,
+                quantity=1,
+                product_id=None,
+                unit_id=m.unit_id,
+                sale_id=m.sale_id,
+                service_ticket_id=m.service_ticket_id,
+                project_pull_id=m.project_pull_id,
+                stock_adjustment_id=m.stock_adjustment_id,
+                notes=m.notes,
+            )
+            for m in session.exec(u_stmt).all()
+        )
+
+    if audit_part:
+        p_stmt = select(PartMovement)
+        if event_type is not None:
+            p_stmt = p_stmt.where(PartMovement.event_type == event_type)
+        if from_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
+        if product_id is not None:
+            p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        p_stmt = p_stmt.order_by(
+            col(PartMovement.occurred_at).desc(), col(PartMovement.id).desc()
+        ).limit(bound)
+        rows.extend(
+            AuditEntryPublic(
+                id=m.id,
+                ledger="PART",
+                event_type=m.event_type,
+                occurred_at=m.occurred_at,
+                actor_user_id=m.actor_user_id,
+                quantity=m.quantity,
+                product_id=m.product_id,
+                unit_id=None,
+                sale_id=m.sale_id,
+                service_ticket_id=m.service_ticket_id,
+                project_pull_id=m.project_pull_id,
+                stock_adjustment_id=m.stock_adjustment_id,
+                notes=m.notes,
+            )
+            for m in session.exec(p_stmt).all()
+        )
+
+    rows.sort(key=lambda e: (e.occurred_at, e.id), reverse=True)
+    return rows[skip : skip + limit]
