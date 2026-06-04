@@ -25,6 +25,8 @@ from app.models import (
     LineState,
     Location,
     MovementType,
+    NotificationPreference,
+    NotificationPreferenceUpdate,
     PartBatch,
     PartMovement,
     PriceChange,
@@ -1263,7 +1265,8 @@ def fulfill_project_pull(
     pull.fulfilled_at = get_datetime_utc()
     pull.fulfilled_by_user_id = actor_user_id
     session.add(pull)
-    # FR-018: notify admin on SHORT pull — wired in Task 2.7.
+    # FR-018: notifying admins on a SHORT pull is a post-commit side effect
+    # triggered in the fulfill route (kept out of this consumption transaction).
     session.commit()
     session.refresh(pull)
     return pull
@@ -1309,6 +1312,52 @@ def cancel_project_pull(
     session.commit()
     session.refresh(pull)
     return pull
+
+
+def list_notification_preferences(
+    *, session: Session, user_id: uuid.UUID
+) -> list[NotificationPreference]:
+    """Return a user's notification preferences (FR-018)."""
+    return list(
+        session.exec(
+            select(NotificationPreference)
+            .where(NotificationPreference.user_id == user_id)
+            .order_by(col(NotificationPreference.id))
+        ).all()
+    )
+
+
+def upsert_notification_preferences(
+    *,
+    session: Session,
+    user_id: uuid.UUID,
+    updates: list[NotificationPreferenceUpdate],
+) -> list[NotificationPreference]:
+    """Insert-or-update each (channel, event_type) opt-in for the user, then
+    return the user's full preference list. Idempotent."""
+    for upd in updates:
+        existing = session.exec(
+            select(NotificationPreference).where(
+                NotificationPreference.user_id == user_id,
+                NotificationPreference.channel == upd.channel,
+                NotificationPreference.event_type == upd.event_type,
+            )
+        ).first()
+        if existing:
+            existing.enabled = upd.enabled
+            existing.updated_at = get_datetime_utc()
+            session.add(existing)
+        else:
+            session.add(
+                NotificationPreference(
+                    user_id=user_id,
+                    channel=upd.channel,
+                    event_type=upd.event_type,
+                    enabled=upd.enabled,
+                )
+            )
+    session.commit()
+    return list_notification_preferences(session=session, user_id=user_id)
 
 
 # Dummy hash to use for timing attack prevention when user is not found

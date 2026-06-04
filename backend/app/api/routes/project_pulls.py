@@ -12,6 +12,7 @@ from app.models import (
     ProjectPullPublic,
     ProjectPullState,
 )
+from app.services import notify
 
 router = APIRouter(prefix="/project-pulls", tags=["project-pulls"])
 
@@ -96,6 +97,11 @@ def fulfill_project_pull(
         fulfill_lines=payload.lines,
         actor_user_id=current_user.id,
     )
+    # FR-018: notify BKK admins on a SHORT settlement. Post-commit, best-effort —
+    # notify swallows send errors so it can never turn a successful fulfill into
+    # a 500.
+    if pull.state == ProjectPullState.SHORT:
+        notify.notify_pull_short(session=session, pull=pull)
     return _to_public(session=session, pull=pull)
 
 

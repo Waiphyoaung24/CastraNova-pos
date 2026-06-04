@@ -100,6 +100,23 @@ class ProjectStatus(str, enum.Enum):
     CLOSED = "CLOSED"
 
 
+class NotificationChannel(str, enum.Enum):
+    LINE = "LINE"
+    VIBER = "VIBER"
+
+
+class NotificationEvent(str, enum.Enum):
+    LOW_STOCK = "LOW_STOCK"
+    OVERRIDE_PENDING = "OVERRIDE_PENDING"
+    PULL_FULFILLED = "PULL_FULFILLED"
+    PULL_SHORT = "PULL_SHORT"
+
+
+class NotificationStatus(str, enum.Enum):
+    SENT = "SENT"
+    FAILED = "FAILED"
+
+
 # Shared properties
 class UserBase(SQLModel):
     email: EmailStr = Field(unique=True, index=True, max_length=255)
@@ -140,6 +157,10 @@ class UpdatePassword(SQLModel):
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     hashed_password: str
+    # Messaging platform recipient IDs (populated at deployment enrollment,
+    # Task 5.4). Table-only — never exposed via the user API (UserBase/Public).
+    line_user_id: str | None = Field(default=None, max_length=128)
+    viber_user_id: str | None = Field(default=None, max_length=128)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -927,6 +948,75 @@ class ProjectPullPublic(SQLModel):
     cancelled_at: datetime | None
     cancelled_by_user_id: uuid.UUID | None
     lines: list[ProjectPullLinePublic]
+
+
+# --- Notifications (FR-018; M007/M019) ----------------------------------------
+
+
+class NotificationPreference(SQLModel, table=True):
+    # Per-user M2M opt-in for a (channel, event) pair. UNIQUE keeps one row per
+    # (user, channel, event) so the upsert is deterministic.
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "channel",
+            "event_type",
+            name="uq_notification_preference_user_channel_event",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, index=True)
+    channel: NotificationChannel
+    event_type: NotificationEvent
+    enabled: bool = Field(default=True)
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class NotificationLog(SQLModel, table=True):
+    # Append-only delivery record (REVOKE UPDATE/DELETE lands in M021/Task 2.10).
+    # Index (status, created_at) drives the weekly FAILED-row admin review.
+    __table_args__ = (
+        Index(
+            "ix_notification_log_status_created", "status", "created_at"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    channel: NotificationChannel
+    event_type: NotificationEvent
+    target_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    payload: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
+    status: NotificationStatus
+    attempts: int
+    last_error: str | None = Field(default=None, max_length=1024)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+
+
+class NotificationPreferencePublic(SQLModel):
+    id: uuid.UUID
+    channel: NotificationChannel
+    event_type: NotificationEvent
+    enabled: bool
+
+
+class NotificationPreferenceUpdate(SQLModel):
+    channel: NotificationChannel
+    event_type: NotificationEvent
+    enabled: bool
+
+
+class NotificationPreferencesUpdate(SQLModel):
+    preferences: list[NotificationPreferenceUpdate] = Field(
+        min_length=1, max_length=100
+    )
 
 
 # Generic message

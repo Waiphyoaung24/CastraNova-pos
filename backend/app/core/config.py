@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: EmailStr | None = None
     EMAILS_FROM_NAME: str | None = None
 
+    # Outbound push notification tokens (FR-018). None in dev/test; the LINE +
+    # Viber clients are mocked in tests. Never log these.
+    LINE_CHANNEL_ACCESS_TOKEN: str | None = None
+    VIBER_AUTH_TOKEN: str | None = None
+
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:
         if not self.EMAILS_FROM_NAME:

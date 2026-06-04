@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     customers,
     login,
+    notifications,
     private,
     products,
     project_pulls,
@@ -28,6 +29,7 @@ api_router.include_router(products.router)
 api_router.include_router(receipts.router)
 api_router.include_router(sales.router)
 api_router.include_router(service_tickets.router)
+api_router.include_router(notifications.router)
 
 
 if settings.ENVIRONMENT == "local":
