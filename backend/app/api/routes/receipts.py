@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_user
-from app.models import ReceiveSerializedRequest, ReceiveSerializedResponse
+from app.models import (
+    PartBatchPublic,
+    ReceiveQuantityRequest,
+    ReceiveSerializedRequest,
+    ReceiveSerializedResponse,
+)
 from app.services.barcode import render_unit_label
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
@@ -26,6 +31,28 @@ def receive_serialized(
         received_by_user_id=current_user.id,
     )
     return ReceiveSerializedResponse(units=units)
+
+
+@router.post("/quantity", response_model=PartBatchPublic)
+def receive_quantity(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: ReceiveQuantityRequest,
+) -> PartBatchPublic:
+    batch = crud.receive_quantity(
+        session=session,
+        product_id=payload.product_id,
+        supplier_id=payload.supplier_id,
+        received_qty=payload.received_qty,
+        purchase_cost_thb=payload.purchase_cost_thb,
+        idempotency_key=payload.idempotency_key,
+        received_by_user_id=current_user.id,
+        supplier_batch_ref=payload.supplier_batch_ref,
+        expected_qty=payload.expected_qty,
+        note=payload.note,
+    )
+    return PartBatchPublic.model_validate(batch)
 
 
 @router.get(

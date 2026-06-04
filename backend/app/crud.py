@@ -1,9 +1,12 @@
 import uuid
 from collections.abc import Callable
+from datetime import date
 from decimal import Decimal
 from typing import Any, TypeVar
 
 from fastapi import HTTPException
+from sqlalchemy import func
+from sqlalchemy import select as sa_select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, col, select
 from sqlmodel.sql.expression import SelectOfScalar
@@ -16,6 +19,8 @@ from app.models import (
     CustomerUpdate,
     Location,
     MovementType,
+    PartBatch,
+    PartMovement,
     PriceChange,
     Product,
     ProductCreate,
@@ -31,6 +36,7 @@ from app.models import (
     Supplier,
     SupplierCreate,
     SupplierUpdate,
+    TrackingMode,
     Unit,
     UnitMovement,
     UnitState,
@@ -389,6 +395,135 @@ def receive_serialized(
     for unit in units:
         session.refresh(unit)
     return units
+
+
+# --- QUANTITY receive + FIFO batch numbering (FR-005/FR-006, §6.4) ------------
+
+
+def next_batch_no(
+    *, session: Session, sku: str, today: date, adj: bool = False
+) -> str:
+    """Allocate the next ``YYYYMMDD-{SKU}-[ADJ-]###`` suffix for a SKU on a day.
+
+    The ``MAX(suffix) + 1`` read runs under a transaction-scoped advisory lock
+    keyed on ``(date, SKU)`` so two staff receiving the same SKU on the same day
+    get sequential suffixes with no collision (S8, §6.4). The lock releases
+    automatically at COMMIT/ROLLBACK; ``UNIQUE(product_id, batch_no)`` is the
+    backstop. Plain and ADJ batches keep independent sequences."""
+    yyyymmdd = today.strftime("%Y%m%d")
+    # transaction-scoped advisory lock on (date, SKU); released at COMMIT/ROLLBACK
+    session.execute(sa_select(func.pg_advisory_xact_lock(func.hashtext(f"{yyyymmdd}-{sku}"))))
+    prefix = f"{yyyymmdd}-{sku}-{'ADJ-' if adj else ''}"
+    last = session.exec(
+        select(PartBatch.batch_no)
+        .where(col(PartBatch.batch_no).like(f"{prefix}%"), PartBatch.is_adjustment == adj)
+        .order_by(col(PartBatch.batch_no).desc())
+    ).first()
+    suffix = (int(last.rsplit("-", 1)[1]) if last else 0) + 1
+    return f"{prefix}{suffix:03d}"
+
+
+def _discrepancy_note(
+    *, expected_qty: int | None, received_qty: int, note: str | None
+) -> str | None:
+    """Compose the FR-006 confirmation note (expected vs actual) + staff note."""
+    parts: list[str] = []
+    if expected_qty is not None and expected_qty != received_qty:
+        parts.append(f"Discrepancy: expected {expected_qty}, received {received_qty}.")
+    if note:
+        parts.append(note)
+    return " ".join(parts) if parts else None
+
+
+def _batch_for_receive_key(
+    *, session: Session, idempotency_key: uuid.UUID
+) -> PartBatch | None:
+    """The batch created by a prior receive with this key (via its RECEIVED
+    movement's part_batch_id), or None if this key has not been received yet."""
+    prior = session.exec(
+        select(PartMovement).where(PartMovement.idempotency_key == idempotency_key)
+    ).first()
+    if prior is None or prior.part_batch_id is None:
+        return None
+    return session.get(PartBatch, prior.part_batch_id)
+
+
+def receive_quantity(
+    *,
+    session: Session,
+    product_id: uuid.UUID,
+    supplier_id: uuid.UUID,
+    received_qty: int,
+    purchase_cost_thb: Decimal,
+    idempotency_key: uuid.UUID,
+    received_by_user_id: uuid.UUID,
+    supplier_batch_ref: str | None = None,
+    expected_qty: int | None = None,
+    note: str | None = None,
+) -> PartBatch:
+    """Receive a QUANTITY batch: one part_batch (``remaining_qty == received_qty``)
+    + one RECEIVED part_movement, in one transaction. Idempotent per request —
+    replaying the same idempotency_key returns the existing batch without
+    inserting duplicates (FR-005, S6). When ``expected_qty`` differs from actual,
+    the FR-006 confirmation note is recorded on the movement (no manifest entity,
+    §11)."""
+    replay = _batch_for_receive_key(session=session, idempotency_key=idempotency_key)
+    if replay is not None:
+        return replay
+
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.tracking_mode != TrackingMode.QUANTITY:
+        raise HTTPException(
+            status_code=400, detail="Product is not QUANTITY-tracked"
+        )
+    if not session.get(Supplier, supplier_id):
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
+    if not ygn:
+        raise HTTPException(status_code=500, detail="YGN_WH location not seeded")
+
+    batch = PartBatch(
+        product_id=product_id,
+        batch_no=next_batch_no(session=session, sku=product.sku, today=date.today()),
+        supplier_id=supplier_id,
+        supplier_batch_ref=supplier_batch_ref,
+        received_qty=received_qty,
+        remaining_qty=received_qty,
+        purchase_cost_thb=purchase_cost_thb,
+        received_by_user_id=received_by_user_id,
+    )
+    session.add(batch)
+    session.flush()  # assign the batch row before the movement FK references it
+    session.add(
+        PartMovement(
+            product_id=product_id,
+            event_type=MovementType.RECEIVED,
+            quantity=received_qty,
+            part_batch_id=batch.id,
+            from_location_id=None,
+            to_location_id=ygn.id,
+            actor_user_id=received_by_user_id,
+            idempotency_key=idempotency_key,
+            notes=_discrepancy_note(
+                expected_qty=expected_qty, received_qty=received_qty, note=note
+            ),
+        )
+    )
+    try:
+        session.commit()
+    except IntegrityError:
+        # Concurrent replay won the idempotency race — return its batch.
+        session.rollback()
+        replay = _batch_for_receive_key(
+            session=session, idempotency_key=idempotency_key
+        )
+        if replay is None:
+            raise
+        return replay
+    session.refresh(batch)
+    return batch
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------

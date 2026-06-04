@@ -49,6 +49,20 @@ export type NewPassword = {
     new_password: string;
 };
 
+export type PartBatchPublic = {
+    product_id: string;
+    batch_no: string;
+    supplier_id: string;
+    supplier_batch_ref?: (string | null);
+    received_qty: number;
+    remaining_qty: number;
+    purchase_cost_thb: string;
+    is_adjustment?: boolean;
+    id: string;
+    received_by_user_id: string;
+    received_at?: (string | null);
+};
+
 export type PriceChangePublic = {
     product_id: string;
     field: string;
@@ -148,6 +162,17 @@ export type ProjectUpdate = {
 export type ReceivePiece = {
     supplier_serial: string;
     purchase_cost_thb: (number | string);
+};
+
+export type ReceiveQuantityRequest = {
+    product_id: string;
+    supplier_id: string;
+    received_qty: number;
+    purchase_cost_thb: (number | string);
+    supplier_batch_ref?: (string | null);
+    expected_qty?: (number | null);
+    note?: (string | null);
+    idempotency_key: string;
 };
 
 export type ReceiveSerializedRequest = {
@@ -400,6 +425,12 @@ export type ReceiptsReceiveSerializedData = {
 };
 
 export type ReceiptsReceiveSerializedResponse = (ReceiveSerializedResponse);
+
+export type ReceiptsReceiveQuantityData = {
+    requestBody: ReceiveQuantityRequest;
+};
+
+export type ReceiptsReceiveQuantityResponse = (PartBatchPublic);
 
 export type ReceiptsReadUnitLabelData = {
     unitId: string;

@@ -5,7 +5,16 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import EmailStr
-from sqlalchemy import Column, DateTime, Index, Numeric, UniqueConstraint, func, text
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    Numeric,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -482,6 +491,129 @@ class ReceiveSerializedRequest(SQLModel):
 
 class ReceiveSerializedResponse(SQLModel):
     units: list[UnitPublic]
+
+
+# --- Part batch (QUANTITY FIFO stock; M009) -----------------------------------
+
+
+class PartBatchBase(SQLModel):
+    # No index=True: the composite (product_id, remaining_qty) index below already
+    # covers product_id-prefix lookups, so a standalone B-tree would be redundant.
+    product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
+    batch_no: str = Field(max_length=128)  # YYYYMMDD-{SKU}-[ADJ-]###
+    supplier_id: uuid.UUID = Field(foreign_key="supplier.id", nullable=False)
+    supplier_batch_ref: str | None = Field(default=None, max_length=128)
+    received_qty: int
+    remaining_qty: int
+    purchase_cost_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    is_adjustment: bool = Field(default=False)
+
+
+class PartBatch(PartBatchBase, table=True):
+    # UNIQUE(product_id, batch_no) — race-safe sequence backstop (§6.4); index
+    # (product_id, remaining_qty) drives FIFO candidate scans (§6.3); CHECK keeps
+    # remaining_qty within [0, received_qty] at the DB level (§4.6 no-negative).
+    __table_args__ = (
+        UniqueConstraint("product_id", "batch_no", name="uq_part_batch_product_no"),
+        Index("ix_part_batch_product_remaining", "product_id", "remaining_qty"),
+        CheckConstraint(
+            "received_qty > 0 AND remaining_qty >= 0 "
+            "AND remaining_qty <= received_qty",
+            name="ck_part_batch_qty_bounds",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    received_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False
+    )
+    # received_at doubles as the creation timestamp and the FIFO sort key.
+    received_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class PartBatchPublic(PartBatchBase):
+    id: uuid.UUID
+    received_by_user_id: uuid.UUID
+    received_at: datetime | None = None
+
+
+# --- Part movement (append-only QUANTITY ledger; M016, spec §4.4) -------------
+
+
+class PartMovementBase(SQLModel):
+    product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
+    event_type: MovementType
+    quantity: int  # always positive; direction implied by event_type + locations
+    # Set for RECEIVED (the batch this movement created) — the QUANTITY parallel
+    # to unit_movement.unit_id. NULL for consumption events that span batches;
+    # those carry their per-batch links on cost_line instead (M017).
+    part_batch_id: uuid.UUID | None = Field(
+        default=None, foreign_key="partbatch.id"
+    )
+    from_location_id: uuid.UUID | None = Field(
+        default=None, foreign_key="location.id"
+    )
+    to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
+    # FK targets (service_ticket/project_pull/stock_adjustment) land in later
+    # migrations; these stay bare-nullable until their tables exist (mirrors
+    # unit_movement). sale_id's FK target already exists (M010).
+    sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
+    service_ticket_id: uuid.UUID | None = Field(default=None)
+    project_pull_id: uuid.UUID | None = Field(default=None)
+    stock_adjustment_id: uuid.UUID | None = Field(default=None)
+    actor_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
+    notes: str | None = Field(default=None, max_length=512)
+
+
+class PartMovement(PartMovementBase, table=True):
+    # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
+    # index (product_id, occurred_at DESC) for SKU history (FR-015);
+    # CHECK(quantity > 0) — direction is never encoded in the sign (§4.3).
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key", name="uq_part_movement_idempotency_key"
+        ),
+        Index(
+            "ix_part_movement_product_occurred",
+            "product_id",
+            text("occurred_at DESC"),
+        ),
+        CheckConstraint("quantity > 0", name="ck_part_movement_qty_positive"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    idempotency_key: uuid.UUID
+    occurred_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+
+
+# --- QUANTITY receive (FR-005/FR-006) request/response ------------------------
+
+
+class ReceiveQuantityRequest(SQLModel):
+    product_id: uuid.UUID
+    supplier_id: uuid.UUID
+    # Positive and bounded to a sane carton size; 0 is rejected (CHECK + here).
+    received_qty: int = Field(gt=0, le=1_000_000)
+    purchase_cost_thb: Decimal = Field(ge=0, le=9999999999.99)
+    supplier_batch_ref: str | None = Field(default=None, max_length=128)
+    # FR-006 discrepancy confirmation: the expected count is a transient
+    # receive-form field; when it differs from actual the staff note is recorded
+    # on the movement (no manifest entity is stored, §11).
+    expected_qty: int | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=400)
+    idempotency_key: uuid.UUID
 
 
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------

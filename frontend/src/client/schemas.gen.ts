@@ -283,6 +283,81 @@ export const NewPasswordSchema = {
     title: 'NewPassword'
 } as const;
 
+export const PartBatchPublicSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        batch_no: {
+            type: 'string',
+            maxLength: 128,
+            title: 'Batch No'
+        },
+        supplier_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Supplier Id'
+        },
+        supplier_batch_ref: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 128
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier Batch Ref'
+        },
+        received_qty: {
+            type: 'integer',
+            title: 'Received Qty'
+        },
+        remaining_qty: {
+            type: 'integer',
+            title: 'Remaining Qty'
+        },
+        purchase_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Purchase Cost Thb'
+        },
+        is_adjustment: {
+            type: 'boolean',
+            title: 'Is Adjustment',
+            default: false
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        received_by_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Received By User Id'
+        },
+        received_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received At'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'batch_no', 'supplier_id', 'received_qty', 'remaining_qty', 'purchase_cost_thb', 'id', 'received_by_user_id'],
+    title: 'PartBatchPublic'
+} as const;
+
 export const PriceChangePublicSchema = {
     properties: {
         product_id: {
@@ -931,6 +1006,85 @@ export const ReceivePieceSchema = {
     type: 'object',
     required: ['supplier_serial', 'purchase_cost_thb'],
     title: 'ReceivePiece'
+} as const;
+
+export const ReceiveQuantityRequestSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        supplier_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Supplier Id'
+        },
+        received_qty: {
+            type: 'integer',
+            maximum: 1000000,
+            exclusiveMinimum: 0,
+            title: 'Received Qty'
+        },
+        purchase_cost_thb: {
+            anyOf: [
+                {
+                    type: 'number',
+                    maximum: 9999999999.99,
+                    minimum: 0
+                },
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                }
+            ],
+            title: 'Purchase Cost Thb'
+        },
+        supplier_batch_ref: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 128
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier Batch Ref'
+        },
+        expected_qty: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expected Qty'
+        },
+        note: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 400
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Note'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'supplier_id', 'received_qty', 'purchase_cost_thb', 'idempotency_key'],
+    title: 'ReceiveQuantityRequest'
 } as const;
 
 export const ReceiveSerializedRequestSchema = {
