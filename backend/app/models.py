@@ -718,7 +718,8 @@ class SaleLineInput(SQLModel):
     line_kind: SaleLineKind
     castranova_barcode: str | None = None  # UNIT lines
     sku: str | None = None  # PART lines (Part 2)
-    quantity: int = 1
+    # Bounded like ServiceTicketPartCreate; UNIT lines are always treated as 1.
+    quantity: int = Field(default=1, gt=0, le=1_000_000)
 
 
 class SaleCreateRequest(SQLModel):
@@ -761,6 +762,13 @@ class ServiceTicket(SQLModel, table=True):
 
 class ServiceTicketPart(SQLModel, table=True):
     # Mutable until ticket close, then immutable (consumption rows written then).
+    # CHECK(quantity > 0) mirrors the other consuming-quantity tables.
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0", name="ck_service_ticket_part_qty_positive"
+        ),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     service_ticket_id: uuid.UUID = Field(
         foreign_key="serviceticket.id", nullable=False, index=True
@@ -792,7 +800,7 @@ class ServiceTicketPublic(SQLModel):
 
 class ServiceTicketCreate(SQLModel):
     customer_id: uuid.UUID
-    issue: str = Field(max_length=512)
+    issue: str = Field(min_length=1, max_length=512)
     notes: str | None = Field(default=None, max_length=512)
     idempotency_key: uuid.UUID
 

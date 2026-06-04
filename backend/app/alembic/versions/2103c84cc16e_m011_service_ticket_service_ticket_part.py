@@ -41,6 +41,7 @@ def upgrade():
     sa.Column('quantity', sa.Integer(), nullable=False),
     sa.Column('unit_price_thb', sa.Numeric(precision=12, scale=2), nullable=False),
     sa.Column('pricing_override_request_id', sa.Uuid(), nullable=True),
+    sa.CheckConstraint('quantity > 0', name='ck_service_ticket_part_qty_positive'),
     sa.ForeignKeyConstraint(['product_id'], ['product.id'], ),
     sa.ForeignKeyConstraint(['service_ticket_id'], ['serviceticket.id'], ),
     sa.PrimaryKeyConstraint('id')

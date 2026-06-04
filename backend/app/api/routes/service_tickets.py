@@ -1,7 +1,6 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import select
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_user
@@ -9,7 +8,6 @@ from app.models import (
     ServiceTicket,
     ServiceTicketClose,
     ServiceTicketCreate,
-    ServiceTicketPart,
     ServiceTicketPartCreate,
     ServiceTicketPartPublic,
     ServiceTicketPublic,
@@ -19,11 +17,7 @@ router = APIRouter(prefix="/service-tickets", tags=["service-tickets"])
 
 
 def _to_public(*, session: SessionDep, ticket: ServiceTicket) -> ServiceTicketPublic:
-    parts = session.exec(
-        select(ServiceTicketPart).where(
-            ServiceTicketPart.service_ticket_id == ticket.id
-        )
-    ).all()
+    parts = crud.list_service_ticket_parts(session=session, ticket_id=ticket.id)
     return ServiceTicketPublic(
         id=ticket.id,
         customer_id=ticket.customer_id,

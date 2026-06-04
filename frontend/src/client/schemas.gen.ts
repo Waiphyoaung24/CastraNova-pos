@@ -1190,6 +1190,8 @@ export const SaleLineInputSchema = {
         },
         quantity: {
             type: 'integer',
+            maximum: 1000000,
+            exclusiveMinimum: 0,
             title: 'Quantity',
             default: 1
         }
@@ -1328,6 +1330,7 @@ export const ServiceTicketCreateSchema = {
         issue: {
             type: 'string',
             maxLength: 512,
+            minLength: 1,
             title: 'Issue'
         },
         notes: {

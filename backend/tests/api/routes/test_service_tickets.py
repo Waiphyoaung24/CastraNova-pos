@@ -230,6 +230,46 @@ def test_close_insufficient_stock_409_keeps_ticket_open(
     ).all()  # no consumption written (the RECEIVED seed movements remain)
 
 
+def test_add_part_price_override(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
+) -> None:
+    customer_id, sku, _ = seed_ticket_ctx
+    ticket = _open(client, staff_token_headers, customer_id)
+    r = client.post(
+        f"{PREFIX}/service-tickets/{ticket['id']}/parts",
+        headers=staff_token_headers,
+        json={"sku": sku, "quantity": 1, "unit_price_thb": "35.00"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["unit_price_thb"] == "35.00"  # override, not repair_price 20.00
+
+
+def test_close_ticket_with_no_parts_succeeds(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    db: Session,
+    seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
+) -> None:
+    customer_id, _, product_id = seed_ticket_ctx
+    ticket = _open(client, staff_token_headers, customer_id)
+    r = client.post(
+        f"{PREFIX}/service-tickets/{ticket['id']}/close",
+        headers=staff_token_headers,
+        json={},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["closed_at"] is not None
+    db.expire_all()
+    assert not db.exec(
+        select(PartMovement).where(
+            PartMovement.product_id == product_id,
+            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+        )
+    ).all()
+
+
 def test_close_is_idempotent(
     client: TestClient,
     staff_token_headers: dict[str, str],

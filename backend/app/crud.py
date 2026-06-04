@@ -647,6 +647,7 @@ def create_sale(
     # QUANTITY-tracked product.
     barcodes: list[str] = []
     part_reqs: list[tuple[Product, int]] = []
+    part_skus: set[str] = set()
     for line in lines:
         if line.line_kind == SaleLineKind.UNIT:
             if not line.castranova_barcode:
@@ -657,6 +658,12 @@ def create_sale(
         else:  # PART
             if not line.sku:
                 raise HTTPException(status_code=422, detail="PART line requires sku")
+            if line.sku in part_skus:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Duplicate PART line for SKU {line.sku}; merge into one",
+                )
+            part_skus.add(line.sku)
             if line.quantity <= 0:
                 raise HTTPException(
                     status_code=422, detail="PART line quantity must be positive"
@@ -818,6 +825,18 @@ def get_service_ticket(
     return session.get(ServiceTicket, ticket_id)
 
 
+def list_service_ticket_parts(
+    *, session: Session, ticket_id: uuid.UUID
+) -> list[ServiceTicketPart]:
+    return list(
+        session.exec(
+            select(ServiceTicketPart).where(
+                ServiceTicketPart.service_ticket_id == ticket_id
+            )
+        ).all()
+    )
+
+
 def open_service_ticket(
     *,
     session: Session,
@@ -828,7 +847,15 @@ def open_service_ticket(
     notes: str | None = None,
 ) -> ServiceTicket:
     """Open a maintenance ticket. Idempotent on idempotency_key — replaying an
-    offline ticket-open returns the existing ticket (FR-008, S6)."""
+    offline ticket-open returns the existing ticket without re-validating (FR-008,
+    S6). Customer existence is only checked on a genuine create."""
+    existing = session.exec(
+        select(ServiceTicket).where(
+            ServiceTicket.idempotency_key == idempotency_key
+        )
+    ).first()
+    if existing is not None:
+        return existing
     if not session.get(Customer, customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
     ticket, _ = get_or_replay(
@@ -857,8 +884,14 @@ def add_service_ticket_part(
 ) -> ServiceTicketPart:
     """Add a part line to an open ticket. Price defaults to the product's
     repair_price_thb unless an override is supplied (FR-008 / Flow C.3). Rejected
-    once the ticket is closed (its parts are immutable then)."""
-    ticket = session.get(ServiceTicket, ticket_id)
+    once the ticket is closed (its parts are immutable then). The ticket row is
+    locked FOR UPDATE so this serializes against a concurrent close — a part can
+    never be inserted into a ticket that close has already consumed."""
+    ticket = session.exec(
+        select(ServiceTicket)
+        .where(ServiceTicket.id == ticket_id)
+        .with_for_update()
+    ).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Service ticket not found")
     if ticket.closed_at is not None:
