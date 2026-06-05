@@ -511,9 +511,9 @@ class UnitMovementBase(SQLModel):
         default=None, foreign_key="location.id"
     )
     to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
-    # FK targets (service_ticket/project_pull/stock_adjustment) are introduced
+    # FK targets (service_ticket/stock_adjustment) are introduced
     # in later migrations; those columns stay bare-nullable and their FK
-    # constraints are wired when each table lands (M013, M012, M014).
+    # constraints are wired when each table lands (M013, M014).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
     service_ticket_id: uuid.UUID | None = Field(default=None)
     project_pull_id: uuid.UUID | None = Field(
@@ -672,7 +672,7 @@ class PartMovementBase(SQLModel):
         default=None, foreign_key="location.id"
     )
     to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
-    # FK targets (service_ticket/project_pull/stock_adjustment) land in later
+    # FK targets (service_ticket/stock_adjustment) land in later
     # migrations; these stay bare-nullable until their tables exist (mirrors
     # unit_movement). sale_id's FK target already exists (M010).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
