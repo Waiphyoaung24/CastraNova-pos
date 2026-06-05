@@ -105,6 +105,17 @@ class ProjectStatus(str, enum.Enum):
     CLOSED = "CLOSED"
 
 
+class SyncReviewReason(str, enum.Enum):
+    STALE = "STALE"  # offline mutation older than the 7-day queue cap
+    CONFLICT = "CONFLICT"  # lost a write-conflict (409) on replay
+
+
+class SyncReviewState(str, enum.Enum):
+    PENDING = "PENDING"
+    RESOLVED = "RESOLVED"
+    DISCARDED = "DISCARDED"
+
+
 class NotificationChannel(str, enum.Enum):
     LINE = "LINE"
     VIBER = "VIBER"
@@ -962,6 +973,66 @@ class StockAdjustmentPublic(SQLModel):
     reason: str
     created_by_user_id: uuid.UUID
     created_at: datetime
+
+
+class SyncReviewItem(SQLModel, table=True):
+    # Captures offline mutations that replayed STALE (>7-day cap) or lost a
+    # write-CONFLICT (409 on replay), for admin triage (M020). Thin ingest,
+    # status-only triage; ingest is idempotent via the UNIQUE idempotency_key.
+    __tablename__ = "syncreviewitem"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key", name="uq_syncreviewitem_idempotency_key"
+        ),
+        Index("ix_syncreviewitem_state_created", "state", "created_at"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # Uniqueness via __table_args__ (not a plain index).
+    idempotency_key: uuid.UUID = Field(index=False)
+    mutation_kind: str = Field(min_length=1, max_length=64)
+    payload: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
+    reason: SyncReviewReason
+    state: SyncReviewState = Field(default=SyncReviewState.PENDING)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    resolved_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id"
+    )
+    resolved_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
+    resolution_note: str | None = Field(default=None, max_length=500)
+
+
+class SyncReviewItemCreate(SQLModel):
+    idempotency_key: uuid.UUID
+    mutation_kind: str = Field(min_length=1, max_length=64)
+    payload: dict[str, Any]
+    reason: SyncReviewReason
+
+
+class SyncReviewItemPublic(SQLModel):
+    id: uuid.UUID
+    idempotency_key: uuid.UUID
+    mutation_kind: str
+    payload: dict[str, Any]
+    reason: SyncReviewReason
+    state: SyncReviewState
+    created_at: datetime
+    resolved_by_user_id: uuid.UUID | None
+    resolved_at: datetime | None
+    resolution_note: str | None
+
+
+class SyncReviewResolve(SQLModel):
+    # state must be RESOLVED or DISCARDED (validated in crud).
+    state: SyncReviewState
+    note: str | None = Field(default=None, max_length=500)
 
 
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------
