@@ -75,6 +75,9 @@ from app.models import (
     Supplier,
     SupplierCreate,
     SupplierUpdate,
+    SyncReviewItem,
+    SyncReviewItemCreate,
+    SyncReviewState,
     SystemSetting,
     TrackingMode,
     Unit,
@@ -1408,6 +1411,81 @@ def create_stock_adjustment(
     return _commit_stock_adjustment(
         session=session, adj=adj, idempotency_key=adj_in.idempotency_key
     )
+
+
+# --- Sync review queue (M020) -------------------------------------------------
+
+
+def create_sync_review_item(
+    *, session: Session, data: SyncReviewItemCreate
+) -> SyncReviewItem:
+    """Ingest a STALE/CONFLICT offline mutation into the admin review queue.
+
+    Idempotent by ``idempotency_key``: a re-POST of the same offline item
+    returns the existing row (UNIQUE constraint + IntegrityError rollback path
+    via ``get_or_replay``), never a duplicate."""
+    item, _ = get_or_replay(
+        session=session,
+        statement=select(SyncReviewItem).where(
+            col(SyncReviewItem.idempotency_key) == data.idempotency_key
+        ),
+        build=lambda: SyncReviewItem(
+            idempotency_key=data.idempotency_key,
+            mutation_kind=data.mutation_kind,
+            payload=data.payload,
+            reason=data.reason,
+        ),
+    )
+    return item
+
+
+def get_sync_review_item(
+    *, session: Session, item_id: uuid.UUID
+) -> SyncReviewItem | None:
+    return session.get(SyncReviewItem, item_id)
+
+
+def list_sync_review_items(
+    *, session: Session, state: SyncReviewState | None = None
+) -> list[SyncReviewItem]:
+    stmt = select(SyncReviewItem)
+    if state is not None:
+        stmt = stmt.where(col(SyncReviewItem.state) == state)
+    stmt = stmt.order_by(col(SyncReviewItem.created_at))
+    return list(session.exec(stmt).all())
+
+
+def resolve_sync_review_item(
+    *,
+    session: Session,
+    item_id: uuid.UUID,
+    admin_id: uuid.UUID,
+    new_state: SyncReviewState,
+    note: str | None,
+) -> SyncReviewItem:
+    """Status-only triage: mark RESOLVED or DISCARDED. Does NOT re-run the held
+    mutation. 422 if target is not a terminal state; 404 if missing; 409 if the
+    item was already triaged (not PENDING)."""
+    if new_state not in (SyncReviewState.RESOLVED, SyncReviewState.DISCARDED):
+        raise HTTPException(
+            status_code=422, detail="state must be RESOLVED or DISCARDED"
+        )
+    item = session.get(SyncReviewItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Sync-review item not found")
+    if item.state != SyncReviewState.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only PENDING items can be resolved (current: {item.state.value})",
+        )
+    item.state = new_state
+    item.resolved_by_user_id = admin_id
+    item.resolved_at = get_datetime_utc()
+    item.resolution_note = note
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------
