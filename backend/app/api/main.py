@@ -19,6 +19,7 @@ from app.api.routes import (
     service_tickets,
     stock_adjustments,
     suppliers,
+    sync_review,
     users,
     utils,
 )
@@ -44,6 +45,7 @@ api_router.include_router(pricing_overrides.router)
 api_router.include_router(stock_adjustments.router)
 api_router.include_router(search.router)
 api_router.include_router(dashboards.router)
+api_router.include_router(sync_review.router)
 
 
 if settings.ENVIRONMENT == "local":

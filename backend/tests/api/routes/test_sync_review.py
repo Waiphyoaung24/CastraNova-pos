@@ -121,3 +121,89 @@ def test_list_filters_by_state(db: Session) -> None:
     pending = crud.list_sync_review_items(session=db, state=SyncReviewState.PENDING)
     ids = {i.id for i in pending}
     assert pending_id in ids and discarded_id not in ids
+
+
+def _payload() -> dict:
+    return {
+        "idempotency_key": str(uuid.uuid4()),
+        "mutation_kind": "sale",
+        "payload": {"total_thb": "1200.00"},
+        "reason": "STALE",
+    }
+
+
+def test_ingest_requires_auth(client) -> None:
+    r = client.post(f"{settings.API_V1_STR}/sync-review", json=_payload())
+    assert r.status_code == 401
+
+
+def test_staff_can_ingest(client, staff_token_headers) -> None:
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(),
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "PENDING" and body["reason"] == "STALE"
+
+
+def test_ingest_is_idempotent_over_http(client, staff_token_headers) -> None:
+    body = _payload()
+    r1 = client.post(f"{settings.API_V1_STR}/sync-review", json=body, headers=staff_token_headers)
+    r2 = client.post(f"{settings.API_V1_STR}/sync-review", json=body, headers=staff_token_headers)
+    assert r1.json()["id"] == r2.json()["id"]
+
+
+def test_list_is_admin_only(client, staff_token_headers) -> None:
+    r = client.get(
+        f"{settings.API_V1_STR}/sync-review?state=PENDING",
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 403
+
+
+def test_admin_lists_pending(client, superuser_token_headers, staff_token_headers) -> None:
+    client.post(f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=staff_token_headers)
+    r = client.get(
+        f"{settings.API_V1_STR}/sync-review?state=PENDING",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    assert any(i["state"] == "PENDING" for i in r.json())
+
+
+def test_resolve_is_admin_only(client, staff_token_headers) -> None:
+    created = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=staff_token_headers
+    ).json()
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review/{created['id']}/resolve",
+        json={"state": "RESOLVED", "note": "done"},
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 403
+
+
+def test_admin_resolves_item(client, staff_token_headers, superuser_token_headers) -> None:
+    created = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=staff_token_headers
+    ).json()
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review/{created['id']}/resolve",
+        json={"state": "DISCARDED", "note": "duplicate"},
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "DISCARDED"
+    assert body["resolved_by_user_id"] is not None
+    assert body["resolved_at"] is not None
+
+
+def test_resolve_404(client, superuser_token_headers) -> None:
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review/{uuid.uuid4()}/resolve",
+        json={"state": "RESOLVED", "note": None},
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 404
