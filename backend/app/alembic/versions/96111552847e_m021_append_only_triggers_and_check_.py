@@ -45,6 +45,7 @@ $$ LANGUAGE plpgsql;
     for table in _LEDGER_TABLES:
         op.execute(
             f"""
+DROP TRIGGER IF EXISTS trg_{table}_append_only ON {table};
 CREATE TRIGGER trg_{table}_append_only
 BEFORE UPDATE OR DELETE ON {table}
 FOR EACH ROW EXECUTE FUNCTION reject_ledger_mutation();

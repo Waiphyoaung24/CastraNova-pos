@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import EmailStr, model_validator
 from sqlalchemy import (
@@ -536,18 +536,18 @@ class UnitMovementPublic(UnitMovementBase):
 
 class AuditEntryPublic(SQLModel):
     id: uuid.UUID
-    ledger: str  # "UNIT" | "PART"
+    ledger: Literal["UNIT", "PART"]
     event_type: MovementType
     occurred_at: datetime
     actor_user_id: uuid.UUID
     quantity: int  # 1 for unit movements; part_movement.quantity for parts
-    product_id: uuid.UUID | None  # set for PART; None for UNIT
-    unit_id: uuid.UUID | None  # set for UNIT; None for PART
-    sale_id: uuid.UUID | None
-    service_ticket_id: uuid.UUID | None
-    project_pull_id: uuid.UUID | None
-    stock_adjustment_id: uuid.UUID | None
-    notes: str | None
+    product_id: uuid.UUID | None = None  # set for PART; None for UNIT
+    unit_id: uuid.UUID | None = None  # set for UNIT; None for PART
+    sale_id: uuid.UUID | None = None
+    service_ticket_id: uuid.UUID | None = None
+    project_pull_id: uuid.UUID | None = None
+    stock_adjustment_id: uuid.UUID | None = None
+    notes: str | None = None
 
 
 # --- Serialized receive (FR-005) request/response -----------------------------
@@ -1043,7 +1043,8 @@ class NotificationPreference(SQLModel, table=True):
 
 
 class NotificationLog(SQLModel, table=True):
-    # Append-only delivery record (REVOKE UPDATE/DELETE lands in M021/Task 2.10).
+    # Append-only; enforced by trg_notificationlog_append_only (M021, BEFORE
+    # UPDATE OR DELETE trigger).
     # Index (status, created_at) drives the weekly FAILED-row admin review.
     __table_args__ = (
         Index(

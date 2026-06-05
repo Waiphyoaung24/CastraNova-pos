@@ -3,6 +3,7 @@ and part_movement ledgers (FR-019)."""
 
 import uuid
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -191,6 +192,35 @@ def test_audit_filter_unit_id_returns_only_unit(
         assert row["unit_id"] == str(uid)
         assert row["product_id"] is None
         assert row["quantity"] == 1
+
+
+def test_audit_filter_date_window(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_audit: dict[str, uuid.UUID],
+) -> None:
+    # Seeded movements occur at ~now; scope to the seeded unit to stay robust
+    # against other rows in the session-scoped db.
+    uid = seed_audit["unit_id"]
+    now = datetime.now(tz=timezone.utc)
+    upper = (now + timedelta(hours=1)).isoformat()
+    future = (now + timedelta(hours=2)).isoformat()
+
+    r = client.get(
+        f"{PREFIX}/audit",
+        params={"unit_id": str(uid), "to_date": upper},
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    assert r.json(), "expected seeded rows before the upper bound"
+
+    r = client.get(
+        f"{PREFIX}/audit",
+        params={"unit_id": str(uid), "from_date": future},
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    assert r.json() == []
 
 
 @pytest.mark.usefixtures("seed_audit")

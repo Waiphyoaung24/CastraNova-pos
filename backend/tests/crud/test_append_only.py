@@ -175,13 +175,15 @@ def test_update_rejected_on_ledger(
     db: Session, ledger_ids: dict[str, uuid.UUID], table: str
 ) -> None:
     row_id = ledger_ids[table]
-    with pytest.raises(DBAPIError) as exc:
-        db.execute(
-            text(f"UPDATE {table} SET {_UPDATE_SETS[table]} WHERE id = :id"),
-            {"id": str(row_id)},
-        )
-    db.rollback()
-    assert "append-only" in str(exc.value)
+    try:
+        with pytest.raises(DBAPIError) as exc:
+            db.execute(
+                text(f"UPDATE {table} SET {_UPDATE_SETS[table]} WHERE id = :id"),
+                {"id": str(row_id)},
+            )
+        assert "append-only" in str(exc.value)
+    finally:
+        db.rollback()
 
 
 @pytest.mark.parametrize(
@@ -192,10 +194,14 @@ def test_delete_rejected_on_ledger(
     db: Session, ledger_ids: dict[str, uuid.UUID], table: str
 ) -> None:
     row_id = ledger_ids[table]
-    with pytest.raises(DBAPIError) as exc:
-        db.execute(text(f"DELETE FROM {table} WHERE id = :id"), {"id": str(row_id)})
-    db.rollback()
-    assert "append-only" in str(exc.value)
+    try:
+        with pytest.raises(DBAPIError) as exc:
+            db.execute(
+                text(f"DELETE FROM {table} WHERE id = :id"), {"id": str(row_id)}
+            )
+        assert "append-only" in str(exc.value)
+    finally:
+        db.rollback()
 
 
 def test_select_still_allowed_on_ledger(
@@ -258,9 +264,25 @@ def test_unit_negative_purchase_cost_rejected(db: Session) -> None:
     db.rollback()
 
 
+_SALELINE_COLS = frozenset(
+    {
+        "id",
+        "sale_id",
+        "line_kind",
+        "unit_id",
+        "product_id",
+        "quantity",
+        "unit_price_thb",
+        "unit_cost_thb",
+        "pricing_override_request_id",
+    }
+)
+
+
 def _insert_saleline_raw(db: Session, **cols: object) -> None:
     """Insert a saleline row via raw SQL so model-level validation does not
     pre-empt the DB CHECK we are exercising."""
+    assert set(cols) <= _SALELINE_COLS, f"unexpected cols: {set(cols) - _SALELINE_COLS}"
     keys = ", ".join(cols.keys())
     placeholders = ", ".join(f":{k}" for k in cols)
     db.execute(

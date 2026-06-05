@@ -18,12 +18,22 @@ def list_audit(
     *,
     session: SessionDep,
     event_type: MovementType | None = None,
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
-    actor_user_id: uuid.UUID | None = None,
-    product_id: uuid.UUID | None = None,
-    unit_id: uuid.UUID | None = None,
-    skip: Annotated[int, Query(ge=0)] = 0,
+    from_date: Annotated[
+        datetime | None, Query(description="ISO-8601 lower bound, inclusive")
+    ] = None,
+    to_date: Annotated[
+        datetime | None, Query(description="ISO-8601 upper bound, exclusive")
+    ] = None,
+    actor_user_id: Annotated[
+        uuid.UUID | None, Query(description="Restrict to a single acting user")
+    ] = None,
+    product_id: Annotated[
+        uuid.UUID | None, Query(description="Restrict to PART entries for a product")
+    ] = None,
+    unit_id: Annotated[
+        uuid.UUID | None, Query(description="Restrict to UNIT entries for a unit")
+    ] = None,
+    skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[AuditEntryPublic]:
     """Chronological (occurred_at DESC) audit trail over the append-only
