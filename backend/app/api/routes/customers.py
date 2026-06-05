@@ -3,8 +3,15 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from app import crud
-from app.api.deps import SessionDep, get_admin, get_current_user
-from app.models import CustomerCreate, CustomerPublic, CustomerUpdate
+from app.api.deps import CurrentUser, SessionDep, get_admin, get_current_user
+from app.models import (
+    CustomerCreate,
+    CustomerDashboardAdminPublic,
+    CustomerDashboardStaffPublic,
+    CustomerPublic,
+    CustomerUpdate,
+    UserRole,
+)
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -33,6 +40,21 @@ def create_customer(
     # Staff may create customers inline during a sale (FR-007 + D25).
     # v1 tolerates duplicates from offline inline-create; admin merge is v1.1 (S3).
     return crud.create_customer(session=session, customer_in=customer_in)  # type: ignore[return-value]
+
+
+@router.get(
+    "/{customer_id}/dashboard",
+    response_model=CustomerDashboardAdminPublic | CustomerDashboardStaffPublic,
+)
+def get_customer_dashboard(
+    customer_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> CustomerDashboardAdminPublic | CustomerDashboardStaffPublic:
+    data = crud.get_customer_dashboard(session=session, customer_id=customer_id)
+    if current_user.role == UserRole.BKK_ADMIN:
+        return CustomerDashboardAdminPublic.model_validate(data)
+    return CustomerDashboardStaffPublic.model_validate(data)
 
 
 @router.patch(

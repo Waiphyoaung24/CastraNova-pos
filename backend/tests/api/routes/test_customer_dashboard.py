@@ -83,3 +83,50 @@ def test_customer_dashboard_admin_aggregates_lifetime_sale(
     assert admin.lifetime_sale_revenue_thb == expected_rev
     assert admin.lifetime_sale_cogs_thb == expected_cogs
     assert admin.lifetime_sale_margin_thb == expected_rev - expected_cogs
+
+
+def test_customer_dashboard_staff_has_no_financial_keys(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    customer_id, _, _ = _seed_customer_with_one_sale(client, staff_token_headers, db)
+    r = client.get(
+        f"{PREFIX}/customers/{customer_id}/dashboard", headers=staff_token_headers
+    )
+    assert r.status_code == 200
+    body = r.json()
+    blob = str(body).lower()
+    for forbidden in ("revenue", "cogs", "margin", "budget", "consumed_cost"):
+        assert forbidden not in blob, f"staff dashboard leaked {forbidden}"
+    assert "transactions" in body and "active_projects" in body
+
+
+def test_customer_dashboard_admin_has_financial_keys(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    customer_id, expected_rev, _ = _seed_customer_with_one_sale(
+        client, staff_token_headers, db
+    )
+    r = client.get(
+        f"{PREFIX}/customers/{customer_id}/dashboard",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["lifetime_sale_revenue_thb"] == f"{expected_rev:.2f}"
+    assert "lifetime_sale_cogs_thb" in body
+
+
+def test_customer_dashboard_404(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    r = client.get(
+        f"{PREFIX}/customers/{uuid.uuid4()}/dashboard",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 404
