@@ -20,6 +20,12 @@ export type AuditEntryPublic = {
 
 export type ledger = 'UNIT' | 'PART';
 
+export type BatchDrillRow = {
+    batch_no: string;
+    remaining_qty: number;
+    received_at: string;
+};
+
 export type Body_login_login_access_token = {
     grant_type?: (string | null);
     username: string;
@@ -61,6 +67,27 @@ export type CustomerCreate = {
     contact?: (string | null);
     type?: CustomerType;
     notes?: (string | null);
+};
+
+export type CustomerDashboardAdminPublic = {
+    customer: CustomerPublic;
+    transactions: Array<TransactionSummaryPublic>;
+    active_projects: Array<ProjectSummaryAdminPublic>;
+    closed_projects: Array<ProjectSummaryAdminPublic>;
+    lifetime_sale_revenue_thb: string;
+    lifetime_sale_cogs_thb: string;
+    lifetime_sale_margin_thb: string;
+    lifetime_maintenance_revenue_thb: string;
+    lifetime_maintenance_cogs_thb: string;
+    lifetime_maintenance_margin_thb: string;
+    lifetime_project_cogs_thb: string;
+};
+
+export type CustomerDashboardStaffPublic = {
+    customer: CustomerPublic;
+    transactions: Array<TransactionSummaryPublic>;
+    active_projects: Array<ProjectSummaryStaffPublic>;
+    closed_projects: Array<ProjectSummaryStaffPublic>;
 };
 
 export type CustomerPublic = {
@@ -295,6 +322,18 @@ export type ProjectCreate = {
     budget_thb?: (number | string | null);
 };
 
+export type ProjectDashboardAdminPublic = {
+    project: ProjectPublic;
+    pulls: Array<TransactionSummaryPublic>;
+    budget_thb: (string | null);
+    consumed_cost_thb: string;
+};
+
+export type ProjectDashboardStaffPublic = {
+    project: ProjectStaffPublic;
+    pulls: Array<TransactionSummaryPublic>;
+};
+
 export type ProjectPublic = {
     code: string;
     name: string;
@@ -355,7 +394,33 @@ export type ProjectPullPublic = {
 
 export type ProjectPullState = 'PENDING' | 'FULFILLED' | 'SHORT' | 'CANCELLED';
 
+export type ProjectStaffPublic = {
+    id: string;
+    code: string;
+    name: string;
+    customer_id: string;
+    start_date: (string | null);
+    end_date: (string | null);
+    status: ProjectStatus;
+};
+
 export type ProjectStatus = 'ACTIVE' | 'CLOSED';
+
+export type ProjectSummaryAdminPublic = {
+    id: string;
+    code: string;
+    name: string;
+    status: ProjectStatus;
+    budget_thb: (string | null);
+    consumed_cost_thb: string;
+};
+
+export type ProjectSummaryStaffPublic = {
+    id: string;
+    code: string;
+    name: string;
+    status: ProjectStatus;
+};
 
 export type ProjectUpdate = {
     code?: (string | null);
@@ -523,6 +588,19 @@ export type StockAdjustmentPublic = {
     created_at: string;
 };
 
+export type StockOnHandResponse = {
+    rows: Array<StockOnHandRow>;
+};
+
+export type StockOnHandRow = {
+    product_id: string;
+    sku: string;
+    model_name: string;
+    category: (string | null);
+    tracking_mode: TrackingMode;
+    quantity_on_hand: number;
+};
+
 export type SupplierCreate = {
     name: string;
     country?: (string | null);
@@ -548,6 +626,12 @@ export type Token = {
 };
 
 export type TrackingMode = 'SERIALIZED' | 'QUANTITY';
+
+export type TransactionSummaryPublic = {
+    kind: string;
+    reference_id: string;
+    occurred_at: string;
+};
 
 export type UnitPublic = {
     product_id: string;
@@ -660,12 +744,32 @@ export type CustomersCreateCustomerData = {
 
 export type CustomersCreateCustomerResponse = (CustomerPublic);
 
+export type CustomersGetCustomerDashboardData = {
+    customerId: string;
+};
+
+export type CustomersGetCustomerDashboardResponse = ((CustomerDashboardAdminPublic | CustomerDashboardStaffPublic));
+
 export type CustomersUpdateCustomerData = {
     customerId: string;
     requestBody: CustomerUpdate;
 };
 
 export type CustomersUpdateCustomerResponse = (CustomerPublic);
+
+export type DashboardsGetStockOnHandData = {
+    category?: (string | null);
+    customer?: (string | null);
+    supplier?: (string | null);
+};
+
+export type DashboardsGetStockOnHandResponse = (StockOnHandResponse);
+
+export type DashboardsGetStockOnHandBatchesData = {
+    productId: string;
+};
+
+export type DashboardsGetStockOnHandBatchesResponse = (Array<BatchDrillRow>);
 
 export type LoginLoginAccessTokenData = {
     formData: Body_login_login_access_token;
@@ -814,6 +918,12 @@ export type ProjectsCreateProjectData = {
 };
 
 export type ProjectsCreateProjectResponse = (ProjectPublic);
+
+export type ProjectsGetProjectDashboardData = {
+    projectId: string;
+};
+
+export type ProjectsGetProjectDashboardResponse = ((ProjectDashboardAdminPublic | ProjectDashboardStaffPublic));
 
 export type ProjectsUpdateProjectData = {
     projectId: string;

@@ -124,6 +124,27 @@ export const AuditEntryPublicSchema = {
     title: 'AuditEntryPublic'
 } as const;
 
+export const BatchDrillRowSchema = {
+    properties: {
+        batch_no: {
+            type: 'string',
+            title: 'Batch No'
+        },
+        remaining_qty: {
+            type: 'integer',
+            title: 'Remaining Qty'
+        },
+        received_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Received At'
+        }
+    },
+    type: 'object',
+    required: ['batch_no', 'remaining_qty', 'received_at'],
+    title: 'BatchDrillRow'
+} as const;
+
 export const Body_login_login_access_tokenSchema = {
     properties: {
         grant_type: {
@@ -341,6 +362,105 @@ export const CustomerCreateSchema = {
     type: 'object',
     required: ['name'],
     title: 'CustomerCreate'
+} as const;
+
+export const CustomerDashboardAdminPublicSchema = {
+    properties: {
+        customer: {
+            '$ref': '#/components/schemas/CustomerPublic'
+        },
+        transactions: {
+            items: {
+                '$ref': '#/components/schemas/TransactionSummaryPublic'
+            },
+            type: 'array',
+            title: 'Transactions'
+        },
+        active_projects: {
+            items: {
+                '$ref': '#/components/schemas/ProjectSummaryAdminPublic'
+            },
+            type: 'array',
+            title: 'Active Projects'
+        },
+        closed_projects: {
+            items: {
+                '$ref': '#/components/schemas/ProjectSummaryAdminPublic'
+            },
+            type: 'array',
+            title: 'Closed Projects'
+        },
+        lifetime_sale_revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Lifetime Sale Revenue Thb'
+        },
+        lifetime_sale_cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Lifetime Sale Cogs Thb'
+        },
+        lifetime_sale_margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Lifetime Sale Margin Thb'
+        },
+        lifetime_maintenance_revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Lifetime Maintenance Revenue Thb'
+        },
+        lifetime_maintenance_cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Lifetime Maintenance Cogs Thb'
+        },
+        lifetime_maintenance_margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Lifetime Maintenance Margin Thb'
+        },
+        lifetime_project_cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Lifetime Project Cogs Thb'
+        }
+    },
+    type: 'object',
+    required: ['customer', 'transactions', 'active_projects', 'closed_projects', 'lifetime_sale_revenue_thb', 'lifetime_sale_cogs_thb', 'lifetime_sale_margin_thb', 'lifetime_maintenance_revenue_thb', 'lifetime_maintenance_cogs_thb', 'lifetime_maintenance_margin_thb', 'lifetime_project_cogs_thb'],
+    title: 'CustomerDashboardAdminPublic'
+} as const;
+
+export const CustomerDashboardStaffPublicSchema = {
+    properties: {
+        customer: {
+            '$ref': '#/components/schemas/CustomerPublic'
+        },
+        transactions: {
+            items: {
+                '$ref': '#/components/schemas/TransactionSummaryPublic'
+            },
+            type: 'array',
+            title: 'Transactions'
+        },
+        active_projects: {
+            items: {
+                '$ref': '#/components/schemas/ProjectSummaryStaffPublic'
+            },
+            type: 'array',
+            title: 'Active Projects'
+        },
+        closed_projects: {
+            items: {
+                '$ref': '#/components/schemas/ProjectSummaryStaffPublic'
+            },
+            type: 'array',
+            title: 'Closed Projects'
+        }
+    },
+    type: 'object',
+    required: ['customer', 'transactions', 'active_projects', 'closed_projects'],
+    title: 'CustomerDashboardStaffPublic'
 } as const;
 
 export const CustomerPublicSchema = {
@@ -1512,6 +1632,59 @@ export const ProjectCreateSchema = {
     title: 'ProjectCreate'
 } as const;
 
+export const ProjectDashboardAdminPublicSchema = {
+    properties: {
+        project: {
+            '$ref': '#/components/schemas/ProjectPublic'
+        },
+        pulls: {
+            items: {
+                '$ref': '#/components/schemas/TransactionSummaryPublic'
+            },
+            type: 'array',
+            title: 'Pulls'
+        },
+        budget_thb: {
+            anyOf: [
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Budget Thb'
+        },
+        consumed_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Consumed Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb'],
+    title: 'ProjectDashboardAdminPublic'
+} as const;
+
+export const ProjectDashboardStaffPublicSchema = {
+    properties: {
+        project: {
+            '$ref': '#/components/schemas/ProjectStaffPublic'
+        },
+        pulls: {
+            items: {
+                '$ref': '#/components/schemas/TransactionSummaryPublic'
+            },
+            type: 'array',
+            title: 'Pulls'
+        }
+    },
+    type: 'object',
+    required: ['project', 'pulls'],
+    title: 'ProjectDashboardStaffPublic'
+} as const;
+
 export const ProjectPublicSchema = {
     properties: {
         code: {
@@ -1847,10 +2020,128 @@ export const ProjectPullStateSchema = {
     title: 'ProjectPullState'
 } as const;
 
+export const ProjectStaffPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        start_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Start Date'
+        },
+        end_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'End Date'
+        },
+        status: {
+            '$ref': '#/components/schemas/ProjectStatus'
+        }
+    },
+    type: 'object',
+    required: ['id', 'code', 'name', 'customer_id', 'start_date', 'end_date', 'status'],
+    title: 'ProjectStaffPublic'
+} as const;
+
 export const ProjectStatusSchema = {
     type: 'string',
     enum: ['ACTIVE', 'CLOSED'],
     title: 'ProjectStatus'
+} as const;
+
+export const ProjectSummaryAdminPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        status: {
+            '$ref': '#/components/schemas/ProjectStatus'
+        },
+        budget_thb: {
+            anyOf: [
+                {
+                    type: 'string',
+                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Budget Thb'
+        },
+        consumed_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Consumed Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'code', 'name', 'status', 'budget_thb', 'consumed_cost_thb'],
+    title: 'ProjectSummaryAdminPublic'
+} as const;
+
+export const ProjectSummaryStaffPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        status: {
+            '$ref': '#/components/schemas/ProjectStatus'
+        }
+    },
+    type: 'object',
+    required: ['id', 'code', 'name', 'status'],
+    title: 'ProjectSummaryStaffPublic'
 } as const;
 
 export const ProjectUpdateSchema = {
@@ -2796,6 +3087,60 @@ export const StockAdjustmentPublicSchema = {
     title: 'StockAdjustmentPublic'
 } as const;
 
+export const StockOnHandResponseSchema = {
+    properties: {
+        rows: {
+            items: {
+                '$ref': '#/components/schemas/StockOnHandRow'
+            },
+            type: 'array',
+            title: 'Rows'
+        }
+    },
+    type: 'object',
+    required: ['rows'],
+    title: 'StockOnHandResponse'
+} as const;
+
+export const StockOnHandRowSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        sku: {
+            type: 'string',
+            title: 'Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
+        category: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Category'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode'
+        },
+        quantity_on_hand: {
+            type: 'integer',
+            title: 'Quantity On Hand'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'sku', 'model_name', 'category', 'tracking_mode', 'quantity_on_hand'],
+    title: 'StockOnHandRow'
+} as const;
+
 export const SupplierCreateSchema = {
     properties: {
         name: {
@@ -2939,6 +3284,28 @@ export const TrackingModeSchema = {
     type: 'string',
     enum: ['SERIALIZED', 'QUANTITY'],
     title: 'TrackingMode'
+} as const;
+
+export const TransactionSummaryPublicSchema = {
+    properties: {
+        kind: {
+            type: 'string',
+            title: 'Kind'
+        },
+        reference_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Reference Id'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        }
+    },
+    type: 'object',
+    required: ['kind', 'reference_id', 'occurred_at'],
+    title: 'TransactionSummaryPublic'
 } as const;
 
 export const UnitPublicSchema = {
