@@ -1055,6 +1055,36 @@ def override_exceptions_report(
 # --- Stock adjustment (FR-011, Flow E) ----------------------------------------
 
 
+def _stock_adjustment_by_key(
+    *, session: Session, idempotency_key: uuid.UUID
+) -> StockAdjustment | None:
+    return session.exec(
+        select(StockAdjustment).where(
+            StockAdjustment.idempotency_key == idempotency_key
+        )
+    ).first()
+
+
+def _commit_stock_adjustment(
+    *, session: Session, adj: StockAdjustment, idempotency_key: uuid.UUID
+) -> StockAdjustment:
+    """Commit an adjustment; on an idempotency-key race return the winner (and
+    discard any non-transactional low-stock crossing from the rolled-back work)."""
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        session.info["low_stock_crossed"] = set()
+        winner = _stock_adjustment_by_key(
+            session=session, idempotency_key=idempotency_key
+        )
+        if winner is None:
+            raise
+        return winner
+    session.refresh(adj)
+    return adj
+
+
 def create_stock_adjustment(
     *,
     session: Session,
@@ -1069,7 +1099,17 @@ def create_stock_adjustment(
       part_movement(ADJUSTED_OUT) + its cost_line[]; 409 on insufficient stock.
     - QUANTITY positive: create a new is_adjustment part_batch (ADJ-### batch_no,
       admin-supplied purchase_cost) + one part_movement(RECEIVED).
+
+    Idempotent on ``idempotency_key`` (admin double-submit returns the existing
+    adjustment, never double-consumes / double-creates a batch). Field-shape is
+    validated on ``StockAdjustmentCreate``; this only does existence/stock checks.
     """
+    replay = _stock_adjustment_by_key(
+        session=session, idempotency_key=adj_in.idempotency_key
+    )
+    if replay is not None:
+        return replay
+
     adjusted_out = session.exec(
         select(Location).where(Location.code == "ADJUSTED_OUT")
     ).first()
@@ -1080,11 +1120,6 @@ def create_stock_adjustment(
         raise HTTPException(status_code=500, detail="Locations not seeded")
 
     if adj_in.target_kind == AdjustmentTarget.UNIT:
-        if not adj_in.castranova_barcode:
-            raise HTTPException(
-                status_code=422,
-                detail="UNIT adjustment requires castranova_barcode",
-            )
         unit = session.exec(
             select(Unit)
             .where(Unit.castranova_barcode == adj_in.castranova_barcode)
@@ -1105,6 +1140,7 @@ def create_stock_adjustment(
             target_kind=AdjustmentTarget.UNIT,
             unit_id=unit.id,
             reason=adj_in.reason,
+            idempotency_key=adj_in.idempotency_key,
             created_by_user_id=created_by_user_id,
         )
         session.add(adj)
@@ -1124,20 +1160,11 @@ def create_stock_adjustment(
         unit.current_location_id = adjusted_out.id
         unit.updated_at = get_datetime_utc()
         session.add(unit)
-        session.commit()
-        session.refresh(adj)
-        return adj
+        return _commit_stock_adjustment(
+            session=session, adj=adj, idempotency_key=adj_in.idempotency_key
+        )
 
     # QUANTITY
-    if not adj_in.sku:
-        raise HTTPException(
-            status_code=422, detail="QUANTITY adjustment requires sku"
-        )
-    if not adj_in.quantity_delta:
-        raise HTTPException(
-            status_code=422,
-            detail="QUANTITY adjustment requires a non-zero quantity_delta",
-        )
     product = session.exec(
         select(Product).where(Product.sku == adj_in.sku)
     ).first()
@@ -1149,11 +1176,13 @@ def create_stock_adjustment(
             detail="Stock adjustment SKU must be QUANTITY-tracked",
         )
 
+    assert adj_in.quantity_delta is not None  # validator guarantees non-zero
     adj = StockAdjustment(
         target_kind=AdjustmentTarget.QUANTITY,
         product_id=product.id,
         quantity_delta=adj_in.quantity_delta,
         reason=adj_in.reason,
+        idempotency_key=adj_in.idempotency_key,
         created_by_user_id=created_by_user_id,
     )
     session.add(adj)
@@ -1180,12 +1209,11 @@ def create_stock_adjustment(
         for cost_line in cost_lines:
             cost_line.part_movement_id = movement.id
             session.add(cost_line)
+        # Flow E.5: adjustments never notify — drain the crossing the consume
+        # recorded so the route can't dispatch a low-stock alert for it.
+        session.info["low_stock_crossed"] = set()
     else:
-        if adj_in.purchase_cost_thb is None:
-            raise HTTPException(
-                status_code=422,
-                detail="Positive QUANTITY adjustment requires purchase_cost_thb",
-            )
+        assert adj_in.purchase_cost_thb is not None  # validator guarantees set
         batch = PartBatch(
             product_id=product.id,
             batch_no=next_batch_no(
@@ -1218,9 +1246,9 @@ def create_stock_adjustment(
             )
         )
 
-    session.commit()
-    session.refresh(adj)
-    return adj
+    return _commit_stock_adjustment(
+        session=session, adj=adj, idempotency_key=adj_in.idempotency_key
+    )
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------

@@ -1,17 +1,21 @@
 """Stock Adjustment (FR-011, Flow E, Task 3.2).
 
 SERIALIZED → unit terminal ADJUSTED_OUT; QUANTITY negative → FIFO consume
-(spans batches); QUANTITY positive → new ADJ-### batch. Admin-only."""
+(spans batches); QUANTITY positive → new ADJ-### batch. Admin-only, idempotent."""
 
 import uuid
 from decimal import Decimal
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from app import crud
 from app.core.config import settings
 from app.models import (
+    AdjustmentTarget,
     CostLine,
     Location,
     PartBatch,
@@ -19,6 +23,7 @@ from app.models import (
     ProductCreate,
     ReceivePiece,
     StockAdjustment,
+    StockAdjustmentCreate,
     SupplierCreate,
     TrackingMode,
     Unit,
@@ -38,6 +43,34 @@ def _user_id(db: Session) -> uuid.UUID:
 def _seed(db: Session) -> None:
     if not db.exec(select(Location).where(Location.code == "YGN_WH")).first():
         crud.seed_locations(session=db)
+
+
+def _unit_adj(barcode: str, reason: str = "x") -> StockAdjustmentCreate:
+    return StockAdjustmentCreate(
+        target_kind=AdjustmentTarget.UNIT,
+        castranova_barcode=barcode,
+        reason=reason,
+        idempotency_key=uuid.uuid4(),
+    )
+
+
+def _qty_adj(
+    sku: str, delta: int, *, cost: str | None = None, reason: str = "x"
+) -> StockAdjustmentCreate:
+    return StockAdjustmentCreate(
+        target_kind=AdjustmentTarget.QUANTITY,
+        sku=sku,
+        quantity_delta=delta,
+        purchase_cost_thb=Decimal(cost) if cost is not None else None,
+        reason=reason,
+        idempotency_key=uuid.uuid4(),
+    )
+
+
+def _make(db: Session, adj_in: StockAdjustmentCreate) -> StockAdjustment:
+    return crud.create_stock_adjustment(
+        session=db, adj_in=adj_in, created_by_user_id=_user_id(db)
+    )
 
 
 def _quantity_product(db: Session, *, batches: list[tuple[int, str]]):
@@ -99,15 +132,7 @@ def _serialized_unit(db: Session) -> Unit:
 
 def test_serialized_adjustment_moves_unit_to_terminal(db: Session) -> None:
     unit = _serialized_unit(db)
-    adj = crud.create_stock_adjustment(
-        session=db,
-        adj_in=crud.StockAdjustmentCreate(
-            target_kind=crud.AdjustmentTarget.UNIT,
-            castranova_barcode=unit.castranova_barcode,
-            reason="damaged in storage",
-        ),
-        created_by_user_id=_user_id(db),
-    )
+    adj = _make(db, _unit_adj(unit.castranova_barcode, "damaged in storage"))
     db.refresh(unit)
     assert unit.current_state == UnitState.ADJUSTED_OUT
     mv = db.exec(
@@ -118,32 +143,15 @@ def test_serialized_adjustment_moves_unit_to_terminal(db: Session) -> None:
 
 def test_serialized_double_adjustment_conflict(db: Session) -> None:
     unit = _serialized_unit(db)
-    body = crud.StockAdjustmentCreate(
-        target_kind=crud.AdjustmentTarget.UNIT,
-        castranova_barcode=unit.castranova_barcode,
-        reason="x",
-    )
-    crud.create_stock_adjustment(session=db, adj_in=body, created_by_user_id=_user_id(db))
-    import pytest
-    from fastapi import HTTPException
-
+    _make(db, _unit_adj(unit.castranova_barcode))
     with pytest.raises(HTTPException) as exc:
-        crud.create_stock_adjustment(session=db, adj_in=body, created_by_user_id=_user_id(db))
+        _make(db, _unit_adj(unit.castranova_barcode))  # distinct key, unit terminal
     assert exc.value.status_code == 409
 
 
 def test_negative_quantity_adjustment_spans_two_batches(db: Session) -> None:
     product = _quantity_product(db, batches=[(3, "10.00"), (4, "12.00")])
-    adj = crud.create_stock_adjustment(
-        session=db,
-        adj_in=crud.StockAdjustmentCreate(
-            target_kind=crud.AdjustmentTarget.QUANTITY,
-            sku=product.sku,
-            quantity_delta=-5,  # 3 from batch1 + 2 from batch2
-            reason="recount loss",
-        ),
-        created_by_user_id=_user_id(db),
-    )
+    adj = _make(db, _qty_adj(product.sku, -5, reason="recount loss"))
     mv = db.exec(
         select(PartMovement).where(PartMovement.stock_adjustment_id == adj.id)
     ).first()
@@ -156,7 +164,6 @@ def test_negative_quantity_adjustment_spans_two_batches(db: Session) -> None:
         (2, "12.00"),
         (3, "10.00"),
     ]
-    # remaining: batch1 0, batch2 2
     remaining = sum(
         b.remaining_qty
         for b in db.exec(
@@ -167,37 +174,15 @@ def test_negative_quantity_adjustment_spans_two_batches(db: Session) -> None:
 
 
 def test_negative_adjustment_oversell_conflict(db: Session) -> None:
-    import pytest
-    from fastapi import HTTPException
-
     product = _quantity_product(db, batches=[(3, "10.00")])
     with pytest.raises(HTTPException) as exc:
-        crud.create_stock_adjustment(
-            session=db,
-            adj_in=crud.StockAdjustmentCreate(
-                target_kind=crud.AdjustmentTarget.QUANTITY,
-                sku=product.sku,
-                quantity_delta=-5,
-                reason="too much",
-            ),
-            created_by_user_id=_user_id(db),
-        )
+        _make(db, _qty_adj(product.sku, -5, reason="too much"))
     assert exc.value.status_code == 409
 
 
 def test_positive_quantity_adjustment_creates_adj_batch(db: Session) -> None:
     product = _quantity_product(db, batches=[(2, "10.00")])
-    adj = crud.create_stock_adjustment(
-        session=db,
-        adj_in=crud.StockAdjustmentCreate(
-            target_kind=crud.AdjustmentTarget.QUANTITY,
-            sku=product.sku,
-            quantity_delta=5,
-            purchase_cost_thb=Decimal("11.50"),
-            reason="found stock",
-        ),
-        created_by_user_id=_user_id(db),
-    )
+    adj = _make(db, _qty_adj(product.sku, 5, cost="11.50", reason="found stock"))
     batch = db.exec(
         select(PartBatch).where(
             PartBatch.product_id == product.id, PartBatch.is_adjustment.is_(True)
@@ -214,23 +199,46 @@ def test_positive_quantity_adjustment_creates_adj_batch(db: Session) -> None:
     assert mv is not None and mv.event_type.value == "RECEIVED"
 
 
-def test_positive_adjustment_requires_purchase_cost(db: Session) -> None:
-    import pytest
-    from fastapi import HTTPException
+def test_adjustment_idempotent_replay(db: Session) -> None:
+    product = _quantity_product(db, batches=[(10, "10.00")])
+    adj_in = _qty_adj(product.sku, -3, reason="recount")
+    first = _make(db, adj_in)
+    second = crud.create_stock_adjustment(  # same key -> replay, no double-consume
+        session=db, adj_in=adj_in, created_by_user_id=_user_id(db)
+    )
+    assert first.id == second.id
+    remaining = sum(
+        b.remaining_qty
+        for b in db.exec(
+            select(PartBatch).where(PartBatch.product_id == product.id)
+        ).all()
+    )
+    assert remaining == 7  # consumed once (10 - 3), not twice
 
-    product = _quantity_product(db, batches=[(2, "10.00")])
-    with pytest.raises(HTTPException) as exc:
-        crud.create_stock_adjustment(
-            session=db,
-            adj_in=crud.StockAdjustmentCreate(
-                target_kind=crud.AdjustmentTarget.QUANTITY,
-                sku=product.sku,
-                quantity_delta=5,
-                reason="no cost",
-            ),
-            created_by_user_id=_user_id(db),
+
+# --- schema validation --------------------------------------------------------
+
+
+def test_positive_adjustment_requires_purchase_cost() -> None:
+    with pytest.raises(ValidationError):
+        StockAdjustmentCreate(
+            target_kind=AdjustmentTarget.QUANTITY,
+            sku="X",
+            quantity_delta=5,
+            reason="no cost",
+            idempotency_key=uuid.uuid4(),
         )
-    assert exc.value.status_code == 422
+
+
+def test_unit_adjustment_rejects_quantity_fields() -> None:
+    with pytest.raises(ValidationError):
+        StockAdjustmentCreate(
+            target_kind=AdjustmentTarget.UNIT,
+            castranova_barcode="CN-1",
+            quantity_delta=3,
+            reason="mismatch",
+            idempotency_key=uuid.uuid4(),
+        )
 
 
 # --- route authz --------------------------------------------------------------
@@ -248,6 +256,7 @@ def test_stock_adjustment_staff_forbidden(
             "sku": product.sku,
             "quantity_delta": -1,
             "reason": "staff try",
+            "idempotency_key": str(uuid.uuid4()),
         },
     )
     assert r.status_code == 403
@@ -265,6 +274,7 @@ def test_stock_adjustment_admin_ok(
             "sku": product.sku,
             "quantity_delta": -2,
             "reason": "admin recount",
+            "idempotency_key": str(uuid.uuid4()),
         },
     )
     assert r.status_code == 200, r.text

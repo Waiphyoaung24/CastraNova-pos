@@ -853,25 +853,36 @@ class StockAdjustment(SQLModel, table=True):
     # unit_movement.stock_adjustment_id (SERIALIZED) or one+ part_movement rows
     # (QUANTITY: N on negative FIFO, one on a positive ADJ batch).
     __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key", name="uq_stock_adjustment_idempotency_key"
+        ),
         CheckConstraint(
-            "target_kind != 'UNIT' OR unit_id IS NOT NULL",
-            name="ck_stock_adjustment_unit_requires_unit_id",
+            "target_kind != 'UNIT' OR "
+            "(unit_id IS NOT NULL AND product_id IS NULL "
+            "AND quantity_delta IS NULL)",
+            name="ck_stock_adjustment_unit_fields",
         ),
         CheckConstraint(
             "target_kind != 'QUANTITY' OR "
-            "(product_id IS NOT NULL AND quantity_delta IS NOT NULL "
-            "AND quantity_delta <> 0)",
-            name="ck_stock_adjustment_quantity_requires_product_delta",
+            "(product_id IS NOT NULL AND unit_id IS NULL "
+            "AND quantity_delta IS NOT NULL AND quantity_delta <> 0)",
+            name="ck_stock_adjustment_quantity_fields",
         ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     target_kind: AdjustmentTarget
-    unit_id: uuid.UUID | None = Field(default=None, foreign_key="unit.id")
-    product_id: uuid.UUID | None = Field(default=None, foreign_key="product.id")
+    unit_id: uuid.UUID | None = Field(
+        default=None, foreign_key="unit.id", index=True
+    )
+    product_id: uuid.UUID | None = Field(
+        default=None, foreign_key="product.id", index=True
+    )
     # Signed for QUANTITY (+ found / - lost); NULL for a SERIALIZED write-off.
     quantity_delta: int | None = Field(default=None)
     reason: str = Field(max_length=512)
+    # Idempotent on double-submit (admin online action; no offline queue).
+    idempotency_key: uuid.UUID
     created_by_user_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, index=True
     )
@@ -886,12 +897,44 @@ class StockAdjustmentCreate(SQLModel):
     target_kind: AdjustmentTarget
     castranova_barcode: str | None = None  # SERIALIZED target
     sku: str | None = None  # QUANTITY target
-    quantity_delta: int | None = None  # QUANTITY: non-zero +/-
+    # QUANTITY: non-zero +/-, bounded like the receive/sale quantity caps.
+    quantity_delta: int | None = Field(default=None, ge=-1_000_000, le=1_000_000)
     # Required for a positive QUANTITY adjustment (cost basis of the new batch).
     purchase_cost_thb: Decimal | None = Field(
         default=None, ge=0, le=9999999999.99
     )
     reason: str = Field(min_length=1, max_length=512)
+    idempotency_key: uuid.UUID
+
+    @model_validator(mode="after")
+    def _check_fields(self) -> "StockAdjustmentCreate":
+        if self.target_kind == AdjustmentTarget.UNIT:
+            if not self.castranova_barcode:
+                raise ValueError("UNIT adjustment requires castranova_barcode")
+            if (
+                self.sku is not None
+                or self.quantity_delta is not None
+                or self.purchase_cost_thb is not None
+            ):
+                raise ValueError(
+                    "UNIT adjustment must not set sku/quantity_delta/purchase_cost_thb"
+                )
+        else:  # QUANTITY
+            if not self.sku:
+                raise ValueError("QUANTITY adjustment requires sku")
+            if self.castranova_barcode is not None:
+                raise ValueError(
+                    "QUANTITY adjustment must not set castranova_barcode"
+                )
+            if not self.quantity_delta:
+                raise ValueError(
+                    "QUANTITY adjustment requires a non-zero quantity_delta"
+                )
+            if self.quantity_delta > 0 and self.purchase_cost_thb is None:
+                raise ValueError(
+                    "Positive QUANTITY adjustment requires purchase_cost_thb"
+                )
+        return self
 
 
 class StockAdjustmentPublic(SQLModel):

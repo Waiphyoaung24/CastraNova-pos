@@ -26,16 +26,20 @@ def upgrade():
     sa.Column('product_id', sa.Uuid(), nullable=True),
     sa.Column('quantity_delta', sa.Integer(), nullable=True),
     sa.Column('reason', sqlmodel.sql.sqltypes.AutoString(length=512), nullable=False),
+    sa.Column('idempotency_key', sa.Uuid(), nullable=False),
     sa.Column('created_by_user_id', sa.Uuid(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.CheckConstraint("target_kind != 'QUANTITY' OR (product_id IS NOT NULL AND quantity_delta IS NOT NULL AND quantity_delta <> 0)", name='ck_stock_adjustment_quantity_requires_product_delta'),
-    sa.CheckConstraint("target_kind != 'UNIT' OR unit_id IS NOT NULL", name='ck_stock_adjustment_unit_requires_unit_id'),
+    sa.CheckConstraint("target_kind != 'QUANTITY' OR (product_id IS NOT NULL AND unit_id IS NULL AND quantity_delta IS NOT NULL AND quantity_delta <> 0)", name='ck_stock_adjustment_quantity_fields'),
+    sa.CheckConstraint("target_kind != 'UNIT' OR (unit_id IS NOT NULL AND product_id IS NULL AND quantity_delta IS NULL)", name='ck_stock_adjustment_unit_fields'),
     sa.ForeignKeyConstraint(['created_by_user_id'], ['user.id'], ),
     sa.ForeignKeyConstraint(['product_id'], ['product.id'], ),
     sa.ForeignKeyConstraint(['unit_id'], ['unit.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('idempotency_key', name='uq_stock_adjustment_idempotency_key')
     )
     op.create_index(op.f('ix_stockadjustment_created_by_user_id'), 'stockadjustment', ['created_by_user_id'], unique=False)
+    op.create_index(op.f('ix_stockadjustment_unit_id'), 'stockadjustment', ['unit_id'], unique=False)
+    op.create_index(op.f('ix_stockadjustment_product_id'), 'stockadjustment', ['product_id'], unique=False)
     # part_batch.supplier_id nullable: positive-adjustment (found-stock) batches
     # have no supplier; normal receives still require one in crud.
     op.alter_column('partbatch', 'supplier_id',
@@ -51,9 +55,13 @@ def upgrade():
 def downgrade():
     op.drop_constraint('fk_unitmovement_stock_adjustment_id', 'unitmovement', type_='foreignkey')
     op.drop_constraint('fk_partmovement_stock_adjustment_id', 'partmovement', type_='foreignkey')
+    # Adjustment batches have no supplier; clear them before restoring NOT NULL.
+    op.execute("DELETE FROM partbatch WHERE is_adjustment = TRUE AND supplier_id IS NULL")
     op.alter_column('partbatch', 'supplier_id',
                existing_type=sa.UUID(),
                nullable=False)
+    op.execute("DROP INDEX IF EXISTS ix_stockadjustment_product_id")
+    op.execute("DROP INDEX IF EXISTS ix_stockadjustment_unit_id")
     op.drop_index(op.f('ix_stockadjustment_created_by_user_id'), table_name='stockadjustment')
     op.drop_table('stockadjustment')
     op.execute("DROP TYPE IF EXISTS adjustmenttarget")
