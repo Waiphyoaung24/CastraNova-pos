@@ -3,28 +3,54 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from app import crud
-from app.api.deps import SessionDep, get_admin
-from app.models import ProjectCreate, ProjectPublic, ProjectUpdate
-
-# Projects are admin-only across the board (spec §8).
-router = APIRouter(
-    prefix="/projects", tags=["projects"], dependencies=[Depends(get_admin)]
+from app.api.deps import CurrentUser, SessionDep, get_admin
+from app.models import (
+    ProjectCreate,
+    ProjectDashboardAdminPublic,
+    ProjectDashboardStaffPublic,
+    ProjectPublic,
+    ProjectUpdate,
+    UserRole,
 )
 
+# Project CRUD is admin-only (spec §8); the dashboard is role-tiered (FR-020/S7).
+router = APIRouter(prefix="/projects", tags=["projects"])
 
-@router.get("/", response_model=list[ProjectPublic])
+
+@router.get(
+    "/", response_model=list[ProjectPublic], dependencies=[Depends(get_admin)]
+)
 def read_projects(
     session: SessionDep, skip: int = 0, limit: int = 100
 ) -> list[ProjectPublic]:
     return crud.list_projects(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
 
 
-@router.post("/", response_model=ProjectPublic)
+@router.post(
+    "/", response_model=ProjectPublic, dependencies=[Depends(get_admin)]
+)
 def create_project(*, session: SessionDep, project_in: ProjectCreate) -> ProjectPublic:
     return crud.create_project(session=session, project_in=project_in)  # type: ignore[return-value]
 
 
-@router.patch("/{project_id}", response_model=ProjectPublic)
+@router.get(
+    "/{project_id}/dashboard",
+    response_model=ProjectDashboardAdminPublic | ProjectDashboardStaffPublic,
+)
+def get_project_dashboard(
+    project_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ProjectDashboardAdminPublic | ProjectDashboardStaffPublic:
+    data = crud.get_project_dashboard(session=session, project_id=project_id)
+    if current_user.role == UserRole.BKK_ADMIN:
+        return ProjectDashboardAdminPublic.model_validate(data)
+    return ProjectDashboardStaffPublic.model_validate(data)
+
+
+@router.patch(
+    "/{project_id}", response_model=ProjectPublic, dependencies=[Depends(get_admin)]
+)
 def update_project(
     *, session: SessionDep, project_id: uuid.UUID, project_in: ProjectUpdate
 ) -> ProjectPublic:

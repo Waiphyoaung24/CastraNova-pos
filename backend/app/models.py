@@ -1431,6 +1431,35 @@ class CustomerDashboardAdminPublic(CustomerDashboardStaffPublic):
     closed_projects: list[ProjectSummaryAdminPublic]  # type: ignore[assignment]
 
 
+class ProjectStaffPublic(SQLModel):
+    # Redacted project view for the staff dashboard: every ProjectPublic field
+    # EXCEPT budget_thb (a financial field staff must never see). ProjectPublic
+    # inherits budget_thb from ProjectBase, so the staff dashboard cannot reuse
+    # it directly without leaking the budget.
+    id: uuid.UUID
+    code: str
+    name: str
+    customer_id: uuid.UUID
+    start_date: date | None
+    end_date: date | None
+    status: ProjectStatus
+
+
+class ProjectDashboardStaffPublic(SQLModel):
+    project: ProjectStaffPublic
+    pulls: list[TransactionSummaryPublic]  # kind="PROJECT_PULL"
+    # No budget / consumed_cost — staff redaction.
+
+
+class ProjectDashboardAdminPublic(ProjectDashboardStaffPublic):
+    # Admin sees the full project (adds back budget_thb). consumed_cost_thb is
+    # REQUIRED so a staff payload cannot upcast to admin; budget_thb is
+    # intentionally optional (a project may have no budget).
+    project: ProjectPublic  # type: ignore[assignment]
+    budget_thb: Decimal | None
+    consumed_cost_thb: Decimal
+
+
 # --- Override-exceptions report (FR-010; read-only) ---------------------------
 
 

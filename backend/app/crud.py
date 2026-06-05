@@ -2501,6 +2501,33 @@ def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decima
     return _q(part_cogs + unit_cogs)
 
 
+def get_project_dashboard(
+    *, session: Session, project_id: uuid.UUID
+) -> dict[str, Any]:
+    """Admin-superset dashboard for one project: its pull transactions plus
+    budget and consumed cost (reusing _project_consumed_cost). The route picks
+    the staff or admin schema by role; the budget/consumed_cost fields are
+    physically absent from the staff JSON."""
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    pulls = session.exec(
+        select(ProjectPull).where(col(ProjectPull.project_id) == project_id)
+    ).all()
+    pull_rows = [
+        {"kind": "PROJECT_PULL", "reference_id": p.id, "occurred_at": p.created_at}
+        for p in sorted(pulls, key=lambda p: p.created_at, reverse=True)
+    ]
+    return {
+        "project": project,
+        "pulls": pull_rows,
+        "budget_thb": project.budget_thb,
+        "consumed_cost_thb": _project_consumed_cost(
+            session=session, project_id=project_id
+        ),
+    }
+
+
 def _customer_transactions(
     *, session: Session, customer_id: uuid.UUID
 ) -> list[dict[str, Any]]:
