@@ -1383,6 +1383,28 @@ class OverrideExceptionsReport(SQLModel):
     rows: list[OverrideExceptionRow]
 
 
+# --- Holding-period report (FR-014; read-only) --------------------------------
+
+
+class HoldingPeriodRow(SQLModel):
+    tracking_mode: TrackingMode
+    product_id: uuid.UUID
+    sku: str
+    # SERIALIZED: the unit barcode (one row per in-stock unit). QUANTITY: the
+    # oldest non-depleted batch_no (one rolled-up row per SKU).
+    reference: str
+    received_at: datetime
+    holding_days: int
+    quantity: int  # 1 for a unit; sum(remaining_qty) for a SKU rollup
+    over_threshold: bool
+
+
+class HoldingPeriodReport(SQLModel):
+    threshold_days: int
+    generated_at: datetime
+    rows: list[HoldingPeriodRow]
+
+
 # Generic message
 class Message(SQLModel):
     message: str

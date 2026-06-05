@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, Query
 
 from app import crud
 from app.api.deps import SessionDep, get_admin
-from app.models import ChannelMarginReport, OverrideExceptionsReport
+from app.models import (
+    ChannelMarginReport,
+    HoldingPeriodReport,
+    OverrideExceptionsReport,
+)
 
 router = APIRouter(
     prefix="/reports", tags=["reports"], dependencies=[Depends(get_admin)]
@@ -48,3 +52,17 @@ def override_exceptions(
     counts."""
     year, mon = int(month[:4]), int(month[5:7])
     return crud.override_exceptions_report(session=session, year=year, month=mon)
+
+
+@router.get("/holding-period", response_model=HoldingPeriodReport)
+def holding_period(
+    *,
+    session: SessionDep,
+    over_threshold_only: bool = False,
+) -> HoldingPeriodReport:
+    """In-stock holding period per SERIALIZED unit + per QUANTITY SKU (oldest
+    active batch), flagged against the system_setting threshold, admin-only
+    (FR-014, spec §8)."""
+    return crud.holding_period_report(
+        session=session, only_over_threshold=over_threshold_only
+    )

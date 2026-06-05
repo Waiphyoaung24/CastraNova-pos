@@ -27,6 +27,8 @@ from app.models import (
     Customer,
     CustomerCreate,
     CustomerUpdate,
+    HoldingPeriodReport,
+    HoldingPeriodRow,
     LineState,
     Location,
     LowStockItemPublic,
@@ -157,6 +159,8 @@ def seed_locations(*, session: Session) -> None:
 
 OVERRIDE_THRESHOLD_KEY = "override_deviation_threshold_pct"
 DEFAULT_OVERRIDE_THRESHOLD_PCT = 5.0
+HOLDING_THRESHOLD_KEY = "holding_period_threshold_days"
+DEFAULT_HOLDING_THRESHOLD_DAYS = 90
 
 
 def get_setting(*, session: Session, key: str, default: Any = None) -> Any:
@@ -192,17 +196,15 @@ def set_setting(
 
 def seed_system_settings(*, session: Session) -> None:
     """Idempotently seed the default configurable thresholds."""
-    if not session.exec(
-        select(SystemSetting).where(
-            SystemSetting.key == OVERRIDE_THRESHOLD_KEY
-        )
-    ).first():
-        session.add(
-            SystemSetting(
-                key=OVERRIDE_THRESHOLD_KEY,
-                value=DEFAULT_OVERRIDE_THRESHOLD_PCT,
-            )
-        )
+    defaults: list[tuple[str, Any]] = [
+        (OVERRIDE_THRESHOLD_KEY, DEFAULT_OVERRIDE_THRESHOLD_PCT),
+        (HOLDING_THRESHOLD_KEY, DEFAULT_HOLDING_THRESHOLD_DAYS),
+    ]
+    for key, value in defaults:
+        if not session.exec(
+            select(SystemSetting).where(SystemSetting.key == key)
+        ).first():
+            session.add(SystemSetting(key=key, value=value))
     session.commit()
 
 
@@ -1049,6 +1051,89 @@ def override_exceptions_report(
         approved=counts[OverrideState.APPROVED],
         rejected=counts[OverrideState.REJECTED],
         rows=rows,
+    )
+
+
+# --- Holding-period report (FR-014, Flow F) -----------------------------------
+
+
+def holding_period_report(
+    *, session: Session, only_over_threshold: bool = False
+) -> HoldingPeriodReport:
+    """now() - received_at for in-stock SERIALIZED units (per unit) and active
+    QUANTITY batches rolled up per SKU on the oldest non-depleted batch (Flow F).
+    Threshold is admin-configurable via system_setting (default 90 days); rows
+    above it are flagged. Sorted oldest-first."""
+    threshold = int(
+        get_setting(
+            session=session,
+            key=HOLDING_THRESHOLD_KEY,
+            default=DEFAULT_HOLDING_THRESHOLD_DAYS,
+        )
+    )
+    now = get_datetime_utc()
+    rows: list[HoldingPeriodRow] = []
+
+    units = session.exec(
+        select(Unit, Product.sku)
+        .join(Product, col(Unit.product_id) == col(Product.id))
+        .where(Unit.current_state == UnitState.IN_STOCK)
+    ).all()
+    for unit, sku in units:
+        days = (now - unit.received_at).days
+        rows.append(
+            HoldingPeriodRow(
+                tracking_mode=TrackingMode.SERIALIZED,
+                product_id=unit.product_id,
+                sku=sku,
+                reference=unit.castranova_barcode,
+                received_at=unit.received_at,
+                holding_days=days,
+                quantity=1,
+                over_threshold=days > threshold,
+            )
+        )
+
+    # QUANTITY: roll up active batches per product onto the oldest one.
+    active = session.exec(
+        select(PartBatch, Product.sku)
+        .join(Product, col(PartBatch.product_id) == col(Product.id))
+        .where(PartBatch.remaining_qty > 0)
+    ).all()
+    rollup: dict[uuid.UUID, dict[str, Any]] = {}
+    for batch, sku in active:
+        entry = rollup.get(batch.product_id)
+        if entry is None:
+            rollup[batch.product_id] = {
+                "sku": sku,
+                "oldest": batch,
+                "qty": batch.remaining_qty,
+            }
+        else:
+            entry["qty"] += batch.remaining_qty
+            if batch.received_at < entry["oldest"].received_at:
+                entry["oldest"] = batch
+    for product_id, entry in rollup.items():
+        oldest: PartBatch = entry["oldest"]
+        days = (now - oldest.received_at).days
+        rows.append(
+            HoldingPeriodRow(
+                tracking_mode=TrackingMode.QUANTITY,
+                product_id=product_id,
+                sku=entry["sku"],
+                reference=oldest.batch_no,
+                received_at=oldest.received_at,
+                holding_days=days,
+                quantity=entry["qty"],
+                over_threshold=days > threshold,
+            )
+        )
+
+    if only_over_threshold:
+        rows = [r for r in rows if r.over_threshold]
+    rows.sort(key=lambda r: r.holding_days, reverse=True)
+    return HoldingPeriodReport(
+        threshold_days=threshold, generated_at=now, rows=rows
     )
 
 
