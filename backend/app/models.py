@@ -1240,6 +1240,35 @@ class ChannelMarginReport(SQLModel):
     total_margin_thb: MoneyTHB
 
 
+# --- Override-exceptions report (FR-010; read-only) ---------------------------
+
+
+class OverrideExceptionRow(SQLModel):
+    id: uuid.UUID
+    target_kind: OverrideTargetKind
+    product_id: uuid.UUID
+    sku: str
+    default_price_thb: MoneyTHB
+    requested_price_thb: MoneyTHB
+    deviation_pct: Decimal
+    reason: str
+    state: OverrideState
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+    decided_by_user_id: uuid.UUID | None
+    decided_at: datetime | None
+
+
+class OverrideExceptionsReport(SQLModel):
+    month: str  # "YYYY-MM"
+    total: int
+    auto_approved: int
+    pending: int
+    approved: int
+    rejected: int
+    rows: list[OverrideExceptionRow]
+
+
 # Generic message
 class Message(SQLModel):
     message: str

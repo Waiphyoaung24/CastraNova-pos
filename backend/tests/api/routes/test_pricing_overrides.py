@@ -119,3 +119,30 @@ def test_admin_decides_pending_override(
     body = r.json()
     assert body["state"] == "APPROVED"
     assert body["decided_at"] is not None
+
+
+def test_override_exceptions_report_admin_only(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    from datetime import datetime, timezone
+
+    pid = _seed_product(db)
+    client.post(
+        "/api/v1/pricing-overrides",
+        headers=superuser_token_headers,
+        json=_create_payload(pid, "900.00"),  # PENDING
+    )
+    now = datetime.now(timezone.utc)
+    month = f"{now.year:04d}-{now.month:02d}"
+    url = f"/api/v1/reports/override-exceptions?month={month}"
+
+    assert client.get(url, headers=staff_token_headers).status_code == 403
+    r = client.get(url, headers=superuser_token_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["month"] == month
+    assert body["total"] == len(body["rows"])
+    assert body["pending"] >= 1

@@ -221,3 +221,51 @@ def test_list_filters_by_state(db: Session) -> None:
     rows = crud.list_pricing_overrides(session=db, state=OverrideState.PENDING)
     assert pending.id in {r.id for r in rows}
     assert all(r.state == OverrideState.PENDING for r in rows)
+
+
+def test_override_exceptions_report_shape(db: Session) -> None:
+    from datetime import datetime, timezone
+
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db, retail="1000.00")
+
+    def _mk(price: str) -> PricingOverrideRequest:
+        return crud.create_pricing_override(
+            session=db,
+            override_in=PricingOverrideCreate(
+                target_kind=OverrideTargetKind.SALE_LINE,
+                product_id=pid,
+                requested_price_thb=Decimal(price),
+                reason="x",
+            ),
+            created_by_user_id=actor,
+        )
+
+    auto = _mk("970.00")  # AUTO_APPROVED
+    pend = _mk("900.00")  # PENDING
+    appr = _mk("850.00")  # PENDING -> APPROVED
+    rej = _mk("800.00")  # PENDING -> REJECTED
+    crud.decide_pricing_override(
+        session=db, override_id=appr.id, decision="APPROVED", decided_by_user_id=actor
+    )
+    crud.decide_pricing_override(
+        session=db, override_id=rej.id, decision="REJECTED", decided_by_user_id=actor
+    )
+
+    now = datetime.now(timezone.utc)
+    report = crud.override_exceptions_report(
+        session=db, year=now.year, month=now.month
+    )
+    assert report.month == f"{now.year:04d}-{now.month:02d}"
+    by_id = {r.id: r for r in report.rows}
+    assert {auto.id, pend.id, appr.id, rej.id} <= set(by_id)
+    assert by_id[auto.id].state == OverrideState.AUTO_APPROVED
+    assert by_id[appr.id].state == OverrideState.APPROVED
+    assert by_id[rej.id].state == OverrideState.REJECTED
+    assert by_id[auto.id].sku  # product sku joined in
+    assert report.total == len(report.rows)
+    assert report.auto_approved >= 1
+    assert report.pending >= 1
+    assert report.approved >= 1
+    assert report.rejected >= 1

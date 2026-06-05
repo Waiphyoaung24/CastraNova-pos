@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app import crud
 from app.api.deps import SessionDep, get_admin
-from app.models import ChannelMarginReport
+from app.models import ChannelMarginReport, OverrideExceptionsReport
 
 router = APIRouter(
     prefix="/reports", tags=["reports"], dependencies=[Depends(get_admin)]
@@ -28,3 +28,23 @@ def channel_margin(
     admin-only (FR-013, spec §8)."""
     year, mon = int(month[:4]), int(month[5:7])
     return crud.channel_margin_report(session=session, year=year, month=mon)
+
+
+@router.get("/override-exceptions", response_model=OverrideExceptionsReport)
+def override_exceptions(
+    *,
+    session: SessionDep,
+    month: Annotated[
+        str,
+        Query(
+            pattern=r"^20\d{2}-(0[1-9]|1[0-2])$",
+            description="Reporting month in YYYY-MM (year 2000-2099)",
+            examples=["2026-03"],
+        ),
+    ],
+) -> OverrideExceptionsReport:
+    """Monthly pricing-override exceptions for ``month`` (YYYY-MM), admin-only
+    (FR-010, spec §8). Lists every override requested that month with per-state
+    counts."""
+    year, mon = int(month[:4]), int(month[5:7])
+    return crud.override_exceptions_report(session=session, year=year, month=mon)

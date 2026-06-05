@@ -424,7 +424,6 @@ def test_ticket_close_crossing_threshold_fires_alert(
         ticket_id=ticket.id,
         sku=product.sku,
         quantity=2,  # 6 -> 4 at close, crosses below 5
-        unit_price_thb=Decimal("50.00"),
     )
 
     r = client.post(

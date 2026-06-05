@@ -32,6 +32,8 @@ from app.models import (
     MovementType,
     NotificationPreference,
     NotificationPreferenceUpdate,
+    OverrideExceptionRow,
+    OverrideExceptionsReport,
     OverrideState,
     OverrideTargetKind,
     PartBatch,
@@ -975,6 +977,61 @@ def _apply_override_price(
             status_code=409, detail="Override already applied to a line"
         )
     return override.requested_price_thb
+
+
+def override_exceptions_report(
+    *, session: Session, year: int, month: int
+) -> OverrideExceptionsReport:
+    """Monthly list of pricing overrides requested in [month_start, next) UTC,
+    with per-state counts (FR-010, spec §8). Grouped by created_at (request
+    date); each row carries the product SKU for readability."""
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    if month == 12:
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+
+    results = session.exec(
+        select(PricingOverrideRequest, Product.sku)
+        .join(Product, col(PricingOverrideRequest.product_id) == col(Product.id))
+        .where(
+            col(PricingOverrideRequest.created_at) >= start,
+            col(PricingOverrideRequest.created_at) < end,
+        )
+        .order_by(col(PricingOverrideRequest.created_at))
+    ).all()
+
+    counts: dict[OverrideState, int] = dict.fromkeys(OverrideState, 0)
+    rows: list[OverrideExceptionRow] = []
+    for ovr, sku in results:
+        counts[ovr.state] += 1
+        rows.append(
+            OverrideExceptionRow(
+                id=ovr.id,
+                target_kind=ovr.target_kind,
+                product_id=ovr.product_id,
+                sku=sku,
+                default_price_thb=ovr.default_price_thb,
+                requested_price_thb=ovr.requested_price_thb,
+                deviation_pct=ovr.deviation_pct,
+                reason=ovr.reason,
+                state=ovr.state,
+                created_by_user_id=ovr.created_by_user_id,
+                created_at=ovr.created_at,
+                decided_by_user_id=ovr.decided_by_user_id,
+                decided_at=ovr.decided_at,
+            )
+        )
+
+    return OverrideExceptionsReport(
+        month=f"{year:04d}-{month:02d}",
+        total=len(rows),
+        auto_approved=counts[OverrideState.AUTO_APPROVED],
+        pending=counts[OverrideState.PENDING],
+        approved=counts[OverrideState.APPROVED],
+        rejected=counts[OverrideState.REJECTED],
+        rows=rows,
+    )
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------
