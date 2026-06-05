@@ -1405,6 +1405,48 @@ class HoldingPeriodReport(SQLModel):
     rows: list[HoldingPeriodRow]
 
 
+# --- Search (FR-015; read-only, both roles — no cost fields) -------------------
+
+
+class SerialMovementPublic(SQLModel):
+    event_type: MovementType
+    from_location_id: uuid.UUID | None
+    to_location_id: uuid.UUID | None
+    occurred_at: datetime
+    actor_user_id: uuid.UUID
+    sale_id: uuid.UUID | None
+    service_ticket_id: uuid.UUID | None
+    project_pull_id: uuid.UUID | None
+    stock_adjustment_id: uuid.UUID | None
+    notes: str | None
+
+
+class SerialSearchResult(SQLModel):
+    castranova_barcode: str
+    product_id: uuid.UUID
+    sku: str
+    supplier_serial: str
+    current_state: UnitState
+    movements: list[SerialMovementPublic]  # chronological (occurred_at asc)
+
+
+class SkuBatchPublic(SQLModel):
+    # No purchase_cost_thb: COGS stays admin-only (search is both-roles).
+    batch_no: str
+    received_at: datetime
+    received_qty: int
+    remaining_qty: int
+    is_adjustment: bool
+
+
+class SkuSearchResult(SQLModel):
+    sku: str
+    product_id: uuid.UUID
+    tracking_mode: TrackingMode
+    total_on_hand: int
+    batches: list[SkuBatchPublic]  # QUANTITY only; empty for SERIALIZED
+
+
 # Generic message
 class Message(SQLModel):
     message: str

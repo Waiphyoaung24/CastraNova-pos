@@ -60,8 +60,12 @@ from app.models import (
     SaleLine,
     SaleLineInput,
     SaleLineKind,
+    SerialMovementPublic,
+    SerialSearchResult,
     ServiceTicket,
     ServiceTicketPart,
+    SkuBatchPublic,
+    SkuSearchResult,
     StockAdjustment,
     StockAdjustmentCreate,
     Supplier,
@@ -1134,6 +1138,72 @@ def holding_period_report(
     rows.sort(key=lambda r: r.holding_days, reverse=True)
     return HoldingPeriodReport(
         threshold_days=threshold, generated_at=now, rows=rows
+    )
+
+
+# --- Search (FR-015, Flow F) --------------------------------------------------
+
+
+def search_serial(
+    *, session: Session, barcode: str
+) -> SerialSearchResult:
+    """Full lifecycle of one serialized unit by castranova_barcode — its
+    unit_movement rows in chronological order (FR-015). No cost fields."""
+    unit = session.exec(
+        select(Unit).where(Unit.castranova_barcode == barcode)
+    ).first()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    product = session.get(Product, unit.product_id)
+    assert product is not None
+    movements = session.exec(
+        select(UnitMovement)
+        .where(UnitMovement.unit_id == unit.id)
+        .order_by(col(UnitMovement.occurred_at), col(UnitMovement.id))
+    ).all()
+    return SerialSearchResult(
+        castranova_barcode=unit.castranova_barcode,
+        product_id=unit.product_id,
+        sku=product.sku,
+        supplier_serial=unit.supplier_serial,
+        current_state=unit.current_state,
+        movements=[SerialMovementPublic.model_validate(m) for m in movements],
+    )
+
+
+def search_sku(*, session: Session, sku: str) -> SkuSearchResult:
+    """Batch attribution + quantity-on-hand for one SKU (FR-015). QUANTITY lists
+    its part_batch rows (oldest-first) with remaining_qty; SERIALIZED reports the
+    in-stock unit count. No cost fields (search is both-roles)."""
+    product = session.exec(select(Product).where(Product.sku == sku)).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if product.tracking_mode == TrackingMode.QUANTITY:
+        batches = session.exec(
+            select(PartBatch)
+            .where(PartBatch.product_id == product.id)
+            .order_by(col(PartBatch.received_at), col(PartBatch.id))
+        ).all()
+        total = sum(b.remaining_qty for b in batches)
+        batch_pub = [SkuBatchPublic.model_validate(b) for b in batches]
+    else:
+        total = len(
+            session.exec(
+                select(Unit.id).where(
+                    Unit.product_id == product.id,
+                    Unit.current_state == UnitState.IN_STOCK,
+                )
+            ).all()
+        )
+        batch_pub = []
+
+    return SkuSearchResult(
+        sku=product.sku,
+        product_id=product.id,
+        tracking_mode=product.tracking_mode,
+        total_on_hand=total,
+        batches=batch_pub,
     )
 
 
