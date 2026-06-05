@@ -56,6 +56,7 @@ from app.models import (
     Supplier,
     SupplierCreate,
     SupplierUpdate,
+    SystemSetting,
     TrackingMode,
     Unit,
     UnitMovement,
@@ -140,6 +141,59 @@ def seed_locations(*, session: Session) -> None:
     for code, name in seeds:
         if not session.exec(select(Location).where(Location.code == code)).first():
             session.add(Location(code=code, name=name))
+    session.commit()
+
+
+# --- System settings (singleton key/jsonb store; §4.2 row 8) ------------------
+
+OVERRIDE_THRESHOLD_KEY = "override_deviation_threshold_pct"
+DEFAULT_OVERRIDE_THRESHOLD_PCT = 5.0
+
+
+def get_setting(*, session: Session, key: str, default: Any = None) -> Any:
+    row = session.exec(
+        select(SystemSetting).where(SystemSetting.key == key)
+    ).first()
+    return row.value if row else default
+
+
+def set_setting(
+    *,
+    session: Session,
+    key: str,
+    value: Any,
+    updated_by_user_id: uuid.UUID | None = None,
+) -> SystemSetting:
+    row = session.exec(
+        select(SystemSetting).where(SystemSetting.key == key)
+    ).first()
+    if row:
+        row.value = value
+        row.updated_by_user_id = updated_by_user_id
+        row.updated_at = get_datetime_utc()
+    else:
+        row = SystemSetting(
+            key=key, value=value, updated_by_user_id=updated_by_user_id
+        )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
+
+
+def seed_system_settings(*, session: Session) -> None:
+    """Idempotently seed the default configurable thresholds."""
+    if not session.exec(
+        select(SystemSetting).where(
+            SystemSetting.key == OVERRIDE_THRESHOLD_KEY
+        )
+    ).first():
+        session.add(
+            SystemSetting(
+                key=OVERRIDE_THRESHOLD_KEY,
+                value=DEFAULT_OVERRIDE_THRESHOLD_PCT,
+            )
+        )
     session.commit()
 
 

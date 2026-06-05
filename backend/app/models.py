@@ -200,6 +200,25 @@ class LocationPublic(LocationBase):
     id: uuid.UUID
 
 
+# --- System settings (singleton key/jsonb store; M006, spec §4.2 row 8) -------
+
+
+class SystemSetting(SQLModel, table=True):
+    # One row per configurable knob: override deviation threshold (FR-010),
+    # holding-period slow-mover threshold (FR-014), low-stock default, etc.
+    # `value` is jsonb so each setting stores its own natural type.
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    key: str = Field(unique=True, index=True, max_length=64)
+    value: Any = Field(sa_column=Column(JSONB, nullable=False))
+    updated_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id"
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
+
+
 # --- Supplier -----------------------------------------------------------------
 
 

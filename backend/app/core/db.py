@@ -33,3 +33,4 @@ def init_db(session: Session) -> None:
         user = crud.create_user(session=session, user_create=user_in)
 
     crud.seed_locations(session=session)
+    crud.seed_system_settings(session=session)
