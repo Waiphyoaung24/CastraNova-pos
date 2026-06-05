@@ -1,6 +1,5 @@
 import uuid
 from decimal import Decimal
-from typing import Any
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -16,34 +15,9 @@ from app.models import (
     SupplierCreate,
     TrackingMode,
 )
+from tests.utils.utils import assert_no_financial_keys
 
 PREFIX = settings.API_V1_STR
-
-
-def _assert_no_financial_keys(payload: Any) -> None:
-    """Recursively assert no cost/margin/budget KEY appears anywhere in the JSON
-    (financial fields must be absent for staff, not blanked). Key-based (not a
-    substring scan of values) so a customer/project named 'Margin Co' can't
-    false-trip it."""
-    forbidden = {"revenue", "cogs", "margin", "budget", "consumed_cost",
-                 "lifetime_sale_revenue_thb", "lifetime_sale_cogs_thb",
-                 "lifetime_sale_margin_thb", "lifetime_maintenance_revenue_thb",
-                 "lifetime_maintenance_cogs_thb", "lifetime_maintenance_margin_thb",
-                 "lifetime_project_cogs_thb", "budget_thb", "consumed_cost_thb"}
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            for k, v in node.items():
-                kl = k.lower()
-                assert not any(
-                    f in kl for f in forbidden
-                ), f"leaked financial key: {k}"
-                walk(v)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(payload)
 
 
 def _seed_customer_with_one_sale(
@@ -123,7 +97,7 @@ def test_customer_dashboard_staff_has_no_financial_keys(
     )
     assert r.status_code == 200
     body = r.json()
-    _assert_no_financial_keys(body)
+    assert_no_financial_keys(body)
     assert "transactions" in body and "active_projects" in body
 
 
