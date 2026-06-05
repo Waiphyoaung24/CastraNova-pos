@@ -1364,6 +1364,29 @@ class ChannelMarginReport(SQLModel):
     total_margin_thb: MoneyTHB
 
 
+# --- Stock-on-hand dashboard (FR-012; both roles, no cost fields) -------------
+
+
+class StockOnHandRow(SQLModel):
+    product_id: uuid.UUID
+    sku: str
+    model_name: str
+    category: str | None
+    tracking_mode: TrackingMode
+    quantity_on_hand: int
+
+
+class StockOnHandResponse(SQLModel):
+    rows: list[StockOnHandRow]
+
+
+class BatchDrillRow(SQLModel):
+    batch_no: str
+    remaining_qty: int
+    received_at: datetime
+    # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
+
+
 # --- Override-exceptions report (FR-010; read-only) ---------------------------
 
 

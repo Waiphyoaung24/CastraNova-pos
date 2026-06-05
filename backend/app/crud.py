@@ -5,7 +5,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypeVar
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import ColumnElement, case, func
 from sqlalchemy import select as sa_select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, col, select
@@ -20,6 +20,7 @@ from app.core.state_machine import (
 from app.models import (
     AdjustmentTarget,
     AuditEntryPublic,
+    BatchDrillRow,
     Channel,
     ChannelMarginReport,
     ChannelMarginRow,
@@ -68,6 +69,8 @@ from app.models import (
     SkuSearchResult,
     StockAdjustment,
     StockAdjustmentCreate,
+    StockOnHandResponse,
+    StockOnHandRow,
     Supplier,
     SupplierCreate,
     SupplierUpdate,
@@ -2472,3 +2475,125 @@ def list_audit(
 
     rows.sort(key=lambda e: (e.occurred_at, e.id), reverse=True)
     return rows[skip : skip + limit]
+
+
+# --- Stock-on-hand dashboard (FR-012) -----------------------------------------
+
+
+def stock_on_hand(
+    *,
+    session: Session,
+    category: str | None = None,
+    supplier_id: uuid.UUID | None = None,
+    customer_id: uuid.UUID | None = None,
+) -> StockOnHandResponse:
+    """Server-side stock-on-hand per active product in one annotation pass.
+
+    QUANTITY products: sum(part_batch.remaining_qty); SERIALIZED products: count
+    of IN_STOCK unit rows. Correlated scalar subqueries with coalesce(...,0) keep
+    this set-based (no N+1, no per-row @property). No cost/COGS fields — quantities
+    aren't financial, so a single both-roles schema with no role-tiering."""
+    qty_pred: list[ColumnElement[bool]] = [
+        col(PartBatch.product_id) == col(Product.id),
+        col(PartBatch.remaining_qty) > 0,
+    ]
+    if supplier_id is not None:
+        qty_pred.append(col(PartBatch.supplier_id) == supplier_id)
+    qty_subq = (
+        select(func.coalesce(func.sum(PartBatch.remaining_qty), 0))
+        .where(*qty_pred)
+        .correlate(Product)
+        .scalar_subquery()
+    )
+    unit_pred: list[ColumnElement[bool]] = [
+        col(Unit.product_id) == col(Product.id),
+        col(Unit.current_state) == UnitState.IN_STOCK,
+    ]
+    if supplier_id is not None:
+        unit_pred.append(col(Unit.supplier_id) == supplier_id)
+    unit_subq = (
+        select(func.coalesce(func.count(col(Unit.id)), 0))
+        .where(*unit_pred)
+        .correlate(Product)
+        .scalar_subquery()
+    )
+    on_hand = case(
+        (col(Product.tracking_mode) == TrackingMode.SERIALIZED, unit_subq),
+        else_=qty_subq,
+    )
+    stmt = select(  # type: ignore[call-overload]
+        Product.id,
+        Product.sku,
+        Product.model_name,
+        Product.category,
+        Product.tracking_mode,
+        on_hand.label("quantity_on_hand"),
+    ).where(col(Product.is_active).is_(True))
+    if category is not None:
+        stmt = stmt.where(col(Product.category) == category)
+    stmt = stmt.order_by(col(Product.sku))
+    rows = [
+        StockOnHandRow(
+            product_id=r[0],
+            sku=r[1],
+            model_name=r[2],
+            category=r[3],
+            tracking_mode=r[4],
+            quantity_on_hand=int(r[5] or 0),
+        )
+        for r in session.exec(stmt).all()
+    ]
+    if customer_id is not None:
+        rows = _filter_rows_by_customer(
+            session=session, rows=rows, customer_id=customer_id
+        )
+    return StockOnHandResponse(rows=rows)
+
+
+def stock_on_hand_batches(
+    *, session: Session, product_id: uuid.UUID
+) -> list[BatchDrillRow]:
+    """Active (remaining_qty > 0) batches for a product, oldest first (FIFO order)."""
+    batches = session.exec(
+        select(PartBatch)
+        .where(
+            col(PartBatch.product_id) == product_id,
+            PartBatch.remaining_qty > 0,
+        )
+        .order_by(col(PartBatch.received_at), col(PartBatch.id))
+    ).all()
+    return [
+        BatchDrillRow(
+            batch_no=b.batch_no,
+            remaining_qty=b.remaining_qty,
+            received_at=b.received_at,
+        )
+        for b in batches
+    ]
+
+
+def _filter_rows_by_customer(
+    *,
+    session: Session,
+    rows: list[StockOnHandRow],
+    customer_id: uuid.UUID,
+) -> list[StockOnHandRow]:
+    """Restrict rows to products the customer has ever bought or had serviced."""
+    sold = session.exec(
+        select(SaleLine.product_id)
+        .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
+        .where(
+            col(Sale.customer_id) == customer_id,
+            col(SaleLine.product_id).is_not(None),
+        )
+    ).all()
+    serviced = session.exec(
+        select(ServiceTicketPart.product_id)
+        .join(
+            ServiceTicket,
+            col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+        )
+        .where(col(ServiceTicket.customer_id) == customer_id)
+    ).all()
+    allowed = {pid for pid in [*sold, *serviced] if pid is not None}
+    return [row for row in rows if row.product_id in allowed]

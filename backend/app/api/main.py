@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     audit,
     customers,
+    dashboards,
     login,
     low_stock,
     notifications,
@@ -42,6 +43,7 @@ api_router.include_router(audit.router)
 api_router.include_router(pricing_overrides.router)
 api_router.include_router(stock_adjustments.router)
 api_router.include_router(search.router)
+api_router.include_router(dashboards.router)
 
 
 if settings.ENVIRONMENT == "local":
