@@ -33,6 +33,7 @@ from app.models import (
     NotificationLog,
     NotificationPreference,
     NotificationStatus,
+    PricingOverrideRequest,
     Product,
     ProjectPull,
     ProjectPullLine,
@@ -226,6 +227,13 @@ def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> s
             f"Low stock: {payload.get('sku')} — {payload.get('on_hand')} left "
             f"(min {payload.get('min_stock_level')})."
         )
+    if event_type == NotificationEvent.OVERRIDE_PENDING:
+        # deviation_pct is a percentage, not a raw price — safe to surface.
+        return (
+            f"Pricing override pending approval: {payload.get('sku')} "
+            f"({payload.get('deviation_pct')}% deviation). "
+            f"Request {payload.get('override_id')}."
+        )
     # Never push a raw payload (may carry financial fields). Each new event must
     # add an explicit, safe template here.
     raise NotImplementedError(f"No render template for {event_type!r}")
@@ -314,6 +322,42 @@ def notify_low_stock_bg(*, product_ids: list[uuid.UUID]) -> None:
             notify_low_stock(session=session, product_ids=product_ids)
     except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
         logger.exception("notify_low_stock_bg failed for product_ids=%s", product_ids)
+
+
+def notify_override_pending(
+    *, session: Session, override: PricingOverrideRequest
+) -> list[NotificationLog]:
+    """Notify every BKK_ADMIN that a pricing override needs a decision (FR-010)."""
+    recipients = list(
+        session.exec(select(User).where(User.role == UserRole.BKK_ADMIN)).all()
+    )
+    product = session.get(Product, override.product_id)
+    payload: dict[str, Any] = {
+        "override_id": str(override.id),
+        "sku": product.sku if product else None,
+        "deviation_pct": str(override.deviation_pct),
+    }
+    return notify(
+        session=session,
+        event_type=NotificationEvent.OVERRIDE_PENDING,
+        recipients=recipients,
+        payload=payload,
+    )
+
+
+def notify_override_pending_bg(*, override_id: uuid.UUID) -> None:
+    """BackgroundTasks entrypoint for override-pending alerts. Opens its OWN
+    session and never raises out of the background task (best-effort)."""
+    try:
+        with Session(engine) as session:
+            override = session.get(PricingOverrideRequest, override_id)
+            if override is None:
+                return
+            notify_override_pending(session=session, override=override)
+    except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
+        logger.exception(
+            "notify_override_pending_bg failed for override_id=%s", override_id
+        )
 
 
 def notify_pull_short_bg(*, pull_id: uuid.UUID) -> None:

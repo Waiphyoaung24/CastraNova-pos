@@ -6,6 +6,7 @@ from app.api.routes import (
     login,
     low_stock,
     notifications,
+    pricing_overrides,
     private,
     products,
     project_pulls,
@@ -36,6 +37,7 @@ api_router.include_router(notifications.router)
 api_router.include_router(low_stock.router)
 api_router.include_router(reports.router)
 api_router.include_router(audit.router)
+api_router.include_router(pricing_overrides.router)
 
 
 if settings.ENVIRONMENT == "local":
