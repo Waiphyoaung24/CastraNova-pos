@@ -80,6 +80,11 @@ class OverrideState(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class OverrideTargetKind(str, enum.Enum):
+    SALE_LINE = "SALE_LINE"
+    SERVICE_TICKET_PART = "SERVICE_TICKET_PART"
+
+
 class AdjustmentTarget(str, enum.Enum):
     UNIT = "UNIT"
     QUANTITY = "QUANTITY"
@@ -754,6 +759,81 @@ class ReceiveQuantityRequest(SQLModel):
     idempotency_key: uuid.UUID
 
 
+# --- Pricing override (FR-010; M013) ------------------------------------------
+
+
+class PricingOverrideRequest(SQLModel, table=True):
+    # Standalone approval request. A sale_line / service_ticket_part points to it
+    # via pricing_override_request_id (FK, not the reverse — spec line 222), so a
+    # line carries at most one override. default_price_thb is server-derived from
+    # the product (never client-supplied) so deviation can't be gamed. State is
+    # AUTO_APPROVED when |requested-default| is within the system_setting
+    # threshold; else PENDING for an admin decide (FR-010).
+    __table_args__ = (
+        Index("ix_pricing_override_state_created", "state", "created_at"),
+        CheckConstraint(
+            "default_price_thb >= 0", name="ck_override_default_price_nonneg"
+        ),
+        CheckConstraint(
+            "requested_price_thb >= 0",
+            name="ck_override_requested_price_nonneg",
+        ),
+        CheckConstraint(
+            "deviation_pct >= 0", name="ck_override_deviation_nonneg"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    target_kind: OverrideTargetKind
+    product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
+    default_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    requested_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    deviation_pct: Decimal = Field(sa_type=Numeric(7, 4))  # type: ignore[call-overload]
+    reason: str = Field(max_length=512)
+    state: OverrideState
+    created_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    decided_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id"
+    )
+    decided_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
+
+
+class PricingOverrideCreate(SQLModel):
+    target_kind: OverrideTargetKind
+    product_id: uuid.UUID
+    requested_price_thb: Decimal = Field(ge=0, le=9999999999.99)
+    reason: str = Field(min_length=1, max_length=512)
+
+
+class PricingOverrideDecision(SQLModel):
+    decision: Literal["APPROVED", "REJECTED"]
+
+
+class PricingOverridePublic(SQLModel):
+    id: uuid.UUID
+    target_kind: OverrideTargetKind
+    product_id: uuid.UUID
+    default_price_thb: Decimal
+    requested_price_thb: Decimal
+    deviation_pct: Decimal
+    reason: str
+    state: OverrideState
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+    decided_by_user_id: uuid.UUID | None
+    decided_at: datetime | None
+
+
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------
 
 
@@ -787,6 +867,11 @@ class SaleLine(SQLModel, table=True):
             "line_kind != 'UNIT' OR unit_id IS NOT NULL",
             name="ck_saleline_unit_requires_unit_id",
         ),
+        # An override applies to at most one line (nullable unique → many NULLs OK).
+        UniqueConstraint(
+            "pricing_override_request_id",
+            name="uq_saleline_pricing_override_request_id",
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -797,8 +882,9 @@ class SaleLine(SQLModel, table=True):
     quantity: int
     unit_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
     unit_cost_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
-    # FK wired in M013 (pricing_override_request); bare-nullable until then.
-    pricing_override_request_id: uuid.UUID | None = Field(default=None)
+    pricing_override_request_id: uuid.UUID | None = Field(
+        default=None, foreign_key="pricingoverriderequest.id"
+    )
 
 
 class SaleLinePublic(SQLModel):
@@ -873,6 +959,11 @@ class ServiceTicketPart(SQLModel, table=True):
         CheckConstraint(
             "quantity > 0", name="ck_service_ticket_part_qty_positive"
         ),
+        # An override applies to at most one line (nullable unique → many NULLs OK).
+        UniqueConstraint(
+            "pricing_override_request_id",
+            name="uq_service_ticket_part_pricing_override_request_id",
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -882,8 +973,9 @@ class ServiceTicketPart(SQLModel, table=True):
     product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
     quantity: int
     unit_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
-    # FK wired in M013 (pricing_override_request); bare-nullable until then.
-    pricing_override_request_id: uuid.UUID | None = Field(default=None)
+    pricing_override_request_id: uuid.UUID | None = Field(
+        default=None, foreign_key="pricingoverriderequest.id"
+    )
 
 
 class ServiceTicketPartPublic(SQLModel):
