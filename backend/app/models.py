@@ -975,11 +975,13 @@ class StockAdjustmentPublic(SQLModel):
     created_at: datetime
 
 
+# --- Sync review queue (M020) -------------------------------------------------
+
+
 class SyncReviewItem(SQLModel, table=True):
     # Captures offline mutations that replayed STALE (>7-day cap) or lost a
     # write-CONFLICT (409 on replay), for admin triage (M020). Thin ingest,
     # status-only triage; ingest is idempotent via the UNIQUE idempotency_key.
-    __tablename__ = "syncreviewitem"
     __table_args__ = (
         UniqueConstraint(
             "idempotency_key", name="uq_syncreviewitem_idempotency_key"
@@ -1000,7 +1002,7 @@ class SyncReviewItem(SQLModel, table=True):
         sa_column_kwargs={"server_default": func.now()},
     )
     resolved_by_user_id: uuid.UUID | None = Field(
-        default=None, foreign_key="user.id"
+        default=None, foreign_key="user.id", index=True
     )
     resolved_at: datetime | None = Field(
         default=None,
