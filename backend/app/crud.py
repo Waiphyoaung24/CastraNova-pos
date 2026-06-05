@@ -55,6 +55,7 @@ from app.models import (
     ProjectPullFulfillLine,
     ProjectPullLine,
     ProjectPullState,
+    ProjectStatus,
     ProjectUpdate,
     ReceivePiece,
     Sale,
@@ -2369,6 +2370,166 @@ def channel_margin_report(
         total_cogs_thb=total_cogs,
         total_margin_thb=total_rev - total_cogs,
     )
+
+
+# --- Customer dashboard (FR-020; role-tiered, spec §6.5 / S7) ------------------
+
+
+def get_customer_dashboard(
+    *, session: Session, customer_id: uuid.UUID
+) -> dict[str, Any]:
+    """Admin-superset dashboard for one customer: transactions, projects, and
+    lifetime SALE / MAINTENANCE revenue·COGS·margin + PROJECT COGS. Mirrors the
+    join shapes of channel_margin_report() but scoped by customer (no date
+    window). The route picks the staff or admin schema by role; redacted fields
+    are physically absent from the staff JSON."""
+    customer = session.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    sale_rev, sale_cogs = session.exec(
+        select(
+            func.coalesce(func.sum(Sale.total_thb), Decimal("0")),
+            func.coalesce(func.sum(Sale.total_cogs_thb), Decimal("0")),
+        ).where(col(Sale.customer_id) == customer_id)
+    ).one()
+
+    maint_rev = session.exec(
+        select(
+            func.coalesce(
+                func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                Decimal("0"),
+            )
+        )
+        .join(
+            ServiceTicket,
+            col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+        )
+        .where(
+            col(ServiceTicket.customer_id) == customer_id,
+            col(ServiceTicket.closed_at).is_not(None),
+        )
+    ).one()
+    maint_cogs = session.exec(
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(
+            ServiceTicket,
+            col(PartMovement.service_ticket_id) == col(ServiceTicket.id),
+        )
+        .where(
+            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+            col(ServiceTicket.customer_id) == customer_id,
+        )
+    ).one()
+
+    proj_part_cogs = session.exec(
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+        .where(
+            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.customer_id) == customer_id,
+        )
+    ).one()
+    proj_unit_cogs = session.exec(
+        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        .select_from(UnitMovement)
+        .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.customer_id) == customer_id,
+        )
+    ).one()
+
+    projects = session.exec(
+        select(Project).where(col(Project.customer_id) == customer_id)
+    ).all()
+    active = [p for p in projects if p.status == ProjectStatus.ACTIVE]
+    closed = [p for p in projects if p.status == ProjectStatus.CLOSED]
+
+    def _project_row(p: Project) -> dict[str, Any]:
+        return {
+            "id": p.id,
+            "code": p.code,
+            "name": p.name,
+            "status": p.status,
+            "budget_thb": p.budget_thb,
+            "consumed_cost_thb": _project_consumed_cost(
+                session=session, project_id=p.id
+            ),
+        }
+
+    return {
+        "customer": customer,
+        "transactions": _customer_transactions(
+            session=session, customer_id=customer_id
+        ),
+        "active_projects": [_project_row(p) for p in active],
+        "closed_projects": [_project_row(p) for p in closed],
+        "lifetime_sale_revenue_thb": _q(sale_rev),
+        "lifetime_sale_cogs_thb": _q(sale_cogs),
+        "lifetime_sale_margin_thb": _q(sale_rev - sale_cogs),
+        "lifetime_maintenance_revenue_thb": _q(maint_rev),
+        "lifetime_maintenance_cogs_thb": _q(maint_cogs),
+        "lifetime_maintenance_margin_thb": _q(maint_rev - maint_cogs),
+        "lifetime_project_cogs_thb": _q(proj_part_cogs + proj_unit_cogs),
+    }
+
+
+def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decimal:
+    part_cogs = session.exec(
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+        .where(
+            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id) == project_id,
+        )
+    ).one()
+    unit_cogs = session.exec(
+        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        .select_from(UnitMovement)
+        .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id) == project_id,
+        )
+    ).one()
+    return _q(part_cogs + unit_cogs)
+
+
+def _customer_transactions(
+    *, session: Session, customer_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for s in session.exec(
+        select(Sale).where(col(Sale.customer_id) == customer_id)
+    ).all():
+        out.append({"kind": "SALE", "reference_id": s.id, "occurred_at": s.sold_at})
+    for t in session.exec(
+        select(ServiceTicket).where(
+            col(ServiceTicket.customer_id) == customer_id,
+            col(ServiceTicket.closed_at).is_not(None),
+        )
+    ).all():
+        out.append(
+            {"kind": "MAINTENANCE", "reference_id": t.id, "occurred_at": t.closed_at}
+        )
+    for pull in session.exec(
+        select(ProjectPull).where(col(ProjectPull.customer_id) == customer_id)
+    ).all():
+        out.append(
+            {
+                "kind": "PROJECT_PULL",
+                "reference_id": pull.id,
+                "occurred_at": pull.created_at,
+            }
+        )
+    out.sort(key=lambda r: r["occurred_at"], reverse=True)
+    return out
 
 
 # --- Audit trail (FR-019) -----------------------------------------------------

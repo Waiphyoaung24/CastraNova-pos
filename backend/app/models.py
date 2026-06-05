@@ -1387,6 +1387,50 @@ class BatchDrillRow(SQLModel):
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 
+# --- Customer dashboard (FR-020; role-tiered, spec §6.5 / S7) ------------------
+
+
+class TransactionSummaryPublic(SQLModel):
+    kind: str  # "SALE" | "MAINTENANCE" | "PROJECT_PULL"
+    reference_id: uuid.UUID
+    occurred_at: datetime
+
+
+class ProjectSummaryStaffPublic(SQLModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    status: ProjectStatus
+    # No budget / consumed_cost — staff redaction.
+
+
+class ProjectSummaryAdminPublic(ProjectSummaryStaffPublic):
+    budget_thb: Decimal | None
+    consumed_cost_thb: Decimal
+
+
+class CustomerDashboardStaffPublic(SQLModel):
+    customer: CustomerPublic
+    transactions: list[TransactionSummaryPublic]
+    active_projects: list[ProjectSummaryStaffPublic]
+    closed_projects: list[ProjectSummaryStaffPublic]
+
+
+class CustomerDashboardAdminPublic(CustomerDashboardStaffPublic):
+    # Financial fields are REQUIRED so a staff payload cannot upcast to admin.
+    lifetime_sale_revenue_thb: Decimal
+    lifetime_sale_cogs_thb: Decimal
+    lifetime_sale_margin_thb: Decimal
+    lifetime_maintenance_revenue_thb: Decimal
+    lifetime_maintenance_cogs_thb: Decimal
+    lifetime_maintenance_margin_thb: Decimal
+    lifetime_project_cogs_thb: Decimal
+    # Narrowed to the admin project row (adds budget/consumed_cost); the staff
+    # base declares the redacted row. list invariance → explicit override.
+    active_projects: list[ProjectSummaryAdminPublic]  # type: ignore[assignment]
+    closed_projects: list[ProjectSummaryAdminPublic]  # type: ignore[assignment]
+
+
 # --- Override-exceptions report (FR-010; read-only) ---------------------------
 
 
