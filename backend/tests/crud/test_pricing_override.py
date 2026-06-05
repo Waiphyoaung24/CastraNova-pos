@@ -1,18 +1,27 @@
 import uuid
 from decimal import Decimal
 
+import pytest
+from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app import crud
 from app.models import (
     OverrideState,
     OverrideTargetKind,
+    PricingOverrideCreate,
     PricingOverrideRequest,
     ProductCreate,
     TrackingMode,
     UserCreate,
     UserRole,
 )
+
+
+def _set_threshold(db: Session, pct: float) -> None:
+    crud.set_setting(
+        session=db, key=crud.OVERRIDE_THRESHOLD_KEY, value=pct
+    )
 
 
 def _admin(db: Session) -> uuid.UUID:
@@ -70,3 +79,145 @@ def test_pricing_override_request_persists(db: Session) -> None:
     assert fetched.state == OverrideState.PENDING
     assert fetched.created_at is not None
     assert fetched.decided_at is None
+
+
+def test_create_override_auto_approves_within_threshold(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db, retail="1000.00")
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("970.00"),  # 3% deviation
+            reason="repeat customer",
+        ),
+        created_by_user_id=actor,
+    )
+    assert ovr.state == OverrideState.AUTO_APPROVED
+    assert ovr.default_price_thb == Decimal("1000.00")
+    assert ovr.deviation_pct == Decimal("3.0000")
+
+
+def test_create_override_pending_above_threshold(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db, retail="1000.00")
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("900.00"),  # 10% deviation
+            reason="big discount",
+        ),
+        created_by_user_id=actor,
+    )
+    assert ovr.state == OverrideState.PENDING
+    assert ovr.deviation_pct == Decimal("10.0000")
+
+
+def test_create_override_uses_repair_price_for_ticket_target(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db, retail="1000.00", repair="300.00")
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
+            product_id=pid,
+            requested_price_thb=Decimal("330.00"),  # 10% off repair price
+            reason="warranty goodwill",
+        ),
+        created_by_user_id=actor,
+    )
+    assert ovr.default_price_thb == Decimal("300.00")
+    assert ovr.state == OverrideState.PENDING
+
+
+def test_decide_approve_sets_decided_fields(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    creator = _admin(db)
+    decider = _admin(db)
+    pid = _product(db)
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("800.00"),
+            reason="x",
+        ),
+        created_by_user_id=creator,
+    )
+    decided = crud.decide_pricing_override(
+        session=db,
+        override_id=ovr.id,
+        decision="APPROVED",
+        decided_by_user_id=decider,
+    )
+    assert decided.state == OverrideState.APPROVED
+    assert decided.decided_by_user_id == decider
+    assert decided.decided_at is not None
+
+
+def test_decide_reject(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db)
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("500.00"),
+            reason="x",
+        ),
+        created_by_user_id=actor,
+    )
+    decided = crud.decide_pricing_override(
+        session=db, override_id=ovr.id, decision="REJECTED", decided_by_user_id=actor
+    )
+    assert decided.state == OverrideState.REJECTED
+
+
+def test_decide_non_pending_is_conflict(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db)
+    ovr = crud.create_pricing_override(  # 0% -> AUTO_APPROVED, not PENDING
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("1000.00"),
+            reason="no change",
+        ),
+        created_by_user_id=actor,
+    )
+    assert ovr.state == OverrideState.AUTO_APPROVED
+    with pytest.raises(HTTPException) as exc:
+        crud.decide_pricing_override(
+            session=db, override_id=ovr.id, decision="APPROVED", decided_by_user_id=actor
+        )
+    assert exc.value.status_code == 409
+
+
+def test_list_filters_by_state(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db, retail="1000.00")
+    pending = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("700.00"),  # 30% -> PENDING
+            reason="x",
+        ),
+        created_by_user_id=actor,
+    )
+    rows = crud.list_pricing_overrides(session=db, state=OverrideState.PENDING)
+    assert pending.id in {r.id for r in rows}
+    assert all(r.state == OverrideState.PENDING for r in rows)

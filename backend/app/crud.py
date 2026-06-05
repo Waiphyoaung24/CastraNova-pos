@@ -32,9 +32,13 @@ from app.models import (
     MovementType,
     NotificationPreference,
     NotificationPreferenceUpdate,
+    OverrideState,
+    OverrideTargetKind,
     PartBatch,
     PartMovement,
     PriceChange,
+    PricingOverrideCreate,
+    PricingOverrideRequest,
     Product,
     ProductCreate,
     ProductUpdate,
@@ -773,6 +777,137 @@ def bulk_set_min_stock_level(
     for product in products:
         session.refresh(product)
     return products
+
+
+# --- Pricing override (FR-010) ------------------------------------------------
+
+_PCT = Decimal("0.0001")
+# Caps deviation at the Numeric(7,4) ceiling; used when the default price is 0
+# so a meaningful percentage cannot be computed — forces the request to PENDING.
+_MAX_DEVIATION_PCT = Decimal("999.9999")
+
+
+def _default_price_for_target(
+    *, product: Product, target_kind: OverrideTargetKind
+) -> Decimal:
+    if target_kind == OverrideTargetKind.SALE_LINE:
+        return product.retail_price_thb
+    return product.repair_price_thb
+
+
+def create_pricing_override(
+    *,
+    session: Session,
+    override_in: PricingOverrideCreate,
+    created_by_user_id: uuid.UUID,
+) -> PricingOverrideRequest:
+    """Create an override request (FR-010). The default price is server-derived
+    from the product (never client-supplied), so deviation can't be gamed.
+    AUTO_APPROVED when deviation <= the configured threshold; else PENDING for an
+    admin decide."""
+    product = session.get(Product, override_in.product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    default = _default_price_for_target(
+        product=product, target_kind=override_in.target_kind
+    )
+    requested = override_in.requested_price_thb
+    if default <= 0:
+        deviation = (
+            Decimal("0") if requested == 0 else _MAX_DEVIATION_PCT
+        )
+    else:
+        deviation = (abs(requested - default) / default * 100).quantize(
+            _PCT, rounding=ROUND_HALF_UP
+        )
+
+    threshold = Decimal(
+        str(
+            get_setting(
+                session=session,
+                key=OVERRIDE_THRESHOLD_KEY,
+                default=DEFAULT_OVERRIDE_THRESHOLD_PCT,
+            )
+        )
+    )
+    state = (
+        OverrideState.AUTO_APPROVED
+        if deviation <= threshold
+        else OverrideState.PENDING
+    )
+    row = PricingOverrideRequest(
+        target_kind=override_in.target_kind,
+        product_id=product.id,
+        default_price_thb=default,
+        requested_price_thb=requested,
+        deviation_pct=deviation,
+        reason=override_in.reason,
+        state=state,
+        created_by_user_id=created_by_user_id,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
+
+
+def get_pricing_override(
+    *, session: Session, override_id: Any
+) -> PricingOverrideRequest | None:
+    return session.get(PricingOverrideRequest, override_id)
+
+
+def list_pricing_overrides(
+    *,
+    session: Session,
+    state: OverrideState | None = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[PricingOverrideRequest]:
+    stmt = select(PricingOverrideRequest)
+    if state is not None:
+        stmt = stmt.where(PricingOverrideRequest.state == state)
+    stmt = (
+        stmt.order_by(PricingOverrideRequest.created_at.desc())  # type: ignore[attr-defined]
+        .offset(skip)
+        .limit(limit)
+    )
+    return list(session.exec(stmt).all())
+
+
+def decide_pricing_override(
+    *,
+    session: Session,
+    override_id: uuid.UUID,
+    decision: str,
+    decided_by_user_id: uuid.UUID,
+) -> PricingOverrideRequest:
+    """Admin approves/rejects a PENDING override. Locks the row FOR UPDATE so two
+    concurrent decisions serialize; only a PENDING request may be decided."""
+    row = session.exec(
+        select(PricingOverrideRequest)
+        .where(PricingOverrideRequest.id == override_id)
+        .with_for_update()
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Override request not found")
+    if row.state != OverrideState.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only PENDING overrides can be decided (current: {row.state.value})",
+        )
+    row.state = (
+        OverrideState.APPROVED
+        if decision == "APPROVED"
+        else OverrideState.REJECTED
+    )
+    row.decided_by_user_id = decided_by_user_id
+    row.decided_at = get_datetime_utc()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------
