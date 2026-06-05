@@ -706,6 +706,12 @@ class PartMovement(PartMovementBase, table=True):
             unique=False,
             postgresql_where=text("project_pull_id IS NOT NULL"),
         ),
+        Index(
+            "ix_partmovement_service_ticket_id",
+            "service_ticket_id",
+            unique=False,
+            postgresql_where=text("service_ticket_id IS NOT NULL"),
+        ),
         CheckConstraint("quantity > 0", name="ck_part_movement_qty_positive"),
     )
 
@@ -964,6 +970,7 @@ class StockAdjustmentPublic(SQLModel):
 class Sale(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_sale_idempotency_key"),
+        Index("ix_sale_customer_id", "customer_id"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1058,6 +1065,7 @@ class ServiceTicket(SQLModel, table=True):
         UniqueConstraint(
             "idempotency_key", name="uq_service_ticket_idempotency_key"
         ),
+        Index("ix_serviceticket_customer_id", "customer_id"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1152,6 +1160,8 @@ class ProjectPull(SQLModel, table=True):
     # staff queue.
     __table_args__ = (
         Index("ix_project_pull_state_created", "state", "created_at"),
+        Index("ix_projectpull_customer_id", "customer_id"),
+        Index("ix_projectpull_project_id", "project_id"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

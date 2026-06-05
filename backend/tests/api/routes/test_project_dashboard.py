@@ -139,6 +139,11 @@ def test_project_dashboard_404(
     assert r.status_code == 404
 
 
+def test_project_dashboard_requires_auth(client: TestClient) -> None:
+    r = client.get(f"{PREFIX}/projects/{uuid.uuid4()}/dashboard")
+    assert r.status_code == 401
+
+
 def test_project_routes_still_admin_only(
     client: TestClient, staff_token_headers: dict[str, str]
 ) -> None:

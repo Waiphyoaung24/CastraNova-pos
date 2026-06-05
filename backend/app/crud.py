@@ -2449,6 +2449,10 @@ def get_customer_dashboard(
     active = [p for p in projects if p.status == ProjectStatus.ACTIVE]
     closed = [p for p in projects if p.status == ProjectStatus.CLOSED]
 
+    costs = _project_consumed_costs(
+        session=session, project_ids=[p.id for p in projects]
+    )
+
     def _project_row(p: Project) -> dict[str, Any]:
         return {
             "id": p.id,
@@ -2456,9 +2460,7 @@ def get_customer_dashboard(
             "name": p.name,
             "status": p.status,
             "budget_thb": p.budget_thb,
-            "consumed_cost_thb": _project_consumed_cost(
-                session=session, project_id=p.id
-            ),
+            "consumed_cost_thb": costs.get(p.id, _q(Decimal("0"))),
         }
 
     return {
@@ -2476,6 +2478,53 @@ def get_customer_dashboard(
         "lifetime_maintenance_margin_thb": _q(maint_rev - maint_cogs),
         "lifetime_project_cogs_thb": _q(proj_part_cogs + proj_unit_cogs),
     }
+
+
+def _project_consumed_costs(
+    *, session: Session, project_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, Decimal]:
+    """Batch variant of _project_consumed_cost: part-COGS + unit-COGS per project
+    in TWO grouped queries (avoids the 2N N+1 in get_customer_dashboard). Mirrors
+    the join shapes of _project_consumed_cost; any project_id with no rows
+    defaults to Decimal("0.00") via _q."""
+    if not project_ids:
+        return {}
+    totals: dict[uuid.UUID, Decimal] = {pid: Decimal("0") for pid in project_ids}
+
+    part_rows = session.exec(
+        select(
+            col(ProjectPull.project_id),
+            func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+        )
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+        .where(
+            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id).in_(project_ids),
+        )
+        .group_by(col(ProjectPull.project_id))
+    ).all()
+    for project_id, part_cogs in part_rows:
+        totals[project_id] += part_cogs
+
+    unit_rows = session.exec(
+        select(
+            col(ProjectPull.project_id),
+            func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+        )
+        .select_from(UnitMovement)
+        .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id).in_(project_ids),
+        )
+        .group_by(col(ProjectPull.project_id))
+    ).all()
+    for project_id, unit_cogs in unit_rows:
+        totals[project_id] += unit_cogs
+
+    return {pid: _q(total) for pid, total in totals.items()}
 
 
 def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decimal:

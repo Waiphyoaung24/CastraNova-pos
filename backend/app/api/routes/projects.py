@@ -42,6 +42,9 @@ def get_project_dashboard(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> ProjectDashboardAdminPublic | ProjectDashboardStaffPublic:
+    # Access model (spec §6.5/S7): any authenticated user may view any project
+    # dashboard; budget/consumed-cost fields are redacted for staff via the
+    # role-dispatched response schema below (no per-project IDOR scoping by design).
     data = crud.get_project_dashboard(session=session, project_id=project_id)
     if current_user.role == UserRole.BKK_ADMIN:
         return ProjectDashboardAdminPublic.model_validate(data)

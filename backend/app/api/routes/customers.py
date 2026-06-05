@@ -51,6 +51,9 @@ def get_customer_dashboard(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> CustomerDashboardAdminPublic | CustomerDashboardStaffPublic:
+    # Access model (spec §6.5/S7): any authenticated user may view any customer
+    # dashboard; financial fields are redacted for staff via the role-dispatched
+    # response schema below (no per-customer IDOR scoping by design).
     data = crud.get_customer_dashboard(session=session, customer_id=customer_id)
     if current_user.role == UserRole.BKK_ADMIN:
         return CustomerDashboardAdminPublic.model_validate(data)
