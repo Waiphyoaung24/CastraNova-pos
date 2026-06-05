@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 from app import crud
 from app.core.config import settings
 from app.models import (
+    CustomerCreate,
     Location,
     ProductCreate,
     SupplierCreate,
@@ -147,6 +148,42 @@ def test_stock_on_hand_filter_by_category(
     skus = {row["sku"] for row in r.json()["rows"]}
     assert comp_sku in skus
     assert fan_sku not in skus
+
+
+def test_stock_on_hand_filter_by_customer(
+    client: TestClient, staff_token_headers: dict[str, str], db: Session
+) -> None:
+    # Two QUANTITY products; the customer buys a small qty of only the first,
+    # leaving stock on hand. The customer= filter must return only the product
+    # that customer transacted, excluding the untouched one.
+    bought_sku = f"BUY-{uuid.uuid4().hex[:8]}"
+    other_sku = f"OTHER-{uuid.uuid4().hex[:8]}"
+    _seed_quantity_with_batches(client, staff_token_headers, db, [10], sku=bought_sku)
+    _seed_quantity_with_batches(client, staff_token_headers, db, [10], sku=other_sku)
+    customer = crud.create_customer(
+        session=db, customer_in=CustomerCreate(name="Filtered Customer")
+    )
+
+    sale = client.post(
+        f"{settings.API_V1_STR}/sales",
+        headers=staff_token_headers,
+        json={
+            "customer_id": str(customer.id),
+            "lines": [{"line_kind": "PART", "sku": bought_sku, "quantity": 2}],
+            "idempotency_key": str(uuid.uuid4()),
+        },
+    )
+    assert sale.status_code == 200, sale.text
+
+    r = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand",
+        headers=staff_token_headers,
+        params={"customer": str(customer.id)},
+    )
+    assert r.status_code == 200, r.text
+    skus = {row["sku"] for row in r.json()["rows"]}
+    assert bought_sku in skus
+    assert other_sku not in skus
 
 
 def test_stock_on_hand_requires_auth(client: TestClient) -> None:
