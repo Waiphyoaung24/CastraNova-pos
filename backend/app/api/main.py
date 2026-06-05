@@ -15,6 +15,7 @@ from app.api.routes import (
     reports,
     sales,
     service_tickets,
+    stock_adjustments,
     suppliers,
     users,
     utils,
@@ -38,6 +39,7 @@ api_router.include_router(low_stock.router)
 api_router.include_router(reports.router)
 api_router.include_router(audit.router)
 api_router.include_router(pricing_overrides.router)
+api_router.include_router(stock_adjustments.router)
 
 
 if settings.ENVIRONMENT == "local":

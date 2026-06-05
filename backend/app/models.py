@@ -523,7 +523,9 @@ class UnitMovementBase(SQLModel):
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
     service_ticket_id: uuid.UUID | None = Field(default=None)
     project_pull_id: uuid.UUID | None = Field(default=None)
-    stock_adjustment_id: uuid.UUID | None = Field(default=None)
+    stock_adjustment_id: uuid.UUID | None = Field(
+        default=None, foreign_key="stockadjustment.id"
+    )
     actor_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
     notes: str | None = Field(default=None, max_length=512)
 
@@ -602,7 +604,12 @@ class PartBatchBase(SQLModel):
     # covers product_id-prefix lookups, so a standalone B-tree would be redundant.
     product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
     batch_no: str = Field(max_length=128)  # YYYYMMDD-{SKU}-[ADJ-]###
-    supplier_id: uuid.UUID = Field(foreign_key="supplier.id", nullable=False)
+    # Nullable: positive Stock Adjustment batches (is_adjustment=True, found/
+    # recounted stock) have no supplier. Normal receives still require one
+    # (enforced in crud.receive_quantity).
+    supplier_id: uuid.UUID | None = Field(
+        default=None, foreign_key="supplier.id"
+    )
     supplier_batch_ref: str | None = Field(default=None, max_length=128)
     received_qty: int
     remaining_qty: int
@@ -669,7 +676,9 @@ class PartMovementBase(SQLModel):
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
     service_ticket_id: uuid.UUID | None = Field(default=None)
     project_pull_id: uuid.UUID | None = Field(default=None)
-    stock_adjustment_id: uuid.UUID | None = Field(default=None)
+    stock_adjustment_id: uuid.UUID | None = Field(
+        default=None, foreign_key="stockadjustment.id"
+    )
     actor_user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False)
     notes: str | None = Field(default=None, max_length=512)
 
@@ -834,6 +843,66 @@ class PricingOverridePublic(SQLModel):
     created_at: datetime
     decided_by_user_id: uuid.UUID | None
     decided_at: datetime | None
+
+
+# --- Stock adjustment (FR-011; M014) ------------------------------------------
+
+
+class StockAdjustment(SQLModel, table=True):
+    # Immutable after submit (Flow E). Admin-only. Links downstream:
+    # unit_movement.stock_adjustment_id (SERIALIZED) or one+ part_movement rows
+    # (QUANTITY: N on negative FIFO, one on a positive ADJ batch).
+    __table_args__ = (
+        CheckConstraint(
+            "target_kind != 'UNIT' OR unit_id IS NOT NULL",
+            name="ck_stock_adjustment_unit_requires_unit_id",
+        ),
+        CheckConstraint(
+            "target_kind != 'QUANTITY' OR "
+            "(product_id IS NOT NULL AND quantity_delta IS NOT NULL "
+            "AND quantity_delta <> 0)",
+            name="ck_stock_adjustment_quantity_requires_product_delta",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    target_kind: AdjustmentTarget
+    unit_id: uuid.UUID | None = Field(default=None, foreign_key="unit.id")
+    product_id: uuid.UUID | None = Field(default=None, foreign_key="product.id")
+    # Signed for QUANTITY (+ found / - lost); NULL for a SERIALIZED write-off.
+    quantity_delta: int | None = Field(default=None)
+    reason: str = Field(max_length=512)
+    created_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+        sa_column_kwargs={"server_default": func.now()},
+    )
+
+
+class StockAdjustmentCreate(SQLModel):
+    target_kind: AdjustmentTarget
+    castranova_barcode: str | None = None  # SERIALIZED target
+    sku: str | None = None  # QUANTITY target
+    quantity_delta: int | None = None  # QUANTITY: non-zero +/-
+    # Required for a positive QUANTITY adjustment (cost basis of the new batch).
+    purchase_cost_thb: Decimal | None = Field(
+        default=None, ge=0, le=9999999999.99
+    )
+    reason: str = Field(min_length=1, max_length=512)
+
+
+class StockAdjustmentPublic(SQLModel):
+    id: uuid.UUID
+    target_kind: AdjustmentTarget
+    unit_id: uuid.UUID | None
+    product_id: uuid.UUID | None
+    quantity_delta: int | None
+    reason: str
+    created_by_user_id: uuid.UUID
+    created_at: datetime
 
 
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------

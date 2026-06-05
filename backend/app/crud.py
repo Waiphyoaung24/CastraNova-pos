@@ -18,6 +18,7 @@ from app.core.state_machine import (
     assert_unit_transition,
 )
 from app.models import (
+    AdjustmentTarget,
     AuditEntryPublic,
     Channel,
     ChannelMarginReport,
@@ -59,6 +60,8 @@ from app.models import (
     SaleLineKind,
     ServiceTicket,
     ServiceTicketPart,
+    StockAdjustment,
+    StockAdjustmentCreate,
     Supplier,
     SupplierCreate,
     SupplierUpdate,
@@ -1047,6 +1050,177 @@ def override_exceptions_report(
         rejected=counts[OverrideState.REJECTED],
         rows=rows,
     )
+
+
+# --- Stock adjustment (FR-011, Flow E) ----------------------------------------
+
+
+def create_stock_adjustment(
+    *,
+    session: Session,
+    adj_in: StockAdjustmentCreate,
+    created_by_user_id: uuid.UUID,
+) -> StockAdjustment:
+    """Admin write-off / recount in one transaction, no notifications (Flow E):
+
+    - SERIALIZED: lock the unit, transition IN_STOCK -> ADJUSTED_OUT (terminal),
+      write a unit_movement(ADJUSTED_OUT) to the ADJUSTED_OUT location.
+    - QUANTITY negative: FIFO-consume |delta| (same path as a sale), writing one
+      part_movement(ADJUSTED_OUT) + its cost_line[]; 409 on insufficient stock.
+    - QUANTITY positive: create a new is_adjustment part_batch (ADJ-### batch_no,
+      admin-supplied purchase_cost) + one part_movement(RECEIVED).
+    """
+    adjusted_out = session.exec(
+        select(Location).where(Location.code == "ADJUSTED_OUT")
+    ).first()
+    ygn = session.exec(
+        select(Location).where(Location.code == "YGN_WH")
+    ).first()
+    if not adjusted_out or not ygn:
+        raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    if adj_in.target_kind == AdjustmentTarget.UNIT:
+        if not adj_in.castranova_barcode:
+            raise HTTPException(
+                status_code=422,
+                detail="UNIT adjustment requires castranova_barcode",
+            )
+        unit = session.exec(
+            select(Unit)
+            .where(Unit.castranova_barcode == adj_in.castranova_barcode)
+            .with_for_update()
+        ).first()
+        if not unit:
+            raise HTTPException(status_code=404, detail="Unit not found")
+        try:
+            new_state = assert_unit_transition(
+                unit.current_state, MovementType.ADJUSTED_OUT
+            )
+        except IllegalTransition:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Unit cannot be adjusted from {unit.current_state.value}",
+            )
+        adj = StockAdjustment(
+            target_kind=AdjustmentTarget.UNIT,
+            unit_id=unit.id,
+            reason=adj_in.reason,
+            created_by_user_id=created_by_user_id,
+        )
+        session.add(adj)
+        session.flush()
+        session.add(
+            UnitMovement(
+                unit_id=unit.id,
+                event_type=MovementType.ADJUSTED_OUT,
+                from_location_id=unit.current_location_id,
+                to_location_id=adjusted_out.id,
+                stock_adjustment_id=adj.id,
+                actor_user_id=created_by_user_id,
+                idempotency_key=uuid.uuid5(adj.id, str(unit.id)),
+            )
+        )
+        unit.current_state = new_state
+        unit.current_location_id = adjusted_out.id
+        unit.updated_at = get_datetime_utc()
+        session.add(unit)
+        session.commit()
+        session.refresh(adj)
+        return adj
+
+    # QUANTITY
+    if not adj_in.sku:
+        raise HTTPException(
+            status_code=422, detail="QUANTITY adjustment requires sku"
+        )
+    if not adj_in.quantity_delta:
+        raise HTTPException(
+            status_code=422,
+            detail="QUANTITY adjustment requires a non-zero quantity_delta",
+        )
+    product = session.exec(
+        select(Product).where(Product.sku == adj_in.sku)
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.tracking_mode != TrackingMode.QUANTITY:
+        raise HTTPException(
+            status_code=400,
+            detail="Stock adjustment SKU must be QUANTITY-tracked",
+        )
+
+    adj = StockAdjustment(
+        target_kind=AdjustmentTarget.QUANTITY,
+        product_id=product.id,
+        quantity_delta=adj_in.quantity_delta,
+        reason=adj_in.reason,
+        created_by_user_id=created_by_user_id,
+    )
+    session.add(adj)
+    session.flush()
+
+    if adj_in.quantity_delta < 0:
+        cost_lines = consume_quantity_fifo(
+            session=session,
+            product_id=product.id,
+            quantity_needed=-adj_in.quantity_delta,
+        )
+        movement = PartMovement(
+            product_id=product.id,
+            event_type=MovementType.ADJUSTED_OUT,
+            quantity=-adj_in.quantity_delta,
+            from_location_id=ygn.id,
+            to_location_id=adjusted_out.id,
+            stock_adjustment_id=adj.id,
+            actor_user_id=created_by_user_id,
+            idempotency_key=uuid.uuid5(adj.id, "neg"),
+        )
+        session.add(movement)
+        session.flush()
+        for cost_line in cost_lines:
+            cost_line.part_movement_id = movement.id
+            session.add(cost_line)
+    else:
+        if adj_in.purchase_cost_thb is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Positive QUANTITY adjustment requires purchase_cost_thb",
+            )
+        batch = PartBatch(
+            product_id=product.id,
+            batch_no=next_batch_no(
+                session=session,
+                product_id=product.id,
+                sku=product.sku,
+                today=date.today(),
+                adj=True,
+            ),
+            supplier_id=None,
+            received_qty=adj_in.quantity_delta,
+            remaining_qty=adj_in.quantity_delta,
+            purchase_cost_thb=adj_in.purchase_cost_thb,
+            is_adjustment=True,
+            received_by_user_id=created_by_user_id,
+        )
+        session.add(batch)
+        session.flush()
+        session.add(
+            PartMovement(
+                product_id=product.id,
+                event_type=MovementType.RECEIVED,
+                quantity=adj_in.quantity_delta,
+                part_batch_id=batch.id,
+                from_location_id=adjusted_out.id,
+                to_location_id=ygn.id,
+                stock_adjustment_id=adj.id,
+                actor_user_id=created_by_user_id,
+                idempotency_key=uuid.uuid5(adj.id, "pos"),
+            )
+        )
+
+    session.commit()
+    session.refresh(adj)
+    return adj
 
 
 # --- Serialized sale (FR-007) -------------------------------------------------
