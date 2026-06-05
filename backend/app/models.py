@@ -516,7 +516,9 @@ class UnitMovementBase(SQLModel):
     # constraints are wired when each table lands (M013, M012, M014).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
     service_ticket_id: uuid.UUID | None = Field(default=None)
-    project_pull_id: uuid.UUID | None = Field(default=None)
+    project_pull_id: uuid.UUID | None = Field(
+        default=None, foreign_key="projectpull.id"
+    )
     stock_adjustment_id: uuid.UUID | None = Field(
         default=None, foreign_key="stockadjustment.id"
     )
@@ -533,6 +535,12 @@ class UnitMovement(UnitMovementBase, table=True):
             "ix_unit_movement_unit_occurred",
             "unit_id",
             text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_unitmovement_project_pull_id",
+            "project_pull_id",
+            unique=False,
+            postgresql_where=text("project_pull_id IS NOT NULL"),
         ),
     )
 
@@ -669,7 +677,9 @@ class PartMovementBase(SQLModel):
     # unit_movement). sale_id's FK target already exists (M010).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
     service_ticket_id: uuid.UUID | None = Field(default=None)
-    project_pull_id: uuid.UUID | None = Field(default=None)
+    project_pull_id: uuid.UUID | None = Field(
+        default=None, foreign_key="projectpull.id"
+    )
     stock_adjustment_id: uuid.UUID | None = Field(
         default=None, foreign_key="stockadjustment.id"
     )
@@ -689,6 +699,12 @@ class PartMovement(PartMovementBase, table=True):
             "ix_part_movement_product_occurred",
             "product_id",
             text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_partmovement_project_pull_id",
+            "project_pull_id",
+            unique=False,
+            postgresql_where=text("project_pull_id IS NOT NULL"),
         ),
         CheckConstraint("quantity > 0", name="ck_part_movement_qty_positive"),
     )
