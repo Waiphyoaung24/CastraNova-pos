@@ -73,7 +73,7 @@ def add_service_ticket_part(
         ticket_id=ticket_id,
         sku=payload.sku,
         quantity=payload.quantity,
-        unit_price_thb=payload.unit_price_thb,
+        pricing_override_request_id=payload.pricing_override_request_id,
     )
     return ServiceTicketPartPublic.model_validate(part)
 

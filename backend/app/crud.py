@@ -910,6 +910,73 @@ def decide_pricing_override(
     return row
 
 
+def _override_already_consumed(
+    *, session: Session, override_id: uuid.UUID
+) -> bool:
+    """True if a sale_line or service_ticket_part already references the override
+    (single-use). Safe to call after the override row is locked FOR UPDATE."""
+    if session.exec(
+        select(SaleLine.id).where(
+            SaleLine.pricing_override_request_id == override_id
+        )
+    ).first():
+        return True
+    return (
+        session.exec(
+            select(ServiceTicketPart.id).where(
+                ServiceTicketPart.pricing_override_request_id == override_id
+            )
+        ).first()
+        is not None
+    )
+
+
+def _lock_override(
+    *, session: Session, override_id: uuid.UUID
+) -> PricingOverrideRequest:
+    row = session.exec(
+        select(PricingOverrideRequest)
+        .where(PricingOverrideRequest.id == override_id)
+        .with_for_update()
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Override request not found")
+    return row
+
+
+def _apply_override_price(
+    *,
+    session: Session,
+    override: PricingOverrideRequest,
+    target_kind: OverrideTargetKind,
+    product_id: uuid.UUID,
+) -> Decimal:
+    """Validate an already-locked override against the consuming line and return
+    the price to charge. 400 for wrong target/product or an unapproved state; 409
+    if it was already applied to another line (single-use)."""
+    if override.target_kind != target_kind:
+        raise HTTPException(
+            status_code=400, detail="Override is for a different target kind"
+        )
+    if override.product_id != product_id:
+        raise HTTPException(
+            status_code=400, detail="Override is for a different product"
+        )
+    if override.state not in (
+        OverrideState.AUTO_APPROVED,
+        OverrideState.APPROVED,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Override not approved (state: {override.state.value})",
+        )
+    if _override_already_consumed(session=session, override_id=override.id):
+        raise HTTPException(
+            status_code=409, detail="Override already applied to a line"
+        )
+    return override.requested_price_thb
+
+
 # --- Serialized sale (FR-007) -------------------------------------------------
 
 
@@ -957,13 +1024,27 @@ def create_sale(
     barcodes: list[str] = []
     part_reqs: list[tuple[Product, int]] = []
     part_skus: set[str] = set()
+    # Optional pricing overrides (FR-010), keyed for application in the build
+    # loops. seen_override_ids guards against citing one override on two lines.
+    unit_override_by_barcode: dict[str, uuid.UUID] = {}
+    part_override_by_product: dict[uuid.UUID, uuid.UUID] = {}
+    seen_override_ids: set[uuid.UUID] = set()
     for line in lines:
+        oid = line.pricing_override_request_id
+        if oid is not None and oid in seen_override_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="An override may be applied to at most one line",
+            )
         if line.line_kind == SaleLineKind.UNIT:
             if not line.castranova_barcode:
                 raise HTTPException(
                     status_code=422, detail="UNIT line requires castranova_barcode"
                 )
             barcodes.append(line.castranova_barcode)
+            if oid is not None:
+                unit_override_by_barcode[line.castranova_barcode] = oid
+                seen_override_ids.add(oid)
         else:  # PART
             if not line.sku:
                 raise HTTPException(status_code=422, detail="PART line requires sku")
@@ -988,6 +1069,18 @@ def create_sale(
                     detail="PART line requires a QUANTITY-tracked product",
                 )
             part_reqs.append((product, line.quantity))
+            if oid is not None:
+                part_override_by_product[product.id] = oid
+                seen_override_ids.add(oid)
+
+    # Lock every cited override FOR UPDATE in id order, BEFORE locking units and
+    # batches, so the global lock order (overrides -> units -> batches) is fixed
+    # across concurrent sales and they cannot deadlock; the lock also serializes
+    # two sales racing to consume the same single-use override.
+    locked_overrides: dict[uuid.UUID, PricingOverrideRequest] = {
+        oid: _lock_override(session=session, override_id=oid)
+        for oid in sorted(seen_override_ids, key=str)
+    }
 
     ygn_loc = None
     if part_reqs:
@@ -1035,7 +1128,15 @@ def create_sale(
             )
         product = session.get(Product, unit.product_id)
         assert product is not None  # FK guarantees existence
-        unit_price = product.retail_price_thb  # override hook lands in Part 4
+        unit_price = product.retail_price_thb
+        override_id = unit_override_by_barcode.get(barcode)
+        if override_id is not None:
+            unit_price = _apply_override_price(
+                session=session,
+                override=locked_overrides[override_id],
+                target_kind=OverrideTargetKind.SALE_LINE,
+                product_id=unit.product_id,
+            )
         unit_cost = unit.purchase_cost_thb
 
         session.add(
@@ -1046,6 +1147,7 @@ def create_sale(
                 quantity=1,
                 unit_price_thb=unit_price,
                 unit_cost_thb=unit_cost,
+                pricing_override_request_id=override_id,
             )
         )
         session.add(
@@ -1095,7 +1197,15 @@ def create_sale(
         for cost_line in cost_lines:
             cost_line.part_movement_id = movement.id
             session.add(cost_line)
-        unit_price = product.retail_price_thb  # override hook lands in Part 4
+        unit_price = product.retail_price_thb
+        override_id = part_override_by_product.get(product.id)
+        if override_id is not None:
+            unit_price = _apply_override_price(
+                session=session,
+                override=locked_overrides[override_id],
+                target_kind=OverrideTargetKind.SALE_LINE,
+                product_id=product.id,
+            )
         session.add(
             SaleLine(
                 sale_id=sale.id,
@@ -1104,6 +1214,7 @@ def create_sale(
                 quantity=qty,
                 unit_price_thb=unit_price,
                 unit_cost_thb=(line_cogs / qty).quantize(Decimal("0.01")),
+                pricing_override_request_id=override_id,
             )
         )
         total_thb += unit_price * qty
@@ -1193,13 +1304,14 @@ def add_service_ticket_part(
     ticket_id: uuid.UUID,
     sku: str,
     quantity: int,
-    unit_price_thb: Decimal | None = None,
+    pricing_override_request_id: uuid.UUID | None = None,
 ) -> ServiceTicketPart:
     """Add a part line to an open ticket. Price defaults to the product's
-    repair_price_thb unless an override is supplied (FR-008 / Flow C.3). Rejected
-    once the ticket is closed (its parts are immutable then). The ticket row is
-    locked FOR UPDATE so this serializes against a concurrent close — a part can
-    never be inserted into a ticket that close has already consumed."""
+    repair_price_thb; a different price requires an approved pricing override
+    (FR-010 / Flow C.3) — there is no free-form price bypass. Rejected once the
+    ticket is closed (its parts are immutable then). The ticket row is locked FOR
+    UPDATE so this serializes against a concurrent close — a part can never be
+    inserted into a ticket that close has already consumed."""
     ticket = session.exec(
         select(ServiceTicket)
         .where(ServiceTicket.id == ticket_id)
@@ -1216,13 +1328,23 @@ def add_service_ticket_part(
         raise HTTPException(
             status_code=400, detail="Service part requires a QUANTITY-tracked product"
         )
+    unit_price = product.repair_price_thb
+    if pricing_override_request_id is not None:
+        override = _lock_override(
+            session=session, override_id=pricing_override_request_id
+        )
+        unit_price = _apply_override_price(
+            session=session,
+            override=override,
+            target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
+            product_id=product.id,
+        )
     part = ServiceTicketPart(
         service_ticket_id=ticket.id,
         product_id=product.id,
         quantity=quantity,
-        unit_price_thb=(
-            unit_price_thb if unit_price_thb is not None else product.repair_price_thb
-        ),
+        unit_price_thb=unit_price,
+        pricing_override_request_id=pricing_override_request_id,
     )
     session.add(part)
     session.commit()

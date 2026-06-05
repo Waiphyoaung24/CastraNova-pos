@@ -13,12 +13,37 @@ from app.models import (
     CustomerCreate,
     Location,
     MovementType,
+    OverrideTargetKind,
     PartMovement,
+    PricingOverrideCreate,
     ProductCreate,
     ServiceTicket,
     SupplierCreate,
     TrackingMode,
 )
+
+
+def _approved_ticket_override(
+    db: Session, product_id: uuid.UUID, requested: str
+) -> uuid.UUID:
+    """Create + approve a SERVICE_TICKET_PART override, returning its id."""
+    crud.set_setting(session=db, key=crud.OVERRIDE_THRESHOLD_KEY, value=5.0)
+    user = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert user is not None
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
+            product_id=product_id,
+            requested_price_thb=Decimal(requested),
+            reason="goodwill",
+        ),
+        created_by_user_id=user.id,
+    )
+    crud.decide_pricing_override(
+        session=db, override_id=ovr.id, decision="APPROVED", decided_by_user_id=user.id
+    )
+    return ovr.id
 
 PREFIX = settings.API_V1_STR
 
@@ -230,20 +255,60 @@ def test_close_insufficient_stock_409_keeps_ticket_open(
     ).all()  # no consumption written (the RECEIVED seed movements remain)
 
 
-def test_add_part_price_override(
+def test_add_part_with_approved_override_uses_price(
     client: TestClient,
     staff_token_headers: dict[str, str],
+    db: Session,
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
-    customer_id, sku, _ = seed_ticket_ctx
+    # FR-010: a price other than repair_price (20.00) needs an approved override.
+    customer_id, sku, product_id = seed_ticket_ctx
+    override_id = _approved_ticket_override(db, product_id, "35.00")
     ticket = _open(client, staff_token_headers, customer_id)
     r = client.post(
         f"{PREFIX}/service-tickets/{ticket['id']}/parts",
         headers=staff_token_headers,
-        json={"sku": sku, "quantity": 1, "unit_price_thb": "35.00"},
+        json={
+            "sku": sku,
+            "quantity": 1,
+            "pricing_override_request_id": str(override_id),
+        },
     )
     assert r.status_code == 200, r.text
     assert r.json()["unit_price_thb"] == "35.00"  # override, not repair_price 20.00
+
+
+def test_add_part_with_pending_override_blocked(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    db: Session,
+    seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
+) -> None:
+    customer_id, sku, product_id = seed_ticket_ctx
+    crud.set_setting(session=db, key=crud.OVERRIDE_THRESHOLD_KEY, value=5.0)
+    user = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert user is not None
+    ovr = crud.create_pricing_override(  # 75% off repair -> PENDING
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
+            product_id=product_id,
+            requested_price_thb=Decimal("35.00"),
+            reason="goodwill",
+        ),
+        created_by_user_id=user.id,
+    )
+    ticket = _open(client, staff_token_headers, customer_id)
+    r = client.post(
+        f"{PREFIX}/service-tickets/{ticket['id']}/parts",
+        headers=staff_token_headers,
+        json={
+            "sku": sku,
+            "quantity": 1,
+            "pricing_override_request_id": str(ovr.id),
+        },
+    )
+    assert r.status_code == 400, r.text
 
 
 def test_close_ticket_with_no_parts_succeeds(

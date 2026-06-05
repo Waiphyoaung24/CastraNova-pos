@@ -912,6 +912,9 @@ class SaleLineInput(SQLModel):
     sku: str | None = None  # PART lines (Part 2)
     # Bounded like ServiceTicketPartCreate; UNIT lines are always treated as 1.
     quantity: int = Field(default=1, gt=0, le=1_000_000)
+    # Optional approved pricing override (FR-010); price comes from the override
+    # when present, else product.retail_price_thb.
+    pricing_override_request_id: uuid.UUID | None = None
 
 
 class SaleCreateRequest(SQLModel):
@@ -1006,8 +1009,9 @@ class ServiceTicketCreate(SQLModel):
 class ServiceTicketPartCreate(SQLModel):
     sku: str = Field(max_length=64)
     quantity: int = Field(gt=0, le=1_000_000)
-    # Optional repair-price override; defaults to product.repair_price_thb.
-    unit_price_thb: Decimal | None = Field(default=None, ge=0, le=9999999999.99)
+    # Price defaults to product.repair_price_thb. A different price requires an
+    # approved pricing override (FR-010) — no free-form price bypass.
+    pricing_override_request_id: uuid.UUID | None = None
 
 
 class ServiceTicketClose(SQLModel):
