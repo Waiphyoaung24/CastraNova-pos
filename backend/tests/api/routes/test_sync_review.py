@@ -20,7 +20,10 @@ def _admin_id(db: Session) -> uuid.UUID:
     return user.id
 
 
-def _ingest(db: Session, *, reason=SyncReviewReason.STALE, key=None) -> uuid.UUID:
+def _ingest(
+    db: Session, *, reason: SyncReviewReason = SyncReviewReason.STALE,
+    key: uuid.UUID | None = None,
+) -> uuid.UUID:
     data = SyncReviewItemCreate(
         idempotency_key=key or uuid.uuid4(),
         mutation_kind="sale",
@@ -94,6 +97,15 @@ def test_resolve_rejects_pending_target_state(db: Session) -> None:
             note=None,
         )
     assert exc.value.status_code == 422
+
+
+def test_resolve_404_for_missing_item(db: Session) -> None:
+    with pytest.raises(HTTPException) as exc:
+        crud.resolve_sync_review_item(
+            session=db, item_id=uuid.uuid4(), admin_id=_admin_id(db),
+            new_state=SyncReviewState.RESOLVED, note=None,
+        )
+    assert exc.value.status_code == 404
 
 
 def test_list_filters_by_state(db: Session) -> None:

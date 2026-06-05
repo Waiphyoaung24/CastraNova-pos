@@ -1470,7 +1470,11 @@ def resolve_sync_review_item(
         raise HTTPException(
             status_code=422, detail="state must be RESOLVED or DISCARDED"
         )
-    item = session.get(SyncReviewItem, item_id)
+    item = session.exec(
+        select(SyncReviewItem)
+        .where(col(SyncReviewItem.id) == item_id)
+        .with_for_update()
+    ).first()
     if item is None:
         raise HTTPException(status_code=404, detail="Sync-review item not found")
     if item.state != SyncReviewState.PENDING:
