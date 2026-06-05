@@ -644,6 +644,8 @@ Each is a CRUD+ledger task using the patterns from Part 1–2. Migrations M011�
 
 # Part 3 — Group 3 (Overrides, Adjustment, Holding, Search, Exports) — roadmap
 
+> **STATUS: ✅ COMPLETE** (branch `dev`). All 5 tasks done, TDD + db/security review on the high-risk ones (3.1, 3.2). Migrations added: M006 `system_setting` (`1cb3d9a4ffc0`), M013 `pricing_override_request` (`c9a23e6de5d4`), M014 `stock_adjustment` (`3f69da45b448`). 3.5 wired exports onto the **3 admin reports only**; both-roles list exports (search/low-stock) intentionally deferred to **Part 4.2** role-tiering to avoid leaking COGS to staff (see `memory/deferred-security-hardening.md`). Notes: `part_batch.supplier_id` made nullable (adjustment batches have no supplier); the recurring autogenerate drift (notificationlog index rename + `project_pull_id` FK/index on the movement ledgers) was kept out of M006/M013/M014 — **still unresolved, predates Part 3**, fix in its own migration.
+
 Migrations M006 (system_setting), M013 (pricing_override_request — if not in 2.x), M014 (stock_adjustment).
 
 | Task | Builds | Test focus |
