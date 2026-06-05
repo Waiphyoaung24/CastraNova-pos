@@ -41,6 +41,10 @@ def upgrade():
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_pricing_override_state_created', 'pricingoverriderequest', ['state', 'created_at'], unique=False)
+    # Index every FK column (report join on product_id; audit-by-user queries).
+    op.create_index(op.f('ix_pricingoverriderequest_product_id'), 'pricingoverriderequest', ['product_id'], unique=False)
+    op.create_index(op.f('ix_pricingoverriderequest_created_by_user_id'), 'pricingoverriderequest', ['created_by_user_id'], unique=False)
+    op.create_index(op.f('ix_pricingoverriderequest_decided_by_user_id'), 'pricingoverriderequest', ['decided_by_user_id'], unique=False)
     # Wire the override FK (+ nullable-unique) onto the two consuming lines.
     op.create_unique_constraint('uq_saleline_pricing_override_request_id', 'saleline', ['pricing_override_request_id'])
     op.create_foreign_key('fk_saleline_pricing_override_request_id', 'saleline', 'pricingoverriderequest', ['pricing_override_request_id'], ['id'])
@@ -55,5 +59,13 @@ def downgrade():
     op.drop_constraint('uq_service_ticket_part_pricing_override_request_id', 'serviceticketpart', type_='unique')
     op.drop_constraint('fk_saleline_pricing_override_request_id', 'saleline', type_='foreignkey')
     op.drop_constraint('uq_saleline_pricing_override_request_id', 'saleline', type_='unique')
+    op.execute("DROP INDEX IF EXISTS ix_pricingoverriderequest_decided_by_user_id")
+    op.execute("DROP INDEX IF EXISTS ix_pricingoverriderequest_created_by_user_id")
+    op.execute("DROP INDEX IF EXISTS ix_pricingoverriderequest_product_id")
     op.drop_index('ix_pricing_override_state_created', table_name='pricingoverriderequest')
     op.drop_table('pricingoverriderequest')
+    # Drop the native enum types this migration created, else a re-upgrade fails
+    # with "type already exists" (overridetargetkind/overridestate are used only
+    # by this table).
+    op.execute("DROP TYPE IF EXISTS overridetargetkind")
+    op.execute("DROP TYPE IF EXISTS overridestate")

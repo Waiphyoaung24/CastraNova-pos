@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Callable
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -815,14 +815,25 @@ def create_pricing_override(
         product=product, target_kind=override_in.target_kind
     )
     requested = override_in.requested_price_thb
+    # A 0 default price can't yield a meaningful percentage. requested==0 is a
+    # genuine no-op (0% deviation); any other price MUST go to admin review —
+    # forced unconditionally (not via the threshold compare, which a threshold
+    # set absurdly high could otherwise auto-approve).
     if default <= 0:
-        deviation = (
-            Decimal("0") if requested == 0 else _MAX_DEVIATION_PCT
-        )
+        if requested == 0:
+            deviation = Decimal("0")
+            force_pending = False
+        else:
+            deviation = _MAX_DEVIATION_PCT
+            force_pending = True
     else:
-        deviation = (abs(requested - default) / default * 100).quantize(
+        # Cap before quantize so a tiny default + huge requested price can't
+        # overflow Numeric(7,4) (would 500 at commit).
+        raw = abs(requested - default) / default * 100
+        deviation = min(raw, _MAX_DEVIATION_PCT).quantize(
             _PCT, rounding=ROUND_HALF_UP
         )
+        force_pending = False
 
     threshold = Decimal(
         str(
@@ -835,7 +846,7 @@ def create_pricing_override(
     )
     state = (
         OverrideState.AUTO_APPROVED
-        if deviation <= threshold
+        if not force_pending and deviation <= threshold
         else OverrideState.PENDING
     )
     row = PricingOverrideRequest(
@@ -882,11 +893,15 @@ def decide_pricing_override(
     *,
     session: Session,
     override_id: uuid.UUID,
-    decision: str,
+    decision: Literal["APPROVED", "REJECTED"],
     decided_by_user_id: uuid.UUID,
 ) -> PricingOverrideRequest:
     """Admin approves/rejects a PENDING override. Locks the row FOR UPDATE so two
     concurrent decisions serialize; only a PENDING request may be decided."""
+    if decision not in ("APPROVED", "REJECTED"):
+        raise HTTPException(
+            status_code=422, detail="decision must be APPROVED or REJECTED"
+        )
     row = session.exec(
         select(PricingOverrideRequest)
         .where(PricingOverrideRequest.id == override_id)
@@ -1282,13 +1297,21 @@ def create_sale(
     session.add(sale)
     try:
         session.commit()
-    except IntegrityError:
-        # Lost the idempotency race — return the winner's sale.
+    except IntegrityError as exc:
         session.rollback()
         # session.info is NOT transactional: discard the low-stock crossings
         # recorded during the rolled-back consume so the route does not dispatch
         # a duplicate alert (the winning request already alerts).
         session.info["low_stock_crossed"] = set()
+        # A single-use-override unique violation is NOT an idempotency race —
+        # surface it as a clean 409 instead of looking up a non-existent winner
+        # and re-raising a raw 500 (the FOR UPDATE pre-check normally prevents
+        # reaching here, but the DB constraint is the backstop).
+        if "pricing_override_request_id" in str(exc.orig):
+            raise HTTPException(
+                status_code=409, detail="Override already applied to a line"
+            ) from exc
+        # Otherwise: lost the idempotency race — return the winner's sale.
         winner = _sale_by_key(session=session, idempotency_key=idempotency_key)
         if winner is None:
             raise
@@ -1368,7 +1391,12 @@ def add_service_ticket_part(
     (FR-010 / Flow C.3) — there is no free-form price bypass. Rejected once the
     ticket is closed (its parts are immutable then). The ticket row is locked FOR
     UPDATE so this serializes against a concurrent close — a part can never be
-    inserted into a ticket that close has already consumed."""
+    inserted into a ticket that close has already consumed.
+
+    Lock order: ticket -> override. This path never locks units/batches (FIFO
+    consumption happens at close), so it cannot form a cycle with create_sale
+    (override -> units -> batches) or close (ticket -> batches). A future change
+    that adds batch consumption here must re-check that ordering."""
     ticket = session.exec(
         select(ServiceTicket)
         .where(ServiceTicket.id == ticket_id)

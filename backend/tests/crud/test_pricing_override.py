@@ -269,3 +269,67 @@ def test_override_exceptions_report_shape(db: Session) -> None:
     assert report.pending >= 1
     assert report.approved >= 1
     assert report.rejected >= 1
+
+
+def test_create_override_tiny_default_does_not_overflow(db: Session) -> None:
+    # Regression (review C-1): a tiny default + large requested price must not
+    # overflow Numeric(7,4); deviation is capped and the request goes PENDING.
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db, retail="0.01")
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("9999999.00"),
+            reason="huge",
+        ),
+        created_by_user_id=actor,
+    )
+    assert ovr.state == OverrideState.PENDING
+    assert ovr.deviation_pct == Decimal("999.9999")  # capped
+
+
+def test_create_override_zero_default_forces_pending_even_with_huge_threshold(
+    db: Session,
+) -> None:
+    # Regression (review M-1): a 0 default price can't be auto-approved for a
+    # non-zero requested price, regardless of how high the threshold is set.
+    _set_threshold(db, 100000.0)
+    actor = _admin(db)
+    pid = _product(db, retail="0.00")
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("50.00"),
+            reason="free product priced",
+        ),
+        created_by_user_id=actor,
+    )
+    assert ovr.state == OverrideState.PENDING
+    # restore a sane threshold so later tests in this session aren't affected
+    _set_threshold(db, 5.0)
+
+
+def test_decide_rejects_invalid_decision(db: Session) -> None:
+    _set_threshold(db, 5.0)
+    actor = _admin(db)
+    pid = _product(db)
+    ovr = crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            requested_price_thb=Decimal("700.00"),
+            reason="x",
+        ),
+        created_by_user_id=actor,
+    )
+    with pytest.raises(HTTPException) as exc:
+        crud.decide_pricing_override(
+            session=db, override_id=ovr.id, decision="MAYBE", decided_by_user_id=actor  # type: ignore[arg-type]
+        )
+    assert exc.value.status_code == 422

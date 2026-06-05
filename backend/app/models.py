@@ -785,14 +785,16 @@ class PricingOverrideRequest(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     target_kind: OverrideTargetKind
-    product_id: uuid.UUID = Field(foreign_key="product.id", nullable=False)
+    product_id: uuid.UUID = Field(
+        foreign_key="product.id", nullable=False, index=True
+    )
     default_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
     requested_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
     deviation_pct: Decimal = Field(sa_type=Numeric(7, 4))  # type: ignore[call-overload]
     reason: str = Field(max_length=512)
     state: OverrideState
     created_by_user_id: uuid.UUID = Field(
-        foreign_key="user.id", nullable=False
+        foreign_key="user.id", nullable=False, index=True
     )
     created_at: datetime = Field(
         default_factory=get_datetime_utc,
@@ -800,7 +802,7 @@ class PricingOverrideRequest(SQLModel, table=True):
         sa_column_kwargs={"server_default": func.now()},
     )
     decided_by_user_id: uuid.UUID | None = Field(
-        default=None, foreign_key="user.id"
+        default=None, foreign_key="user.id", index=True
     )
     decided_at: datetime | None = Field(
         default=None,
