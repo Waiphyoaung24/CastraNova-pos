@@ -77,8 +77,8 @@ def read_project_pull(
     return _to_public(session=session, pull=pull)
 
 
-# Open to any authenticated user (consistent with close_service_ticket);
-# staff-only role-tiering is deferred to Part 4 (Task 4.2).
+# Fulfill is intentionally open to staff + admin per the 5.3 role matrix
+# (create/cancel are admin-only, already gated above).
 @router.post(
     "/{pull_id}/fulfill",
     response_model=ProjectPullPublic,
