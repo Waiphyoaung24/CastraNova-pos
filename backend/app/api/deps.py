@@ -38,6 +38,7 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
         )
+    # Block refresh tokens from acting as bearer access tokens.
     if token_data.type == "refresh":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
