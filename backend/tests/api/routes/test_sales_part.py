@@ -71,14 +71,14 @@ def _part_body(sku: str, customer_id: uuid.UUID, qty: int, **over: object) -> di
 
 def test_part_sale_fifo_spans_two_batches(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_part_sale: tuple[str, uuid.UUID, uuid.UUID],
 ) -> None:
     sku, customer_id, product_id = seed_part_sale
     r = client.post(
         f"{PREFIX}/sales",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_part_body(sku, customer_id, 5),
     )
     assert r.status_code == 200, r.text
@@ -190,7 +190,7 @@ def test_part_sale_rejects_duplicate_sku_lines(
 
 def test_mixed_unit_and_part_sale(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_part_sale: tuple[str, uuid.UUID, uuid.UUID],
 ) -> None:
@@ -232,7 +232,7 @@ def test_mixed_unit_and_part_sale(
         ],
         "idempotency_key": str(uuid.uuid4()),
     }
-    r = client.post(f"{PREFIX}/sales", headers=staff_token_headers, json=body)
+    r = client.post(f"{PREFIX}/sales", headers=superuser_token_headers, json=body)
     assert r.status_code == 200, r.text
     sale = r.json()
     # Revenue: 1000 (unit) + 2*100 (part) = 1200; COGS: 600 + 2*10 = 620.
