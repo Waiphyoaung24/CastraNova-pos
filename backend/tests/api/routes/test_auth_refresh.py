@@ -33,9 +33,13 @@ def test_login_sets_httponly_refresh_cookie(client: TestClient) -> None:
 
 def test_refresh_returns_working_access_token(client: TestClient) -> None:
     login = _login(client)
-    assert login.cookies.get(security.REFRESH_TOKEN_COOKIE_NAME)
+    original_cookie = login.cookies.get(security.REFRESH_TOKEN_COOKIE_NAME)
+    assert original_cookie
     r = client.post(REFRESH)
     assert r.status_code == 200
+    # Rotation: a new refresh cookie is set on every refresh.
+    set_cookie = r.headers.get("set-cookie", "").lower()
+    assert security.REFRESH_TOKEN_COOKIE_NAME in set_cookie
     access = r.json()["access_token"]
     me = client.post(TEST_TOKEN, headers={"Authorization": f"Bearer {access}"})
     assert me.status_code == 200

@@ -94,6 +94,8 @@ def refresh_access_token(
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     if token_data.type != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if token_data.sub is None:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
     user = session.get(User, token_data.sub)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
