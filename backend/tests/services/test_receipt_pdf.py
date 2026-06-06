@@ -20,37 +20,44 @@ from app.services.receipt_pdf import render_sale_receipt
 
 
 def test_receipt_pdf_signature_has_no_cost_parameter() -> None:
-    """render_sale_receipt must NOT accept any cost/COGS parameter.
+    """render_sale_receipt must accept EXACTLY the expected safe parameter set.
 
-    If unit_cost_thb, total_cogs_thb, purchase_cost, or margin are ever added
-    to the signature, this test fails — alerting the developer that the
-    customer-facing receipt may leak margin data.
+    The allowlist is {"sale_id", "sold_at", "lines", "total_thb"}.  Any
+    deviation — including a new parameter with an unanticipated cost-related
+    name such as ``cost``, ``cogs_thb``, ``landed_cost``, etc. — will cause
+    this test to fail, alerting the developer that the customer-facing receipt
+    renderer may leak margin/cost data and must be reviewed before merging.
     """
     sig = inspect.signature(render_sale_receipt)
     param_names = set(sig.parameters.keys())
-    forbidden = {"unit_cost_thb", "total_cogs_thb", "purchase_cost", "purchase_cost_thb", "margin"}
-    leaked = param_names & forbidden
-    assert not leaked, (
-        f"render_sale_receipt must not expose cost fields; found: {leaked}"
+    expected = {"sale_id", "sold_at", "lines", "total_thb"}
+    assert param_names == expected, (
+        f"render_sale_receipt parameter names changed. "
+        f"Expected exactly {expected}, got {param_names}. "
+        "A new parameter to the receipt renderer could leak cost/margin data "
+        "and MUST be reviewed before this test is updated."
     )
 
 
 def test_receipt_pdf_lines_tuple_has_no_cost_position() -> None:
-    """The ``lines`` parameter annotation must be (label, qty, price) — 3-tuple.
+    """The ``lines`` annotation must be exactly ``list[tuple[str, int, Decimal]]``.
 
-    A cost field would require a 4th position.  We verify via the type annotation
-    string that the tuple width is exactly 3.
+    This pins the element type and width to a 3-tuple (label, qty, price).
+    Adding a 4th position for cost/COGS would change the annotation and break
+    this test, making the change visible during review.
+
+    The render call below is a secondary guard: passing a 3-tuple confirms the
+    function body also accepts exactly 3 elements (no runtime unpacking of 4).
     """
     sig = inspect.signature(render_sale_receipt)
     annotation = sig.parameters["lines"].annotation
-    # annotation is list[tuple[str, int, Decimal]] — repr contains "tuple"
-    ann_str = str(annotation)
-    assert "tuple" in ann_str.lower() or "Tuple" in ann_str, (
-        "lines parameter annotation should be a tuple type"
+    expected_annotation = list[tuple[str, int, Decimal]]
+    assert annotation == expected_annotation, (
+        f"lines parameter annotation must be exactly {expected_annotation!r}, "
+        f"got {annotation!r}. "
+        "Widening the tuple (e.g. adding a cost position) could leak margin data."
     )
-    # Decimal in position 2 is the price; there must be no 4th element.
-    # We verify by actually passing a 3-tuple — if signature or body ever
-    # requires 4 elements, this call will fail.
+    # Secondary guard: the function body must accept a 3-tuple without error.
     pdf_bytes = render_sale_receipt(
         sale_id="test-sale-001",
         sold_at="2026-06-07T10:00:00",
