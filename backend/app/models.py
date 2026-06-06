@@ -1123,6 +1123,25 @@ class SalePublic(SQLModel):
     lines: list[SaleLinePublic]
 
 
+class SaleLineStaffPublic(SQLModel):
+    id: uuid.UUID
+    line_kind: SaleLineKind
+    unit_id: uuid.UUID | None
+    product_id: uuid.UUID | None
+    quantity: int
+    unit_price_thb: Decimal
+    # no unit_cost_thb — redacted for staff
+
+
+class SaleStaffPublic(SQLModel):
+    id: uuid.UUID
+    customer_id: uuid.UUID
+    total_thb: Decimal
+    sold_at: datetime
+    lines: list[SaleLineStaffPublic]
+    # no total_cogs_thb — redacted for staff
+
+
 class SaleLineInput(SQLModel):
     line_kind: SaleLineKind
     castranova_barcode: str | None = None  # UNIT lines
