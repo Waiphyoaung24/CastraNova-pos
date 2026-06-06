@@ -644,6 +644,15 @@ export type SyncReviewItemPublic = {
     resolution_note: (string | null);
 };
 
+export type SyncReviewItemStaffPublic = {
+    id: string;
+    idempotency_key: string;
+    mutation_kind: string;
+    reason: SyncReviewReason;
+    state: SyncReviewState;
+    created_at: string;
+};
+
 export type SyncReviewReason = 'STALE' | 'CONFLICT';
 
 export type SyncReviewResolve = {
@@ -1135,7 +1144,7 @@ export type SyncReviewIngestSyncReviewItemData = {
     requestBody: SyncReviewItemCreate;
 };
 
-export type SyncReviewIngestSyncReviewItemResponse = (SyncReviewItemPublic);
+export type SyncReviewIngestSyncReviewItemResponse = (SyncReviewItemStaffPublic);
 
 export type SyncReviewListSyncReviewItemsData = {
     state?: (SyncReviewState | null);

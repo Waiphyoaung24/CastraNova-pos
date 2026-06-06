@@ -1258,7 +1258,7 @@ export class SyncReviewService {
      * authenticated device may ingest; idempotent on idempotency_key.
      * @param data The data for the request.
      * @param data.requestBody
-     * @returns SyncReviewItemPublic Successful Response
+     * @returns SyncReviewItemStaffPublic Successful Response
      * @throws ApiError
      */
     public static ingestSyncReviewItem(data: SyncReviewIngestSyncReviewItemData): CancelablePromise<SyncReviewIngestSyncReviewItemResponse> {

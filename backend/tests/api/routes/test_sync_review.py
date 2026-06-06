@@ -150,6 +150,35 @@ def test_staff_can_ingest(
     assert body["state"] == "PENDING" and body["reason"] == "STALE"
 
 
+def test_ingest_response_omits_payload(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(),
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "payload" not in body  # staff ingest response must not echo the payload
+    assert body["state"] == "PENDING"
+
+
+def test_admin_list_includes_payload(
+    client: TestClient, superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+) -> None:
+    ingested_id = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(),
+        headers=staff_token_headers,
+    ).json()["id"]
+    r = client.get(
+        f"{settings.API_V1_STR}/sync-review?state=PENDING",
+        headers=superuser_token_headers,
+    )
+    item = next(i for i in r.json() if i["id"] == ingested_id)
+    assert "payload" in item  # admins are entitled to the full payload
+
+
 def test_ingest_is_idempotent_over_http(
     client: TestClient, staff_token_headers: dict[str, str]
 ) -> None:

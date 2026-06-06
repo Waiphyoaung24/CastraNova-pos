@@ -7,6 +7,7 @@ from app.api.deps import AdminUser, SessionDep, get_admin, get_current_user
 from app.models import (
     SyncReviewItemCreate,
     SyncReviewItemPublic,
+    SyncReviewItemStaffPublic,
     SyncReviewResolve,
     SyncReviewState,
 )
@@ -16,18 +17,18 @@ router = APIRouter(prefix="/sync-review", tags=["sync-review"])
 
 @router.post(
     "",
-    response_model=SyncReviewItemPublic,
+    response_model=SyncReviewItemStaffPublic,
     dependencies=[Depends(get_current_user)],
 )
 def ingest_sync_review_item(
     *,
     session: SessionDep,
     data: SyncReviewItemCreate,
-) -> SyncReviewItemPublic:
+) -> SyncReviewItemStaffPublic:
     """Report a STALE/CONFLICT offline mutation for review (FR-021). Any
     authenticated device may ingest; idempotent on idempotency_key."""
     item = crud.create_sync_review_item(session=session, data=data)
-    return SyncReviewItemPublic.model_validate(item)
+    return SyncReviewItemStaffPublic.model_validate(item)
 
 
 @router.get(

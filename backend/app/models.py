@@ -1018,6 +1018,19 @@ class SyncReviewItemCreate(SQLModel):
     reason: SyncReviewReason
 
 
+class SyncReviewItemStaffPublic(SQLModel):
+    # Ingest response for any authenticated caller: deliberately OMITS `payload`
+    # (and the admin-only resolved_* fields) so the staff-reachable route never
+    # echoes a stored mutation payload back. Admin list/resolve use the full
+    # SyncReviewItemPublic.
+    id: uuid.UUID
+    idempotency_key: uuid.UUID
+    mutation_kind: str
+    reason: SyncReviewReason
+    state: SyncReviewState
+    created_at: datetime
+
+
 class SyncReviewItemPublic(SQLModel):
     id: uuid.UUID
     idempotency_key: uuid.UUID

@@ -3363,6 +3363,39 @@ export const SyncReviewItemPublicSchema = {
     title: 'SyncReviewItemPublic'
 } as const;
 
+export const SyncReviewItemStaffPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        mutation_kind: {
+            type: 'string',
+            title: 'Mutation Kind'
+        },
+        reason: {
+            '$ref': '#/components/schemas/SyncReviewReason'
+        },
+        state: {
+            '$ref': '#/components/schemas/SyncReviewState'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'idempotency_key', 'mutation_kind', 'reason', 'state', 'created_at'],
+    title: 'SyncReviewItemStaffPublic'
+} as const;
+
 export const SyncReviewReasonSchema = {
     type: 'string',
     enum: ['STALE', 'CONFLICT'],
