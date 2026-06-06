@@ -70,3 +70,24 @@ def test_access_token_not_accepted_at_refresh(client: TestClient) -> None:
     r = client.post(REFRESH)
     client.cookies.clear()
     assert r.status_code == 401
+
+
+def test_tampered_refresh_cookie_returns_401(client: TestClient) -> None:
+    # A garbage / unsignable value in the refresh cookie must be rejected.
+    client.cookies.clear()
+    client.cookies.set(security.REFRESH_TOKEN_COOKIE_NAME, "not.a.valid.jwt")
+    r = client.post(REFRESH)
+    client.cookies.clear()
+    assert r.status_code == 401
+
+
+def test_expired_refresh_cookie_returns_401(client: TestClient) -> None:
+    # An expired (but correctly signed) refresh token must be rejected.
+    client.cookies.clear()
+    expired = security.create_refresh_token(
+        "any-subject", expires_delta=timedelta(minutes=-5)
+    )
+    client.cookies.set(security.REFRESH_TOKEN_COOKIE_NAME, expired)
+    r = client.post(REFRESH)
+    client.cookies.clear()
+    assert r.status_code == 401
