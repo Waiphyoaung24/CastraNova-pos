@@ -3263,6 +3263,141 @@ export const SupplierUpdateSchema = {
     title: 'SupplierUpdate'
 } as const;
 
+export const SyncReviewItemCreateSchema = {
+    properties: {
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        mutation_kind: {
+            type: 'string',
+            maxLength: 64,
+            minLength: 1,
+            title: 'Mutation Kind'
+        },
+        payload: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Payload'
+        },
+        reason: {
+            '$ref': '#/components/schemas/SyncReviewReason'
+        }
+    },
+    type: 'object',
+    required: ['idempotency_key', 'mutation_kind', 'payload', 'reason'],
+    title: 'SyncReviewItemCreate'
+} as const;
+
+export const SyncReviewItemPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        mutation_kind: {
+            type: 'string',
+            title: 'Mutation Kind'
+        },
+        payload: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Payload'
+        },
+        reason: {
+            '$ref': '#/components/schemas/SyncReviewReason'
+        },
+        state: {
+            '$ref': '#/components/schemas/SyncReviewState'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        resolved_by_user_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolved By User Id'
+        },
+        resolved_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolved At'
+        },
+        resolution_note: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolution Note'
+        }
+    },
+    type: 'object',
+    required: ['id', 'idempotency_key', 'mutation_kind', 'payload', 'reason', 'state', 'created_at', 'resolved_by_user_id', 'resolved_at', 'resolution_note'],
+    title: 'SyncReviewItemPublic'
+} as const;
+
+export const SyncReviewReasonSchema = {
+    type: 'string',
+    enum: ['STALE', 'CONFLICT'],
+    title: 'SyncReviewReason'
+} as const;
+
+export const SyncReviewResolveSchema = {
+    properties: {
+        state: {
+            '$ref': '#/components/schemas/SyncReviewState'
+        },
+        note: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 500
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Note'
+        }
+    },
+    type: 'object',
+    required: ['state'],
+    title: 'SyncReviewResolve'
+} as const;
+
+export const SyncReviewStateSchema = {
+    type: 'string',
+    enum: ['PENDING', 'RESOLVED', 'DISCARDED'],
+    title: 'SyncReviewState'
+} as const;
+
 export const TokenSchema = {
     properties: {
         access_token: {

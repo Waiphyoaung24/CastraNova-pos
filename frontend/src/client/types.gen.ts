@@ -620,6 +620,39 @@ export type SupplierUpdate = {
     contact?: (string | null);
 };
 
+export type SyncReviewItemCreate = {
+    idempotency_key: string;
+    mutation_kind: string;
+    payload: {
+        [key: string]: unknown;
+    };
+    reason: SyncReviewReason;
+};
+
+export type SyncReviewItemPublic = {
+    id: string;
+    idempotency_key: string;
+    mutation_kind: string;
+    payload: {
+        [key: string]: unknown;
+    };
+    reason: SyncReviewReason;
+    state: SyncReviewState;
+    created_at: string;
+    resolved_by_user_id: (string | null);
+    resolved_at: (string | null);
+    resolution_note: (string | null);
+};
+
+export type SyncReviewReason = 'STALE' | 'CONFLICT';
+
+export type SyncReviewResolve = {
+    state: SyncReviewState;
+    note?: (string | null);
+};
+
+export type SyncReviewState = 'PENDING' | 'RESOLVED' | 'DISCARDED';
+
 export type Token = {
     access_token: string;
     token_type?: string;
@@ -1097,6 +1130,25 @@ export type SuppliersUpdateSupplierData = {
 };
 
 export type SuppliersUpdateSupplierResponse = (SupplierPublic);
+
+export type SyncReviewIngestSyncReviewItemData = {
+    requestBody: SyncReviewItemCreate;
+};
+
+export type SyncReviewIngestSyncReviewItemResponse = (SyncReviewItemPublic);
+
+export type SyncReviewListSyncReviewItemsData = {
+    state?: (SyncReviewState | null);
+};
+
+export type SyncReviewListSyncReviewItemsResponse = (Array<SyncReviewItemPublic>);
+
+export type SyncReviewResolveSyncReviewItemData = {
+    itemId: string;
+    requestBody: SyncReviewResolve;
+};
+
+export type SyncReviewResolveSyncReviewItemResponse = (SyncReviewItemPublic);
 
 export type UsersReadUsersData = {
     limit?: number;

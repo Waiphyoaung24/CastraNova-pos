@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AuditListAuditData, AuditListAuditResponse, CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersGetCustomerDashboardData, CustomersGetCustomerDashboardResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, DashboardsGetStockOnHandData, DashboardsGetStockOnHandResponse, DashboardsGetStockOnHandBatchesData, DashboardsGetStockOnHandBatchesResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, LowStockReadLowStockResponse, LowStockBulkSetMinStockLevelData, LowStockBulkSetMinStockLevelResponse, NotificationsReadNotificationPreferencesResponse, NotificationsUpdateNotificationPreferencesData, NotificationsUpdateNotificationPreferencesResponse, PricingOverridesCreatePricingOverrideData, PricingOverridesCreatePricingOverrideResponse, PricingOverridesListPricingOverridesData, PricingOverridesListPricingOverridesResponse, PricingOverridesDecidePricingOverrideData, PricingOverridesDecidePricingOverrideResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsSetMinStockLevelData, ProductsSetMinStockLevelResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectPullsCreateProjectPullData, ProjectPullsCreateProjectPullResponse, ProjectPullsReadProjectPullsData, ProjectPullsReadProjectPullsResponse, ProjectPullsReadProjectPullData, ProjectPullsReadProjectPullResponse, ProjectPullsFulfillProjectPullData, ProjectPullsFulfillProjectPullResponse, ProjectPullsCancelProjectPullData, ProjectPullsCancelProjectPullResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsGetProjectDashboardData, ProjectsGetProjectDashboardResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, ReportsChannelMarginData, ReportsChannelMarginResponse, ReportsChannelMarginPdfData, ReportsChannelMarginPdfResponse, ReportsChannelMarginXlsxData, ReportsChannelMarginXlsxResponse, ReportsOverrideExceptionsData, ReportsOverrideExceptionsResponse, ReportsOverrideExceptionsPdfData, ReportsOverrideExceptionsPdfResponse, ReportsOverrideExceptionsXlsxData, ReportsOverrideExceptionsXlsxResponse, ReportsHoldingPeriodData, ReportsHoldingPeriodResponse, ReportsHoldingPeriodPdfData, ReportsHoldingPeriodPdfResponse, ReportsHoldingPeriodXlsxData, ReportsHoldingPeriodXlsxResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, SearchSearchSerialData, SearchSearchSerialResponse, SearchSearchSkuData, SearchSearchSkuResponse, ServiceTicketsOpenServiceTicketData, ServiceTicketsOpenServiceTicketResponse, ServiceTicketsReadServiceTicketData, ServiceTicketsReadServiceTicketResponse, ServiceTicketsAddServiceTicketPartData, ServiceTicketsAddServiceTicketPartResponse, ServiceTicketsCloseServiceTicketData, ServiceTicketsCloseServiceTicketResponse, StockAdjustmentsCreateStockAdjustmentData, StockAdjustmentsCreateStockAdjustmentResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { AuditListAuditData, AuditListAuditResponse, CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersGetCustomerDashboardData, CustomersGetCustomerDashboardResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, DashboardsGetStockOnHandData, DashboardsGetStockOnHandResponse, DashboardsGetStockOnHandBatchesData, DashboardsGetStockOnHandBatchesResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, LowStockReadLowStockResponse, LowStockBulkSetMinStockLevelData, LowStockBulkSetMinStockLevelResponse, NotificationsReadNotificationPreferencesResponse, NotificationsUpdateNotificationPreferencesData, NotificationsUpdateNotificationPreferencesResponse, PricingOverridesCreatePricingOverrideData, PricingOverridesCreatePricingOverrideResponse, PricingOverridesListPricingOverridesData, PricingOverridesListPricingOverridesResponse, PricingOverridesDecidePricingOverrideData, PricingOverridesDecidePricingOverrideResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsSetMinStockLevelData, ProductsSetMinStockLevelResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectPullsCreateProjectPullData, ProjectPullsCreateProjectPullResponse, ProjectPullsReadProjectPullsData, ProjectPullsReadProjectPullsResponse, ProjectPullsReadProjectPullData, ProjectPullsReadProjectPullResponse, ProjectPullsFulfillProjectPullData, ProjectPullsFulfillProjectPullResponse, ProjectPullsCancelProjectPullData, ProjectPullsCancelProjectPullResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsGetProjectDashboardData, ProjectsGetProjectDashboardResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, ReportsChannelMarginData, ReportsChannelMarginResponse, ReportsChannelMarginPdfData, ReportsChannelMarginPdfResponse, ReportsChannelMarginXlsxData, ReportsChannelMarginXlsxResponse, ReportsOverrideExceptionsData, ReportsOverrideExceptionsResponse, ReportsOverrideExceptionsPdfData, ReportsOverrideExceptionsPdfResponse, ReportsOverrideExceptionsXlsxData, ReportsOverrideExceptionsXlsxResponse, ReportsHoldingPeriodData, ReportsHoldingPeriodResponse, ReportsHoldingPeriodPdfData, ReportsHoldingPeriodPdfResponse, ReportsHoldingPeriodXlsxData, ReportsHoldingPeriodXlsxResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, SearchSearchSerialData, SearchSearchSerialResponse, SearchSearchSkuData, SearchSearchSkuResponse, ServiceTicketsOpenServiceTicketData, ServiceTicketsOpenServiceTicketResponse, ServiceTicketsReadServiceTicketData, ServiceTicketsReadServiceTicketResponse, ServiceTicketsAddServiceTicketPartData, ServiceTicketsAddServiceTicketPartResponse, ServiceTicketsCloseServiceTicketData, ServiceTicketsCloseServiceTicketResponse, StockAdjustmentsCreateStockAdjustmentData, StockAdjustmentsCreateStockAdjustmentResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, SyncReviewIngestSyncReviewItemData, SyncReviewIngestSyncReviewItemResponse, SyncReviewListSyncReviewItemsData, SyncReviewListSyncReviewItemsResponse, SyncReviewResolveSyncReviewItemData, SyncReviewResolveSyncReviewItemResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
 
 export class AuditService {
     /**
@@ -1241,6 +1241,74 @@ export class SuppliersService {
             url: '/api/v1/suppliers/{supplier_id}',
             path: {
                 supplier_id: data.supplierId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class SyncReviewService {
+    /**
+     * Ingest Sync Review Item
+     * Report a STALE/CONFLICT offline mutation for review (FR-021). Any
+     * authenticated device may ingest; idempotent on idempotency_key.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns SyncReviewItemPublic Successful Response
+     * @throws ApiError
+     */
+    public static ingestSyncReviewItem(data: SyncReviewIngestSyncReviewItemData): CancelablePromise<SyncReviewIngestSyncReviewItemResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/sync-review',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Sync Review Items
+     * Admin review queue, optionally filtered by state (FR-021).
+     * @param data The data for the request.
+     * @param data.state
+     * @returns SyncReviewItemPublic Successful Response
+     * @throws ApiError
+     */
+    public static listSyncReviewItems(data: SyncReviewListSyncReviewItemsData = {}): CancelablePromise<SyncReviewListSyncReviewItemsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/sync-review',
+            query: {
+                state: data.state
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Resolve Sync Review Item
+     * Admin resolves or discards a PENDING review item (FR-021).
+     * @param data The data for the request.
+     * @param data.itemId
+     * @param data.requestBody
+     * @returns SyncReviewItemPublic Successful Response
+     * @throws ApiError
+     */
+    public static resolveSyncReviewItem(data: SyncReviewResolveSyncReviewItemData): CancelablePromise<SyncReviewResolveSyncReviewItemResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/sync-review/{item_id}/resolve',
+            path: {
+                item_id: data.itemId
             },
             body: data.requestBody,
             mediaType: 'application/json',
