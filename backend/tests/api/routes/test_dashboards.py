@@ -27,10 +27,12 @@ def _seed_quantity_with_batches(
     *,
     sku: str | None = None,
     category: str | None = None,
+    admin_headers: dict[str, str] | None = None,
 ) -> uuid.UUID:
     """Create a QUANTITY product + supplier (admin), then receive one batch per
-    qty (staff). Returns the product_id."""
+    qty (admin). Returns the product_id."""
     _ensure_locations(db)
+    receive_headers = admin_headers if admin_headers is not None else headers
     product = crud.create_product(
         session=db,
         product_in=ProductCreate(
@@ -48,7 +50,7 @@ def _seed_quantity_with_batches(
     for qty in qtys:
         r = client.post(
             f"{settings.API_V1_STR}/receipts/quantity",
-            headers=headers,
+            headers=receive_headers,
             json={
                 "product_id": str(product.id),
                 "supplier_id": str(supplier.id),
@@ -69,10 +71,12 @@ def _seed_serialized_units(
     *,
     sku: str | None = None,
     category: str | None = None,
+    admin_headers: dict[str, str] | None = None,
 ) -> uuid.UUID:
     """Create a SERIALIZED product + supplier (admin), then receive n units
-    (staff). Returns the product_id."""
+    (admin). Returns the product_id."""
     _ensure_locations(db)
+    receive_headers = admin_headers if admin_headers is not None else headers
     product = crud.create_product(
         session=db,
         product_in=ProductCreate(
@@ -93,7 +97,7 @@ def _seed_serialized_units(
     ]
     r = client.post(
         f"{settings.API_V1_STR}/receipts/serialized",
-        headers=headers,
+        headers=receive_headers,
         json={
             "product_id": str(product.id),
             "supplier_id": str(supplier.id),
@@ -106,12 +110,19 @@ def _seed_serialized_units(
 
 
 def test_stock_on_hand_sums_quantity_batches(
-    client: TestClient, staff_token_headers: dict[str, str], db: Session
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     qty_sku = f"QTY-{uuid.uuid4().hex[:8]}"
     ser_sku = f"SER-{uuid.uuid4().hex[:8]}"
-    _seed_quantity_with_batches(client, staff_token_headers, db, [8, 12], sku=qty_sku)
-    _seed_serialized_units(client, staff_token_headers, db, 2, sku=ser_sku)
+    _seed_quantity_with_batches(
+        client, staff_token_headers, db, [8, 12], sku=qty_sku, admin_headers=superuser_token_headers
+    )
+    _seed_serialized_units(
+        client, staff_token_headers, db, 2, sku=ser_sku, admin_headers=superuser_token_headers
+    )
 
     r = client.get(
         f"{settings.API_V1_STR}/dashboards/stock-on-hand", headers=staff_token_headers
@@ -128,15 +139,20 @@ def test_stock_on_hand_sums_quantity_batches(
 
 
 def test_stock_on_hand_filter_by_category(
-    client: TestClient, staff_token_headers: dict[str, str], db: Session
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     comp_sku = f"COMP-{uuid.uuid4().hex[:8]}"
     fan_sku = f"FAN-{uuid.uuid4().hex[:8]}"
     _seed_quantity_with_batches(
-        client, staff_token_headers, db, [5], sku=comp_sku, category="compressor"
+        client, staff_token_headers, db, [5], sku=comp_sku, category="compressor",
+        admin_headers=superuser_token_headers,
     )
     _seed_quantity_with_batches(
-        client, staff_token_headers, db, [5], sku=fan_sku, category="fan"
+        client, staff_token_headers, db, [5], sku=fan_sku, category="fan",
+        admin_headers=superuser_token_headers,
     )
 
     r = client.get(
@@ -151,15 +167,22 @@ def test_stock_on_hand_filter_by_category(
 
 
 def test_stock_on_hand_filter_by_customer(
-    client: TestClient, staff_token_headers: dict[str, str], db: Session
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     # Two QUANTITY products; the customer buys a small qty of only the first,
     # leaving stock on hand. The customer= filter must return only the product
     # that customer transacted, excluding the untouched one.
     bought_sku = f"BUY-{uuid.uuid4().hex[:8]}"
     other_sku = f"OTHER-{uuid.uuid4().hex[:8]}"
-    _seed_quantity_with_batches(client, staff_token_headers, db, [10], sku=bought_sku)
-    _seed_quantity_with_batches(client, staff_token_headers, db, [10], sku=other_sku)
+    _seed_quantity_with_batches(
+        client, staff_token_headers, db, [10], sku=bought_sku, admin_headers=superuser_token_headers
+    )
+    _seed_quantity_with_batches(
+        client, staff_token_headers, db, [10], sku=other_sku, admin_headers=superuser_token_headers
+    )
     customer = crud.create_customer(
         session=db, customer_in=CustomerCreate(name="Filtered Customer")
     )
@@ -187,7 +210,10 @@ def test_stock_on_hand_filter_by_customer(
 
 
 def test_stock_on_hand_filter_by_supplier_quantity(
-    client: TestClient, staff_token_headers: dict[str, str], db: Session
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     # One QUANTITY product receiving qty 10 from supplier A and qty 5 from
     # supplier B. No filter -> on-hand 15; ?supplier=A -> 10; ?supplier=B -> 5.
@@ -212,7 +238,7 @@ def test_stock_on_hand_filter_by_supplier_quantity(
     for supplier_id, qty in ((supplier_a.id, 10), (supplier_b.id, 5)):
         r = client.post(
             f"{settings.API_V1_STR}/receipts/quantity",
-            headers=staff_token_headers,
+            headers=superuser_token_headers,
             json={
                 "product_id": str(product.id),
                 "supplier_id": str(supplier_id),
@@ -239,7 +265,10 @@ def test_stock_on_hand_filter_by_supplier_quantity(
 
 
 def test_stock_on_hand_filter_by_supplier_serialized(
-    client: TestClient, staff_token_headers: dict[str, str], db: Session
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     # One SERIALIZED product receiving 3 units from supplier A and 2 from
     # supplier B. No filter -> in-stock count 5; ?supplier=A -> 3; ?supplier=B -> 2.
@@ -271,7 +300,7 @@ def test_stock_on_hand_filter_by_supplier_serialized(
         ]
         r = client.post(
             f"{settings.API_V1_STR}/receipts/serialized",
-            headers=staff_token_headers,
+            headers=superuser_token_headers,
             json={
                 "product_id": str(product.id),
                 "supplier_id": str(supplier_id),
@@ -302,10 +331,13 @@ def test_stock_on_hand_requires_auth(client: TestClient) -> None:
 
 
 def test_batch_drilldown_lists_active_batches(
-    client: TestClient, staff_token_headers: dict[str, str], db: Session
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     product_id = _seed_quantity_with_batches(
-        client, staff_token_headers, db, [8, 12]
+        client, staff_token_headers, db, [8, 12], admin_headers=superuser_token_headers
     )
     r = client.get(
         f"{settings.API_V1_STR}/dashboards/stock-on-hand/{product_id}/batches",
@@ -317,11 +349,15 @@ def test_batch_drilldown_lists_active_batches(
 
 
 def test_stock_on_hand_is_single_pass_not_n_plus_one(
-    client: TestClient, staff_token_headers: dict[str, str], db: Session
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
 ) -> None:
     for i in range(50):
         _seed_quantity_with_batches(
-            client, staff_token_headers, db, [5], sku=f"PERF-{i:03d}"
+            client, staff_token_headers, db, [5], sku=f"PERF-{i:03d}",
+            admin_headers=superuser_token_headers,
         )
     from sqlalchemy import event
 
