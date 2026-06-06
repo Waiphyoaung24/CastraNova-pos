@@ -662,12 +662,14 @@ Migrations M006 (system_setting), M013 (pricing_override_request — if not in 2
 
 No new schema except `sync_review_item` (M020).
 
+> **STATUS (2026-06-06): 4.1 + 4.2 + 4.3 ✅ COMPLETE; 4.4 ⏸️ DEFERRED.** Built on branch `dev`, TDD + db/security review on the high-risk role-tiering. 4.1 (`docs/superpowers/plans/2026-06-05-castranova-part4-dashboards.md`) and 4.3 (`docs/superpowers/plans/2026-06-06-castranova-part4.3-sync-review.md`) have their own bite-sized plans. Migrations added: M022 notificationlog-index rename, M023 movement FK indexes (4.1/2 drift+review), M020 `sync_review_item` (4.3, `73a2b0eb6de0`). **4.4 (AI) is deferred per the current round's decision** — AI scope is not being built now; revisit when the feature is locked at signing. With 4.4 deferred, Part 4 has no remaining active task.
+
 | Task | Builds | Test focus |
 |---|---|---|
-| 4.1 Stock-on-Hand dashboard (FR-012) | `GET /dashboards/stock-on-hand?category=&supplier=&customer=`; QUANTITY `sum(remaining_qty)`, SERIALIZED active units; per-batch drill | P95 <10s at 500 SKUs/5000 batches (perf test) |
-| 4.2 Role-tiered customer/project dashboards (FR-020, S7) | `CustomerDashboardStaffPublic` vs `…AdminPublic` (`GET /customers/{id}/dashboard`) **and** a parallel `ProjectDashboardStaffPublic`/`…AdminPublic` pair (`GET /projects/{id}/dashboard` — admin sees budget + consumed cost, staff sees neither), both mirroring §6.5; route dispatches by `current_user.role`; financial fields **absent** for staff | **Raw HTTP inspection**: staff response has no cost/margin keys on either dashboard; export disabled for staff |
-| 4.3 Sync-review queue (95% smooth-sync goal) | `sync_review_item` (M020); `STALE`/`CONFLICT` mutations recorded; `GET /sync-review?state=PENDING`, `POST /{id}/resolve` (admin) | STALE>7d routed; conflict on replay logged; admin resolve/discard |
-| 4.4 AI integration (S11, §7) | **Scope finalized at signing.** Scaffold only: `routes/assistant.py` + provider client in `core/`, behind JWT + role guard, role-tiered (no cost to staff), graceful degradation | Stub returns 501 until feature locked; role guard test |
+| 4.1 Stock-on-Hand dashboard (FR-012) ✅ | `GET /dashboards/stock-on-hand?category=&supplier=&customer=`; QUANTITY `sum(remaining_qty)`, SERIALIZED active units; per-batch drill | P95 <10s at 500 SKUs/5000 batches (perf test) |
+| 4.2 Role-tiered customer/project dashboards (FR-020, S7) ✅ | `CustomerDashboardStaffPublic` vs `…AdminPublic` (`GET /customers/{id}/dashboard`) **and** a parallel `ProjectDashboardStaffPublic`/`…AdminPublic` pair (`GET /projects/{id}/dashboard` — admin sees budget + consumed cost, staff sees neither), both mirroring §6.5; route dispatches by `current_user.role`; financial fields **absent** for staff | **Raw HTTP inspection**: staff response has no cost/margin keys on either dashboard; export disabled for staff |
+| 4.3 Sync-review queue (95% smooth-sync goal) ✅ | `sync_review_item` (M020); `STALE`/`CONFLICT` mutations recorded; `GET /sync-review?state=PENDING`, `POST /{id}/resolve` (admin) | STALE>7d routed; conflict on replay logged; admin resolve/discard |
+| 4.4 AI integration (S11, §7) ⏸️ DEFERRED | **Scope finalized at signing.** Scaffold only: `routes/assistant.py` + provider client in `core/`, behind JWT + role guard, role-tiered (no cost to staff), graceful degradation | Stub returns 501 until feature locked; role guard test |
 
 ---
 
