@@ -675,12 +675,32 @@ No new schema except `sync_review_item` (M020).
 
 # Part 5 — E2E, Hardening, Deployment — roadmap
 
+> **Ordering note (revised 2026-06-07):** 5.3 (frontend screens) now precedes 5.2
+> (browser E2E). Task 5.2's headline acceptance — *"offline queue survives reload;
+> no dup on replay"* — is a frontend PWA behaviour (IndexedDB persistence +
+> `resumePausedMutations` on reconnect) that can only be exercised through real
+> inventory screens in a browser. Those screens do not exist yet (only template
+> login/admin/settings routes are built), so **5.2 is BLOCKED-BY 5.3** and is
+> deferred until the receive + sale screens (at minimum) ship. The backend for all
+> five flows already exists and is covered by pytest; only the browser layer is
+> blocked.
+
 | Task | Builds | Test focus |
 |---|---|---|
-| 5.1 Auth hardening | `slowapi` rate-limit **`"5 per 15 minutes"`** on `/login` (route needs a `request: Request` param; `@router.post` decorator above `@limiter.limit`); refresh cookie `httpOnly secure sameSite=lax` | 6th login attempt in window → 429 |
-| 5.2 Playwright E2E | 5 paths: receive (serial+qty), sale online, **sale offline→reconnect→replay**, ticket close, pull fulfill (with short) | Offline queue survives reload; no dup on replay |
-| 5.3 Frontend SDK + screens | `bun run generate-client` after backend stable; admin + staff role-shells; offline indicator + queue counter | SDK regenerates; staff cannot see admin routes |
+| 5.1 Auth hardening ✅ | `slowapi` rate-limit **`"5 per 15 minutes"`** on `/login` (route needs a `request: Request` param; `@router.post` decorator above `@limiter.limit`); refresh cookie `httpOnly secure sameSite=lax` | 6th login attempt in window → 429 |
+| 5.3 Frontend SDK + screens *(do before 5.2)* | `bun run generate-client` after backend stable; admin + staff role-shells; offline indicator + queue counter; per-flow inventory screens (receive, sale, ticket, pull) | SDK regenerates; staff cannot see admin routes |
+| 5.2 Playwright E2E ⛔ *(BLOCKED-BY 5.3)* | 5 paths: receive (serial+qty), sale online, **sale offline→reconnect→replay**, ticket close, pull fulfill (with short) | Offline queue survives reload; no dup on replay |
 | 5.4 Deploy | Hostinger KVM 8: Traefik + Let's Encrypt + `pg_dump` cron + Sentry DSN; seed import; LINE/Viber bot enroll 10 users; BT scanner (TYSSO/Posiflex) tuning | Restore drill on staging; 8h offline drill |
+
+**E2E suite stabilization (done 2026-06-07, prerequisite for 5.2):**
+- Removed stale template specs `tests/items.spec.ts` (drove the removed `/items`
+  route) and `tests/sign-up.spec.ts` (drove the removed `/signup` route); repointed
+  `reset-password.spec.ts` off the deleted signup screen to the `createUser` API
+  helper; removed the orphaned `signUpNewUser` / `randomItem*` test helpers.
+- 5.1's login rate-limit was 429-ing the E2E suite (many logins from one IP).
+  Disabled it for local dev + E2E via `RATE_LIMIT_ENABLED: "false"` in
+  `compose.override.yml`; production (compose.yml, no override) keeps the secure
+  default `True`. Suite is green: **46 passed**.
 
 ---
 

@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test"
 import { findLastEmail } from "./utils/mailcatcher"
+import { createUser } from "./utils/privateApi"
 import { randomEmail, randomPassword } from "./utils/random"
-import { logInUser, signUpNewUser } from "./utils/user"
+import { logInUser } from "./utils/user"
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
@@ -31,13 +32,12 @@ test("User can reset password successfully using the link", async ({
   page,
   request,
 }) => {
-  const fullName = "Test User"
   const email = randomEmail()
   const password = randomPassword()
   const newPassword = randomPassword()
 
-  // Sign up a new user
-  await signUpNewUser(page, fullName, email, password)
+  // Seed a user via the API (this app has no signup screen)
+  await createUser({ email, password })
 
   await page.goto("/recover-password")
   await page.getByTestId("email-input").fill(email)
@@ -87,13 +87,12 @@ test("Expired or invalid reset link", async ({ page }) => {
 })
 
 test("Weak new password validation", async ({ page, request }) => {
-  const fullName = "Test User"
   const email = randomEmail()
   const password = randomPassword()
   const weakPassword = "123"
 
-  // Sign up a new user
-  await signUpNewUser(page, fullName, email, password)
+  // Seed a user via the API (this app has no signup screen)
+  await createUser({ email, password })
 
   await page.goto("/recover-password")
   await page.getByTestId("email-input").fill(email)

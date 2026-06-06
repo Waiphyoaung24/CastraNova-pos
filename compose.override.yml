@@ -86,6 +86,10 @@ services:
       SMTP_PORT: "1025"
       SMTP_TLS: "false"
       EMAILS_FROM_EMAIL: "noreply@example.com"
+      # Disable login rate-limiting for local dev + E2E (the suite logs in many
+      # times from one IP). Production uses compose.yml without this override, so
+      # RATE_LIMIT_ENABLED keeps its secure default of True there.
+      RATE_LIMIT_ENABLED: "false"
 
   mailcatcher:
     image: schickling/mailcatcher
