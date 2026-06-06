@@ -9,8 +9,9 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
+from app import crud
 from app.core.config import settings
 from app.models import (
     CustomerCreate,
@@ -19,11 +20,7 @@ from app.models import (
     ReceivePiece,
     SupplierCreate,
     TrackingMode,
-    Unit,
-    UnitState,
 )
-from app import crud
-from sqlmodel import select
 
 PREFIX = settings.API_V1_STR
 
@@ -72,7 +69,7 @@ def seed_redaction_unit(
     yield units[0].castranova_barcode, customer.id
 
 
-def _sale_body(barcode: str, customer_id: uuid.UUID) -> dict:  # type: ignore[type-arg]
+def _sale_body(barcode: str, customer_id: uuid.UUID) -> dict[str, object]:
     return {
         "customer_id": str(customer_id),
         "lines": [{"line_kind": "UNIT", "castranova_barcode": barcode}],
@@ -83,7 +80,6 @@ def _sale_body(barcode: str, customer_id: uuid.UUID) -> dict:  # type: ignore[ty
 def test_staff_sale_response_omits_cost_fields(
     client: TestClient,
     staff_token_headers: dict[str, str],
-    db: Session,
     seed_redaction_unit: tuple[str, uuid.UUID],
 ) -> None:
     """STAFF callers must NOT see total_cogs_thb or unit_cost_thb (TDD RED)."""
@@ -106,7 +102,6 @@ def test_staff_sale_response_omits_cost_fields(
 def test_admin_sale_response_includes_cost_fields(
     client: TestClient,
     superuser_token_headers: dict[str, str],
-    db: Session,
     seed_redaction_unit: tuple[str, uuid.UUID],
 ) -> None:
     """SUPERUSER callers must still see total_cogs_thb and unit_cost_thb."""
