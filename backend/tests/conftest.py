@@ -39,6 +39,18 @@ def db() -> Generator[Session, None, None]:
             session.commit()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _disable_login_rate_limit() -> Generator[None, None, None]:
+    # The suite logs in many times across fixtures; a global 5/15min limit would
+    # break unrelated tests. Disable here; the rate-limit test re-enables locally.
+    from app.core.limiter import limiter
+
+    original = limiter.enabled
+    limiter.enabled = False
+    yield
+    limiter.enabled = original
+
+
 @pytest.fixture(scope="module")
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as c:
