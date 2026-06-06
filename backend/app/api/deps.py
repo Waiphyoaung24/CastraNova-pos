@@ -38,6 +38,13 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
         )
+    # Only access-typed tokens may act as bearer credentials (rejects refresh
+    # tokens and any token missing a type claim).
+    if token_data.type != "access":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
     user = session.get(User, token_data.sub)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

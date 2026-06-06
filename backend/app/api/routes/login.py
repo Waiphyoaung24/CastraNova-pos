@@ -1,15 +1,27 @@
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+import jwt
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from jwt.exceptions import InvalidTokenError
+from pydantic import ValidationError
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.core import security
 from app.core.config import settings
-from app.models import Message, NewPassword, Token, UserPublic, UserUpdate
+from app.core.limiter import LOGIN_RATE_LIMIT, limiter
+from app.models import (
+    Message,
+    NewPassword,
+    Token,
+    TokenPayload,
+    User,
+    UserPublic,
+    UserUpdate,
+)
 from app.utils import (
     generate_password_reset_token,
     generate_reset_password_email,
@@ -20,9 +32,25 @@ from app.utils import (
 router = APIRouter(tags=["login"])
 
 
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=security.REFRESH_TOKEN_COOKIE_NAME,
+        value=token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path=security.REFRESH_TOKEN_COOKIE_PATH,
+    )
+
+
 @router.post("/login/access-token")
+@limiter.limit(LOGIN_RATE_LIMIT)
 def login_access_token(
-    session: SessionDep, form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
+    response: Response,
+    session: SessionDep,
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
     """
     OAuth2 compatible token login, get an access token for future requests
@@ -35,11 +63,69 @@ def login_access_token(
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    refresh_token = security.create_refresh_token(
+        user.id,
+        expires_delta=timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES),
+    )
+    _set_refresh_cookie(response, refresh_token)
     return Token(
         access_token=security.create_access_token(
             user.id, expires_delta=access_token_expires
         )
     )
+
+
+@router.post("/login/refresh-token")
+def refresh_access_token(
+    request: Request, response: Response, session: SessionDep
+) -> Token:
+    """
+    Exchange a valid refresh cookie for a new access token (and rotate the cookie).
+    """
+    token = request.cookies.get(security.REFRESH_TOKEN_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+        )
+        token_data = TokenPayload(**payload)
+    except (InvalidTokenError, ValidationError):
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if token_data.type != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if token_data.sub is None:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    user = session.get(User, token_data.sub)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    new_refresh = security.create_refresh_token(
+        user.id,
+        expires_delta=timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES),
+    )
+    _set_refresh_cookie(response, new_refresh)
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    return Token(
+        access_token=security.create_access_token(
+            user.id, expires_delta=access_token_expires
+        )
+    )
+
+
+@router.post("/login/logout")
+def logout(response: Response) -> Message:
+    """
+    Clear the refresh cookie.
+    """
+    response.delete_cookie(
+        key=security.REFRESH_TOKEN_COOKIE_NAME,
+        path=security.REFRESH_TOKEN_COOKIE_PATH,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+    )
+    return Message(message="Logged out")
 
 
 @router.post("/login/test-token", response_model=UserPublic)
