@@ -2528,6 +2528,55 @@ export const SaleLinePublicSchema = {
     title: 'SaleLinePublic'
 } as const;
 
+export const SaleLineStaffPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        unit_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Id'
+        },
+        product_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Id'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'line_kind', 'unit_id', 'product_id', 'quantity', 'unit_price_thb'],
+    title: 'SaleLineStaffPublic'
+} as const;
+
 export const SalePublicSchema = {
     properties: {
         id: {
@@ -2566,6 +2615,41 @@ export const SalePublicSchema = {
     type: 'object',
     required: ['id', 'customer_id', 'total_thb', 'total_cogs_thb', 'sold_at', 'lines'],
     title: 'SalePublic'
+} as const;
+
+export const SaleStaffPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        total_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Thb'
+        },
+        sold_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Sold At'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleLineStaffPublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['id', 'customer_id', 'total_thb', 'sold_at', 'lines'],
+    title: 'SaleStaffPublic'
 } as const;
 
 export const SerialMovementPublicSchema = {
