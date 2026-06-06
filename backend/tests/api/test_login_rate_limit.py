@@ -15,7 +15,8 @@ def rate_limit_on():
 
 
 def test_sixth_login_attempt_is_rate_limited(
-    client: TestClient, rate_limit_on: None  # noqa: ARG001 — side-effect fixture
+    client: TestClient,
+    rate_limit_on: None,  # noqa: ARG001 — side-effect fixture; enables rate limiting
 ) -> None:
     url = f"{settings.API_V1_STR}/login/access-token"
     data = {"username": "nobody@example.com", "password": "wrongpass"}
@@ -25,3 +26,4 @@ def test_sixth_login_attempt_is_rate_limited(
 
     r6 = client.post(url, data=data)
     assert r6.status_code == 429
+    assert "Rate limit" in r6.json().get("error", "")

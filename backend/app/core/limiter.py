@@ -3,7 +3,12 @@ from slowapi.util import get_remote_address
 
 from app.core.config import settings
 
+# WARNING: get_remote_address reads request.client.host (the TCP peer). Behind a
+# reverse proxy (Traefik in this project) the peer is the proxy container, not the
+# end user, so the limit becomes effectively global. Before production deploy
+# (Part 5.4), configure proxy-header handling (e.g. uvicorn --forwarded-allow-ips
+# / ProxyHeadersMiddleware) or a key_func that trusts X-Forwarded-For only from
+# the known proxy. Do NOT parse X-Forwarded-For without a trusted-proxy list.
 limiter = Limiter(key_func=get_remote_address, enabled=settings.RATE_LIMIT_ENABLED)
 
-# spec §5.1: brute-force protection on login.
-LOGIN_RATE_LIMIT = "5/15 minutes"
+LOGIN_RATE_LIMIT = "5/15 minutes"  # spec §5.1: brute-force protection on login
