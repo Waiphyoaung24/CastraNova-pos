@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app import crud
@@ -132,12 +133,14 @@ def _payload() -> dict:
     }
 
 
-def test_ingest_requires_auth(client) -> None:
+def test_ingest_requires_auth(client: TestClient) -> None:
     r = client.post(f"{settings.API_V1_STR}/sync-review", json=_payload())
     assert r.status_code == 401
 
 
-def test_staff_can_ingest(client, staff_token_headers) -> None:
+def test_staff_can_ingest(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
     r = client.post(
         f"{settings.API_V1_STR}/sync-review", json=_payload(),
         headers=staff_token_headers,
@@ -147,14 +150,18 @@ def test_staff_can_ingest(client, staff_token_headers) -> None:
     assert body["state"] == "PENDING" and body["reason"] == "STALE"
 
 
-def test_ingest_is_idempotent_over_http(client, staff_token_headers) -> None:
+def test_ingest_is_idempotent_over_http(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
     body = _payload()
     r1 = client.post(f"{settings.API_V1_STR}/sync-review", json=body, headers=staff_token_headers)
     r2 = client.post(f"{settings.API_V1_STR}/sync-review", json=body, headers=staff_token_headers)
     assert r1.json()["id"] == r2.json()["id"]
 
 
-def test_list_is_admin_only(client, staff_token_headers) -> None:
+def test_list_is_admin_only(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
     r = client.get(
         f"{settings.API_V1_STR}/sync-review?state=PENDING",
         headers=staff_token_headers,
@@ -162,17 +169,26 @@ def test_list_is_admin_only(client, staff_token_headers) -> None:
     assert r.status_code == 403
 
 
-def test_admin_lists_pending(client, superuser_token_headers, staff_token_headers) -> None:
-    client.post(f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=staff_token_headers)
+def test_admin_lists_pending(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+) -> None:
+    ingested_id = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(),
+        headers=staff_token_headers,
+    ).json()["id"]
     r = client.get(
         f"{settings.API_V1_STR}/sync-review?state=PENDING",
         headers=superuser_token_headers,
     )
     assert r.status_code == 200
-    assert any(i["state"] == "PENDING" for i in r.json())
+    assert any(i["id"] == ingested_id for i in r.json())
 
 
-def test_resolve_is_admin_only(client, staff_token_headers) -> None:
+def test_resolve_is_admin_only(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
     created = client.post(
         f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=staff_token_headers
     ).json()
@@ -184,7 +200,11 @@ def test_resolve_is_admin_only(client, staff_token_headers) -> None:
     assert r.status_code == 403
 
 
-def test_admin_resolves_item(client, staff_token_headers, superuser_token_headers) -> None:
+def test_admin_resolves_item(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
+) -> None:
     created = client.post(
         f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=staff_token_headers
     ).json()
@@ -200,7 +220,9 @@ def test_admin_resolves_item(client, staff_token_headers, superuser_token_header
     assert body["resolved_at"] is not None
 
 
-def test_resolve_404(client, superuser_token_headers) -> None:
+def test_resolve_404(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
     r = client.post(
         f"{settings.API_V1_STR}/sync-review/{uuid.uuid4()}/resolve",
         json={"state": "RESOLVED", "note": None},
