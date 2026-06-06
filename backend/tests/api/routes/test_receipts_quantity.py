@@ -56,14 +56,14 @@ def _body(product_id: uuid.UUID, supplier_id: uuid.UUID, **over: object) -> dict
 
 def test_receive_quantity_creates_batch_and_movement(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
     product_id, supplier_id, sku = seed_quantity_product
     r = client.post(
         f"{PREFIX}/receipts/quantity",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(product_id, supplier_id),
     )
     assert r.status_code == 200, r.text
@@ -85,14 +85,14 @@ def test_receive_quantity_creates_batch_and_movement(
 
 def test_receive_quantity_idempotent_replay(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
     product_id, supplier_id, _ = seed_quantity_product
     body = _body(product_id, supplier_id)
     r1 = client.post(
-        f"{PREFIX}/receipts/quantity", headers=staff_token_headers, json=body
+        f"{PREFIX}/receipts/quantity", headers=superuser_token_headers, json=body
     )
     assert r1.status_code == 200
     db.expire_all()
@@ -100,7 +100,7 @@ def test_receive_quantity_idempotent_replay(
     movements_before = len(db.exec(select(PartMovement)).all())
 
     r2 = client.post(
-        f"{PREFIX}/receipts/quantity", headers=staff_token_headers, json=body
+        f"{PREFIX}/receipts/quantity", headers=superuser_token_headers, json=body
     )
     assert r2.status_code == 200
     # Replay returns the same batch and persists no new batch/movement rows.
@@ -123,7 +123,7 @@ def test_receive_quantity_requires_auth(
 
 def test_receive_quantity_rejects_serialized_product(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
@@ -140,7 +140,7 @@ def test_receive_quantity_rejects_serialized_product(
     )
     r = client.post(
         f"{PREFIX}/receipts/quantity",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(serialized.id, supplier_id),
     )
     assert r.status_code == 400
@@ -149,13 +149,13 @@ def test_receive_quantity_rejects_serialized_product(
 
 def test_receive_quantity_rejects_zero_qty(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
     product_id, supplier_id, _ = seed_quantity_product
     r = client.post(
         f"{PREFIX}/receipts/quantity",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(product_id, supplier_id, received_qty=0),
     )
     assert r.status_code == 422
@@ -163,13 +163,13 @@ def test_receive_quantity_rejects_zero_qty(
 
 def test_receive_quantity_unknown_product_returns_404(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
     _, supplier_id, _ = seed_quantity_product
     r = client.post(
         f"{PREFIX}/receipts/quantity",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(uuid.uuid4(), supplier_id),
     )
     assert r.status_code == 404
@@ -178,13 +178,13 @@ def test_receive_quantity_unknown_product_returns_404(
 
 def test_receive_quantity_unknown_supplier_returns_404(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
     product_id, _, _ = seed_quantity_product
     r = client.post(
         f"{PREFIX}/receipts/quantity",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(product_id, uuid.uuid4()),
     )
     assert r.status_code == 404
@@ -193,14 +193,14 @@ def test_receive_quantity_unknown_supplier_returns_404(
 
 def test_receive_quantity_records_discrepancy_note(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
     product_id, supplier_id, _ = seed_quantity_product
     r = client.post(
         f"{PREFIX}/receipts/quantity",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(
             product_id,
             supplier_id,
@@ -217,3 +217,13 @@ def test_receive_quantity_records_discrepancy_note(
     assert movement.notes is not None
     assert "10" in movement.notes and "8" in movement.notes
     assert "2 units missing from carton" in movement.notes
+
+
+def test_staff_cannot_receive_quantity(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+) -> None:
+    resp = client.post(
+        f"{PREFIX}/receipts/quantity", headers=staff_token_headers, json={}
+    )
+    assert resp.status_code == 403

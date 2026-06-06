@@ -53,14 +53,14 @@ def _body(product_id: uuid.UUID, supplier_id: uuid.UUID, **over: object) -> dict
 
 def test_receive_serialized_creates_unit_and_movement(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
     product_id, supplier_id = seed_product_supplier
     r = client.post(
         f"{PREFIX}/receipts/serialized",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(product_id, supplier_id),
     )
     assert r.status_code == 200
@@ -82,14 +82,14 @@ def test_receive_serialized_creates_unit_and_movement(
 
 def test_receive_serialized_idempotent_replay(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
     product_id, supplier_id = seed_product_supplier
     body = _body(product_id, supplier_id)
     r1 = client.post(
-        f"{PREFIX}/receipts/serialized", headers=staff_token_headers, json=body
+        f"{PREFIX}/receipts/serialized", headers=superuser_token_headers, json=body
     )
     assert r1.status_code == 200
     db.expire_all()
@@ -97,7 +97,7 @@ def test_receive_serialized_idempotent_replay(
     movements_before = len(db.exec(select(UnitMovement)).all())
 
     r2 = client.post(
-        f"{PREFIX}/receipts/serialized", headers=staff_token_headers, json=body
+        f"{PREFIX}/receipts/serialized", headers=superuser_token_headers, json=body
     )
     assert r2.status_code == 200
     # Replay returns the same unit and persists no new unit/movement rows.
@@ -120,34 +120,56 @@ def test_receive_serialized_requires_auth(
 
 def test_receive_rejects_negative_cost(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
     product_id, supplier_id = seed_product_supplier
     body = _body(product_id, supplier_id)
     body["pieces"] = [{"supplier_serial": "SN-NEG", "purchase_cost_thb": "-1.00"}]
     r = client.post(
-        f"{PREFIX}/receipts/serialized", headers=staff_token_headers, json=body
+        f"{PREFIX}/receipts/serialized", headers=superuser_token_headers, json=body
     )
     assert r.status_code == 422
 
 
 def test_label_pdf_returned_for_unit(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
     product_id, supplier_id = seed_product_supplier
     rec = client.post(
         f"{PREFIX}/receipts/serialized",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(product_id, supplier_id),
     )
     unit_id = rec.json()["units"][0]["id"]
     r = client.get(
         f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
     )
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert r.content[:4] == b"%PDF"
+
+
+def test_staff_cannot_receive_serialized(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+) -> None:
+    resp = client.post(
+        f"{PREFIX}/receipts/serialized", headers=staff_token_headers, json={}
+    )
+    assert resp.status_code == 403
+
+
+def test_staff_cannot_fetch_unit_label(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+) -> None:
+    unit_id = uuid.uuid4()
+    resp = client.get(
+        f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf",
+        headers=staff_token_headers,
+    )
+    assert resp.status_code == 403
