@@ -19,6 +19,7 @@ password_hash = PasswordHash(
 ALGORITHM = "HS256"
 
 REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
+REFRESH_TOKEN_COOKIE_PATH = f"{settings.API_V1_STR}/login"
 
 
 def create_access_token(subject: str | Any, expires_delta: timedelta) -> str:

@@ -40,7 +40,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
-        path=f"{settings.API_V1_STR}/login",
+        path=security.REFRESH_TOKEN_COOKIE_PATH,
     )
 
 
@@ -118,7 +118,7 @@ def logout(response: Response) -> Message:
     """
     response.delete_cookie(
         key=security.REFRESH_TOKEN_COOKIE_NAME,
-        path=f"{settings.API_V1_STR}/login",
+        path=security.REFRESH_TOKEN_COOKIE_PATH,
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
