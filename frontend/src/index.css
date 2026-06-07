@@ -65,8 +65,8 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
 
-  /* Primary — #3B82F6 blue */
-  --primary: oklch(0.6235 0.1879 258.28);
+  /* Primary — #2563EB blue-600 (darkened from blue-500 to meet WCAG AA 4.5:1 on near-white) */
+  --primary: oklch(0.5461 0.2153 262.89);
   --primary-foreground: oklch(0.985 0 0);
 
   --secondary: oklch(0.97 0 0);
@@ -95,20 +95,20 @@
   /* Sidebar */
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.6235 0.1879 258.28);
+  --sidebar-primary: oklch(0.5461 0.2153 262.89);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  /* CTA — #F97316 orange */
+  /* CTA — #F97316 orange (dark fg for WCAG AA: 5.40:1) */
   --cta: oklch(0.7176 0.1921 47.6);
-  --cta-foreground: oklch(0.985 0 0);
+  --cta-foreground: oklch(0.145 0 0);
 
-  /* Success — #22C55E green */
+  /* Success — #22C55E green (dark fg for WCAG AA: 6.64:1) */
   --success: oklch(0.7231 0.1919 142.5);
-  --success-foreground: oklch(0.985 0 0);
+  --success-foreground: oklch(0.145 0 0);
 
   /* Warn — #F59E0B amber */
   --warn: oklch(0.7686 0.1647 70.08);
@@ -125,8 +125,8 @@
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
 
-  /* Primary — #3B82F6 blue (slightly lighter for dark bg) */
-  --primary: oklch(0.6706 0.1879 258.28);
+  /* Primary — #2563EB blue-600 (same as light; near-white fg → 4.95:1 WCAG AA) */
+  --primary: oklch(0.5461 0.2153 262.89);
   --primary-foreground: oklch(0.985 0 0);
 
   --secondary: oklch(0.269 0 0);
@@ -155,7 +155,7 @@
   /* Sidebar */
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.6706 0.1879 258.28);
+  --sidebar-primary: oklch(0.5461 0.2153 262.89);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
