@@ -1130,7 +1130,8 @@ class SaleLineStaffPublic(SQLModel):
     product_id: uuid.UUID | None
     quantity: int
     unit_price_thb: Decimal
-    # no unit_cost_thb — redacted for staff
+    # no unit_cost_thb — redacted for staff. Any NEW cost/margin field added to
+    # SaleLine MUST be consciously omitted here too (staff must never see cost data).
 
 
 class SaleStaffPublic(SQLModel):
@@ -1139,7 +1140,8 @@ class SaleStaffPublic(SQLModel):
     total_thb: Decimal
     sold_at: datetime
     lines: list[SaleLineStaffPublic]
-    # no total_cogs_thb — redacted for staff
+    # no total_cogs_thb — redacted for staff. Any NEW financial/cost field added to
+    # Sale MUST be consciously omitted here too (staff must never see cost data).
 
 
 class SaleLineInput(SQLModel):

@@ -64,8 +64,13 @@ def get_current_active_superuser(current_user: CurrentUser) -> User:
     return current_user
 
 
+def is_admin(user: User) -> bool:
+    """A superuser OR an explicit BKK_ADMIN is treated as admin everywhere."""
+    return user.is_superuser or user.role == UserRole.BKK_ADMIN
+
+
 def get_admin(current_user: CurrentUser) -> User:
-    if current_user.role != UserRole.BKK_ADMIN:
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Admin only")
     return current_user
 

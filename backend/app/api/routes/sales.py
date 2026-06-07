@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlmodel import select
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_current_user
+from app.api.deps import CurrentUser, SessionDep, get_current_user, is_admin
 from app.models import (
     Sale,
     SaleCreateRequest,
@@ -14,7 +14,6 @@ from app.models import (
     SalePublic,
     SaleStaffPublic,
     User,
-    UserRole,
 )
 from app.services import notify
 from app.services.receipt_pdf import render_sale_receipt
@@ -24,8 +23,7 @@ router = APIRouter(prefix="/sales", tags=["sales"])
 
 def _to_public(*, session: SessionDep, sale: Sale, user: User) -> SalePublic | SaleStaffPublic:
     lines = session.exec(select(SaleLine).where(SaleLine.sale_id == sale.id)).all()
-    is_admin = user.is_superuser or user.role == UserRole.BKK_ADMIN
-    if is_admin:
+    if is_admin(user):
         return SalePublic(
             id=sale.id,
             customer_id=sale.customer_id,
@@ -43,7 +41,7 @@ def _to_public(*, session: SessionDep, sale: Sale, user: User) -> SalePublic | S
     )
 
 
-@router.post("")
+@router.post("", response_model=SalePublic | SaleStaffPublic)
 def create_sale(
     *,
     session: SessionDep,
