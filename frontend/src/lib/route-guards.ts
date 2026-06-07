@@ -51,6 +51,9 @@ export async function requireAuth(): Promise<void> {
  * hand-rolling the predicate.
  */
 export async function requireAdmin(): Promise<void> {
+  if (!isLoggedIn()) {
+    throw redirect({ to: "/login" })
+  }
   const user = await UsersService.readUserMe()
   if (!roleFlags(user).isAdmin) {
     throw redirect({ to: "/" })

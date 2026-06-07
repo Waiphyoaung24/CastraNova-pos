@@ -53,7 +53,11 @@ export function resolveScanResult(
 // ---------------------------------------------------------------------------
 
 export interface UseScanLookupReturn {
-  /** Trigger a lookup for the given scanned code. */
+  /**
+   * Fire-and-forget trigger for the given scanned code (`mutate`, not
+   * awaitable). Non-404 API errors do NOT throw to the caller — they surface
+   * via `error` / `isError` instead.
+   */
   resolve: (code: string) => void
   /** The resolved result once a lookup completes, or undefined while idle. */
   result: ScanLookupResult | undefined
@@ -61,6 +65,10 @@ export interface UseScanLookupReturn {
   isSearching: boolean
   /** True when the last lookup ended with NOT_FOUND. */
   notFound: boolean
+  /** The ApiError from the last failed lookup, or null when idle/succeeded. */
+  error: ApiError | null
+  /** True when the last lookup ended with a non-404 API error. */
+  isError: boolean
   /** Reset result and error state back to idle. */
   reset: () => void
 }
@@ -114,6 +122,8 @@ export function useScanLookup(): UseScanLookupReturn {
     result: mutation.data,
     isSearching: mutation.isPending,
     notFound: mutation.data?.kind === "NOT_FOUND",
+    error: mutation.error,
+    isError: mutation.isError,
     reset: mutation.reset,
   }
 }

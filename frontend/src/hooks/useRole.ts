@@ -4,6 +4,8 @@ import useAuth from "./useAuth"
 /**
  * Pure helper — unit-testable without React.
  * Admin = superuser OR BKK_ADMIN. No role + not superuser → least-privilege (both false).
+ * Note: `is_superuser` absent/undefined is treated as non-admin (least-privilege); a backend
+ * schema regression that drops the field will silently downgrade the user — intentional fail-safe.
  */
 export function roleFlags(
   user: { is_superuser?: boolean; role?: UserRole | null } | null | undefined,
