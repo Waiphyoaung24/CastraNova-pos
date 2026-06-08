@@ -92,6 +92,15 @@ function SerializedTab() {
   const [announce, setAnnounce] = useState("")
 
   const serialInputRef = useRef<HTMLInputElement>(null)
+  // Repeated identical announcements are a no-op for React (equal state bails),
+  // so aria-live stays silent on a 2nd identical outcome. Toggle an invisible
+  // trailing no-break space per announce so the DOM text node always changes;
+  // the visible/sr-only text still reads naturally to a screen reader.
+  const announceCountRef = useRef(0)
+  function announceMessage(message: string) {
+    announceCountRef.current += 1
+    setAnnounce(message + " ".repeat(announceCountRef.current % 2))
+  }
 
   // Reference data — same staleTime as other reference-data screens.
   const { data: products = [], isPending: productsPending } = useQuery({
@@ -123,12 +132,12 @@ function SerializedTab() {
       setPieces([])
       setSerial("")
       setCost("")
-      setAnnounce(`Received ${data.units.length} unit(s).`)
+      announceMessage(`Received ${data.units.length} unit(s).`)
       showSuccessToast(`Received ${data.units.length} unit(s).`)
       serialInputRef.current?.focus()
     },
     onError: () => {
-      setAnnounce("Receive failed.")
+      announceMessage("Receive failed.")
       showErrorToast("Could not receive units. Please retry.")
     },
   })
@@ -142,7 +151,7 @@ function SerializedTab() {
         purchaseCostThb: cost.trim(),
       }),
     )
-    setAnnounce(`Added piece ${serial.trim()}.`)
+    announceMessage(`Added piece ${serial.trim()}.`)
     setSerial("")
     setCost("")
     serialInputRef.current?.focus()
@@ -150,7 +159,7 @@ function SerializedTab() {
 
   function handleRemovePiece(key: string, removedSerial: string) {
     setPieces((prev) => removePiece(prev, key))
-    setAnnounce(`Removed piece ${removedSerial}.`)
+    announceMessage(`Removed piece ${removedSerial}.`)
   }
 
   function handleSubmit() {
@@ -173,11 +182,18 @@ function SerializedTab() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
-          <Label htmlFor="receive-product">Product</Label>
+          <Label htmlFor="receive-product">
+            Product
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
           <Select value={productId} onValueChange={setProductId}>
             <SelectTrigger
               id="receive-product"
               className="h-11 w-full"
+              aria-required="true"
               disabled={productsPending}
             >
               <SelectValue placeholder="Select a serialized product" />
@@ -193,11 +209,18 @@ function SerializedTab() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="receive-supplier">Supplier</Label>
+          <Label htmlFor="receive-supplier">
+            Supplier
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
           <Select value={supplierId} onValueChange={setSupplierId}>
             <SelectTrigger
               id="receive-supplier"
               className="h-11 w-full"
+              aria-required="true"
               disabled={suppliersPending}
             >
               <SelectValue placeholder="Select a supplier" />
@@ -235,11 +258,18 @@ function SerializedTab() {
 
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="receive-serial">Supplier serial</Label>
+              <Label htmlFor="receive-serial">
+                Supplier serial
+                <span aria-hidden="true" className="text-destructive">
+                  {" "}
+                  *
+                </span>
+              </Label>
               <Input
                 id="receive-serial"
                 ref={serialInputRef}
                 className="num h-11"
+                aria-required="true"
                 value={serial}
                 onChange={(e) => setSerial(e.target.value)}
                 onKeyDown={(e) => {
@@ -253,11 +283,18 @@ function SerializedTab() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="receive-cost">Purchase cost (THB)</Label>
+              <Label htmlFor="receive-cost">
+                Purchase cost (THB)
+                <span aria-hidden="true" className="text-destructive">
+                  {" "}
+                  *
+                </span>
+              </Label>
               <Input
                 id="receive-cost"
                 className="num h-11"
                 inputMode="decimal"
+                aria-required="true"
                 value={cost}
                 onChange={(e) => setCost(e.target.value)}
                 placeholder="0.00"
@@ -349,13 +386,13 @@ function QuantityTab() {
   const [draft, setDraft] = useState<QuantityDraft>(EMPTY_QUANTITY_DRAFT)
   const [announce, setAnnounce] = useState("")
 
-  const productId = useId()
-  const supplierId = useId()
-  const qtyId = useId()
-  const costId = useId()
-  const batchRefId = useId()
-  const expectedId = useId()
-  const noteId = useId()
+  const fieldId = useId()
+  // See SerializedTab: aria-live re-announce trick for repeated identical text.
+  const announceCountRef = useRef(0)
+  function announceMessage(message: string) {
+    announceCountRef.current += 1
+    setAnnounce(message + " ".repeat(announceCountRef.current % 2))
+  }
 
   // Reference data — keyed identically to the Serialized tab, so TanStack Query
   // serves both tabs from one shared cache entry (no duplicate fetch).
@@ -386,13 +423,13 @@ function QuantityTab() {
       ReceiptsService.receiveQuantity({ requestBody: body }),
     onSuccess: (batch) => {
       setDraft(EMPTY_QUANTITY_DRAFT)
-      setAnnounce(
+      announceMessage(
         `Received ${batch.received_qty} unit(s) into batch ${batch.batch_no}.`,
       )
       showSuccessToast(`Received batch ${batch.batch_no}.`)
     },
     onError: () => {
-      setAnnounce("Receive failed.")
+      announceMessage("Receive failed.")
       showErrorToast("Could not receive batch. Please retry.")
     },
   })
@@ -410,20 +447,33 @@ function QuantityTab() {
   const canSubmit = canSubmitQuantity(draft)
 
   return (
-    <div className="flex flex-col gap-6 py-4">
+    <form
+      className="flex flex-col gap-6 py-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (canSubmit && !mutation.isPending) handleSubmit()
+      }}
+    >
       <output className="sr-only">{announce}</output>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
-          <Label htmlFor={productId}>Product</Label>
+          <Label htmlFor={`${fieldId}-product`}>
+            Product
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
           <Select
             value={draft.productId}
             onValueChange={(v) => patch("productId", v)}
           >
             <SelectTrigger
-              id={productId}
+              id={`${fieldId}-product`}
               className="h-11 w-full"
-              disabled={productsPending}
+              aria-required="true"
+              disabled={productsPending || mutation.isPending}
             >
               <SelectValue placeholder="Select a quantity product" />
             </SelectTrigger>
@@ -438,15 +488,22 @@ function QuantityTab() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor={supplierId}>Supplier</Label>
+          <Label htmlFor={`${fieldId}-supplier`}>
+            Supplier
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
           <Select
             value={draft.supplierId}
             onValueChange={(v) => patch("supplierId", v)}
           >
             <SelectTrigger
-              id={supplierId}
+              id={`${fieldId}-supplier`}
               className="h-11 w-full"
-              disabled={suppliersPending}
+              aria-required="true"
+              disabled={suppliersPending || mutation.isPending}
             >
               <SelectValue placeholder="Select a supplier" />
             </SelectTrigger>
@@ -463,11 +520,19 @@ function QuantityTab() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
-          <Label htmlFor={qtyId}>Received qty</Label>
+          <Label htmlFor={`${fieldId}-qty`}>
+            Received qty
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
           <Input
-            id={qtyId}
+            id={`${fieldId}-qty`}
             className="num h-11"
             inputMode="numeric"
+            aria-required="true"
+            disabled={mutation.isPending}
             value={draft.receivedQty}
             onChange={(e) => patch("receivedQty", e.target.value)}
             placeholder="0"
@@ -475,11 +540,19 @@ function QuantityTab() {
           />
         </div>
         <div className="flex flex-col gap-2">
-          <Label htmlFor={costId}>Purchase cost (THB)</Label>
+          <Label htmlFor={`${fieldId}-cost`}>
+            Purchase cost (THB)
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
           <Input
-            id={costId}
+            id={`${fieldId}-cost`}
             className="num h-11"
             inputMode="decimal"
+            aria-required="true"
+            disabled={mutation.isPending}
             value={draft.purchaseCostThb}
             onChange={(e) => patch("purchaseCostThb", e.target.value)}
             placeholder="0.00"
@@ -490,10 +563,13 @@ function QuantityTab() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
-          <Label htmlFor={batchRefId}>Supplier batch ref (optional)</Label>
+          <Label htmlFor={`${fieldId}-batch-ref`}>
+            Supplier batch ref (optional)
+          </Label>
           <Input
-            id={batchRefId}
+            id={`${fieldId}-batch-ref`}
             className="h-11"
+            disabled={mutation.isPending}
             value={draft.supplierBatchRef}
             onChange={(e) => patch("supplierBatchRef", e.target.value)}
             placeholder="Supplier batch reference"
@@ -501,11 +577,12 @@ function QuantityTab() {
           />
         </div>
         <div className="flex flex-col gap-2">
-          <Label htmlFor={expectedId}>Expected qty (optional)</Label>
+          <Label htmlFor={`${fieldId}-expected`}>Expected qty (optional)</Label>
           <Input
-            id={expectedId}
+            id={`${fieldId}-expected`}
             className="num h-11"
             inputMode="numeric"
+            disabled={mutation.isPending}
             value={draft.expectedQty}
             onChange={(e) => patch("expectedQty", e.target.value)}
             placeholder="0"
@@ -515,10 +592,11 @@ function QuantityTab() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor={noteId}>Note (optional)</Label>
+        <Label htmlFor={`${fieldId}-note`}>Note (optional)</Label>
         <Input
-          id={noteId}
+          id={`${fieldId}-note`}
           className="h-11"
+          disabled={mutation.isPending}
           value={draft.note}
           onChange={(e) => patch("note", e.target.value)}
           placeholder="Optional note"
@@ -528,16 +606,15 @@ function QuantityTab() {
 
       <div>
         <Button
-          type="button"
+          type="submit"
           size="lg"
           className="h-11"
           disabled={!canSubmit || mutation.isPending}
-          onClick={handleSubmit}
         >
           {mutation.isPending ? "Receiving…" : "Receive"}
         </Button>
       </div>
-    </div>
+    </form>
   )
 }
 
