@@ -3,14 +3,13 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_admin, get_current_user
+from app.api.deps import CurrentUser, SessionDep, get_admin, get_current_user, is_admin
 from app.models import (
     CustomerCreate,
     CustomerDashboardAdminPublic,
     CustomerDashboardStaffPublic,
     CustomerPublic,
     CustomerUpdate,
-    UserRole,
 )
 
 router = APIRouter(prefix="/customers", tags=["customers"])
@@ -55,7 +54,7 @@ def get_customer_dashboard(
     # dashboard; financial fields are redacted for staff via the role-dispatched
     # response schema below (no per-customer IDOR scoping by design).
     data = crud.get_customer_dashboard(session=session, customer_id=customer_id)
-    if current_user.role == UserRole.BKK_ADMIN:
+    if is_admin(current_user):
         return CustomerDashboardAdminPublic.model_validate(data)
     return CustomerDashboardStaffPublic.model_validate(data)
 

@@ -3,14 +3,13 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_admin
+from app.api.deps import CurrentUser, SessionDep, get_admin, is_admin
 from app.models import (
     ProjectCreate,
     ProjectDashboardAdminPublic,
     ProjectDashboardStaffPublic,
     ProjectPublic,
     ProjectUpdate,
-    UserRole,
 )
 
 # Project CRUD is admin-only (spec §8); the dashboard is role-tiered (FR-020/S7).
@@ -46,7 +45,7 @@ def get_project_dashboard(
     # dashboard; budget/consumed-cost fields are redacted for staff via the
     # role-dispatched response schema below (no per-project IDOR scoping by design).
     data = crud.get_project_dashboard(session=session, project_id=project_id)
-    if current_user.role == UserRole.BKK_ADMIN:
+    if is_admin(current_user):
         return ProjectDashboardAdminPublic.model_validate(data)
     return ProjectDashboardStaffPublic.model_validate(data)
 

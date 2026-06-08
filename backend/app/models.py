@@ -1123,6 +1123,27 @@ class SalePublic(SQLModel):
     lines: list[SaleLinePublic]
 
 
+class SaleLineStaffPublic(SQLModel):
+    id: uuid.UUID
+    line_kind: SaleLineKind
+    unit_id: uuid.UUID | None
+    product_id: uuid.UUID | None
+    quantity: int
+    unit_price_thb: Decimal
+    # no unit_cost_thb — redacted for staff. Any NEW cost/margin field added to
+    # SaleLine MUST be consciously omitted here too (staff must never see cost data).
+
+
+class SaleStaffPublic(SQLModel):
+    id: uuid.UUID
+    customer_id: uuid.UUID
+    total_thb: Decimal
+    sold_at: datetime
+    lines: list[SaleLineStaffPublic]
+    # no total_cogs_thb — redacted for staff. Any NEW financial/cost field added to
+    # Sale MUST be consciously omitted here too (staff must never see cost data).
+
+
 class SaleLineInput(SQLModel):
     line_kind: SaleLineKind
     castranova_barcode: str | None = None  # UNIT lines

@@ -1018,7 +1018,7 @@ export class SalesService {
      * Create Sale
      * @param data The data for the request.
      * @param data.requestBody
-     * @returns SalePublic Successful Response
+     * @returns unknown Successful Response
      * @throws ApiError
      */
     public static createSale(data: SalesCreateSaleData): CancelablePromise<SalesCreateSaleResponse> {

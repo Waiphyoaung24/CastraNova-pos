@@ -485,6 +485,15 @@ export type SaleLinePublic = {
     unit_cost_thb: string;
 };
 
+export type SaleLineStaffPublic = {
+    id: string;
+    line_kind: SaleLineKind;
+    unit_id: (string | null);
+    product_id: (string | null);
+    quantity: number;
+    unit_price_thb: string;
+};
+
 export type SalePublic = {
     id: string;
     customer_id: string;
@@ -492,6 +501,14 @@ export type SalePublic = {
     total_cogs_thb: string;
     sold_at: string;
     lines: Array<SaleLinePublic>;
+};
+
+export type SaleStaffPublic = {
+    id: string;
+    customer_id: string;
+    total_thb: string;
+    sold_at: string;
+    lines: Array<SaleLineStaffPublic>;
 };
 
 export type SerialMovementPublic = {
@@ -1072,7 +1089,7 @@ export type SalesCreateSaleData = {
     requestBody: SaleCreateRequest;
 };
 
-export type SalesCreateSaleResponse = (SalePublic);
+export type SalesCreateSaleResponse = ((SalePublic | SaleStaffPublic));
 
 export type SalesReadSaleReceiptData = {
     saleId: string;

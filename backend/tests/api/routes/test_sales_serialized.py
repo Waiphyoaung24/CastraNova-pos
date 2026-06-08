@@ -74,14 +74,14 @@ def _sale_body(barcode: str, customer_id: uuid.UUID, **over: object) -> dict:
 
 def test_sale_of_serialized_unit_happy_path(
     client: TestClient,
-    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     db: Session,
     seed_sale_unit: tuple[str, uuid.UUID],
 ) -> None:
     barcode, customer_id = seed_sale_unit
     r = client.post(
         f"{PREFIX}/sales",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_sale_body(barcode, customer_id),
     )
     assert r.status_code == 200, r.text

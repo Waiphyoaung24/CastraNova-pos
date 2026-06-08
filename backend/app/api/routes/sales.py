@@ -4,13 +4,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlmodel import select
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_current_user
+from app.api.deps import CurrentUser, SessionDep, get_current_user, is_admin
 from app.models import (
     Sale,
     SaleCreateRequest,
     SaleLine,
     SaleLinePublic,
+    SaleLineStaffPublic,
     SalePublic,
+    SaleStaffPublic,
+    User,
 )
 from app.services import notify
 from app.services.receipt_pdf import render_sale_receipt
@@ -18,26 +21,34 @@ from app.services.receipt_pdf import render_sale_receipt
 router = APIRouter(prefix="/sales", tags=["sales"])
 
 
-def _to_public(*, session: SessionDep, sale: Sale) -> SalePublic:
+def _to_public(*, session: SessionDep, sale: Sale, user: User) -> SalePublic | SaleStaffPublic:
     lines = session.exec(select(SaleLine).where(SaleLine.sale_id == sale.id)).all()
-    return SalePublic(
+    if is_admin(user):
+        return SalePublic(
+            id=sale.id,
+            customer_id=sale.customer_id,
+            total_thb=sale.total_thb,
+            total_cogs_thb=sale.total_cogs_thb,
+            sold_at=sale.sold_at,
+            lines=[SaleLinePublic.model_validate(line) for line in lines],
+        )
+    return SaleStaffPublic(
         id=sale.id,
         customer_id=sale.customer_id,
         total_thb=sale.total_thb,
-        total_cogs_thb=sale.total_cogs_thb,
         sold_at=sale.sold_at,
-        lines=[SaleLinePublic.model_validate(line) for line in lines],
+        lines=[SaleLineStaffPublic.model_validate(line) for line in lines],
     )
 
 
-@router.post("", response_model=SalePublic)
+@router.post("", response_model=SalePublic | SaleStaffPublic)
 def create_sale(
     *,
     session: SessionDep,
     current_user: CurrentUser,
     background_tasks: BackgroundTasks,
     payload: SaleCreateRequest,
-) -> SalePublic:
+) -> SalePublic | SaleStaffPublic:
     sale = crud.create_sale(
         session=session,
         customer_id=payload.customer_id,
@@ -49,7 +60,7 @@ def create_sale(
     crossed = crud.pop_low_stock_crossed(session)
     if crossed:
         background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
-    return _to_public(session=session, sale=sale)
+    return _to_public(session=session, sale=sale, user=current_user)
 
 
 @router.get("/{sale_id}/receipt.pdf", dependencies=[Depends(get_current_user)])
