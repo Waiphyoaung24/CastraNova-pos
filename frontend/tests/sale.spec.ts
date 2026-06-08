@@ -100,8 +100,11 @@ test.describe("Sale screen", () => {
 
     // The seeded customer is named "Walk-in …" so the screen auto-selects it;
     // make that explicit (and robust if multiple walk-ins exist in shared DB).
-    await page.getByRole("combobox").first().click()
-    await page.getByRole("option", { name: customerName }).click()
+    await page.getByRole("combobox", { name: "Customer" }).click()
+    await page.getByRole("option", { name: customerName, exact: true }).click()
+    await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(
+      customerName,
+    )
 
     await scanBarcode(page, barcode)
 
@@ -112,7 +115,7 @@ test.describe("Sale screen", () => {
     ).toBeVisible()
 
     // Desktop checkout pane (md+ viewport — Playwright's default is 1280×720).
-    await page.getByRole("button", { name: "Complete sale" }).first().click()
+    await page.getByRole("button", { name: "Complete sale" }).click()
 
     // Success surfaces as a toast and the cart clearing.
     await expect(page.getByText("Sale completed.")).toBeVisible()
@@ -127,7 +130,7 @@ test.describe("Sale screen", () => {
           const res = await SearchService.searchSerial({ barcode })
           return res.current_state
         },
-        { timeout: 10_000 },
+        { timeout: 10_000, intervals: [500, 1_000] },
       )
       .toBe("SOLD")
   })
@@ -146,8 +149,13 @@ test.describe("Sale screen", () => {
 
       // Load online so products/customers cache and the persister is ready.
       await page.goto("/sale")
-      await page.getByRole("combobox").first().click()
-      await page.getByRole("option", { name: customerName }).click()
+      await page.getByRole("combobox", { name: "Customer" }).click()
+      await page
+        .getByRole("option", { name: customerName, exact: true })
+        .click()
+      await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(
+        customerName,
+      )
       await scanBarcode(page, barcode)
       await expect(
         page.getByRole("cell", { name: barcode, exact: true }),
@@ -155,7 +163,7 @@ test.describe("Sale screen", () => {
 
       // Go offline and complete the sale — the mutation should queue (pause).
       await context.setOffline(true)
-      await page.getByRole("button", { name: "Complete sale" }).first().click()
+      await page.getByRole("button", { name: "Complete sale" }).click()
 
       // OfflineIndicator renders an aria-live region with a queued-change count.
       await expect(page.getByText(/Offline — 1 change queued/i)).toBeVisible()
@@ -172,7 +180,7 @@ test.describe("Sale screen", () => {
             const res = await SearchService.searchSerial({ barcode })
             return res.current_state
           },
-          { timeout: 15_000 },
+          { timeout: 15_000, intervals: [500, 1_000] },
         )
         .toBe("SOLD")
     },
