@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 
 import {
   ProductsService,
+  type ReceiveSerializedRequest,
   type ReceiveSerializedResponse,
   SuppliersService,
   type UnitPublic,
@@ -88,12 +89,12 @@ function SerializedTab() {
   const serialInputRef = useRef<HTMLInputElement>(null)
 
   // Reference data — same staleTime as other reference-data screens.
-  const { data: products = [] } = useQuery({
+  const { data: products = [], isPending: productsPending } = useQuery({
     queryKey: ["products"],
     queryFn: () => ProductsService.readProducts(),
     staleTime: 5 * 60 * 1000,
   })
-  const { data: suppliers = [] } = useQuery({
+  const { data: suppliers = [], isPending: suppliersPending } = useQuery({
     queryKey: ["suppliers"],
     queryFn: () => SuppliersService.readSuppliers(),
     staleTime: 5 * 60 * 1000,
@@ -106,7 +107,11 @@ function SerializedTab() {
   // No mutationFn here: it inherits the persisted offline default registered
   // under ["receipts"] in query-client.ts (receiveSerialized), so paused
   // mutations replay after an offline reload.
-  const mutation = useMutation<ReceiveSerializedResponse, Error, unknown>({
+  const mutation = useMutation<
+    ReceiveSerializedResponse,
+    Error,
+    ReceiveSerializedRequest
+  >({
     mutationKey: ["receipts"],
     onSuccess: (data) => {
       setReceived(data.units)
@@ -159,15 +164,17 @@ function SerializedTab() {
 
   return (
     <div className="flex flex-col gap-6 py-4">
-      <output aria-live="polite" className="sr-only">
-        {announce}
-      </output>
+      <output className="sr-only">{announce}</output>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor="receive-product">Product</Label>
           <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger id="receive-product" className="h-11 w-full">
+            <SelectTrigger
+              id="receive-product"
+              className="h-11 w-full"
+              disabled={productsPending}
+            >
               <SelectValue placeholder="Select a serialized product" />
             </SelectTrigger>
             <SelectContent>
@@ -183,7 +190,11 @@ function SerializedTab() {
         <div className="flex flex-col gap-2">
           <Label htmlFor="receive-supplier">Supplier</Label>
           <Select value={supplierId} onValueChange={setSupplierId}>
-            <SelectTrigger id="receive-supplier" className="h-11 w-full">
+            <SelectTrigger
+              id="receive-supplier"
+              className="h-11 w-full"
+              disabled={suppliersPending}
+            >
               <SelectValue placeholder="Select a supplier" />
             </SelectTrigger>
             <SelectContent>
@@ -203,10 +214,13 @@ function SerializedTab() {
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="receive-scan">Scan serial</Label>
+            {/* Plain visual label: ScanInput renders a bare input whose own
+                aria-label covers screen readers, so no htmlFor association. */}
+            <p className="text-sm font-medium">Scan serial</p>
             {/* Scanning fills the serial field below; the operator confirms the
                 cost and presses Add. (No useScanLookup — units don't exist yet.) */}
             <ScanInput
+              placeholder="Scan serial…"
               onScan={(code) => {
                 setSerial(code)
                 serialInputRef.current?.focus()
@@ -250,7 +264,7 @@ function SerializedTab() {
               size="lg"
               className="h-11"
               onClick={handleAddPiece}
-              disabled={serial.trim().length === 0}
+              disabled={serial.trim() === "" || cost.trim() === ""}
             >
               Add piece
             </Button>
@@ -270,7 +284,7 @@ function SerializedTab() {
               <TableRow>
                 <TableHead>Supplier serial</TableHead>
                 <TableHead>Cost (THB)</TableHead>
-                <TableHead className="w-0" />
+                <TableHead className="w-0" aria-label="Actions" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -362,8 +376,12 @@ function PrintLabelButton({
     // Sanctioned bare-fetch exception: the label is a binary PDF the generated
     // SDK types as `unknown`, so it can't reliably yield a usable blob. This is
     // the only authed binary download on the screen.
+    const token = localStorage.getItem("access_token")
+    if (!token) {
+      showErrorToast("Session expired. Please log in again.")
+      return
+    }
     try {
-      const token = localStorage.getItem("access_token")
       const res = await fetch(
         `${import.meta.env.VITE_API_URL}/api/v1/receipts/serialized/${unitId}/label.pdf`,
         { headers: { Authorization: `Bearer ${token}` } },
@@ -375,7 +393,13 @@ function PrintLabelButton({
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
       const url = URL.createObjectURL(await res.blob())
       objectUrlRef.current = url
-      window.open(url, "_blank")
+      const win = window.open(url, "_blank", "noopener,noreferrer")
+      if (!win) {
+        showErrorToast("Pop-up blocked. Allow pop-ups and try again.")
+        URL.revokeObjectURL(url)
+        objectUrlRef.current = null
+        return
+      }
     } catch {
       showErrorToast("Could not load label PDF.")
     }
