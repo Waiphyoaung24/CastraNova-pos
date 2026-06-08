@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test"
 
 import {
-  LoginService,
   OpenAPI,
   type ProductPublic,
   ProductsService,
@@ -9,8 +8,10 @@ import {
   SearchService,
   type SupplierPublic,
   SuppliersService,
+  UsersService,
 } from "../src/client"
 import { firstSuperuser, firstSuperuserPassword } from "./config"
+import { tokenFor, withToken } from "./utils/auth"
 import { createStaffUser } from "./utils/privateApi"
 import { randomEmail, randomPassword } from "./utils/random"
 import { logInUser } from "./utils/user"
@@ -26,23 +27,17 @@ OpenAPI.BASE = `${process.env.VITE_API_URL}`
 // shared dev DB.
 const suffix = () => Math.random().toString(36).substring(2, 10)
 
-/** Obtain a fresh access token for the given creds (Node-side SDK calls). */
-async function tokenFor(username: string, password: string): Promise<string> {
-  const resp = await LoginService.loginAccessToken({
-    formData: { username, password },
-  })
-  return resp.access_token
-}
+// Track staff users seeded across the suite so an afterAll can delete them —
+// the shared dev DB pitfall note flags test-user pollution explicitly.
+const seededStaffUserIds: string[] = []
 
-/** Run an SDK call under a different token, restoring the prior token after. */
-async function withToken<T>(token: string, fn: () => Promise<T>): Promise<T> {
-  const saved = OpenAPI.TOKEN
-  OpenAPI.TOKEN = token
-  try {
-    return await fn()
-  } finally {
-    OpenAPI.TOKEN = saved
-  }
+/** Create a staff user and remember its id for afterAll cleanup. */
+async function seedStaffUser(): Promise<{ email: string; password: string }> {
+  const email = randomEmail()
+  const password = randomPassword()
+  const user = await createStaffUser({ email, password })
+  seededStaffUserIds.push(user.id)
+  return { email, password }
 }
 
 async function seedProduct(
@@ -65,6 +60,25 @@ async function seedSupplier(): Promise<SupplierPublic> {
   })
 }
 
+// Clean up every staff user this spec seeded, under a fresh superuser token, so
+// they don't pollute the shared dev DB for later runs (no product/supplier
+// delete endpoint exists, so those are intentionally left as-is). Each deletion
+// is isolated so one failure can't fail the suite.
+test.afterAll(async () => {
+  if (seededStaffUserIds.length === 0) return
+  const adminToken = await tokenFor(firstSuperuser, firstSuperuserPassword)
+  await withToken(adminToken, async () => {
+    for (const userId of seededStaffUserIds) {
+      try {
+        await UsersService.deleteUser({ userId })
+      } catch {
+        // Best-effort cleanup; a stale/already-deleted user must not fail the run.
+      }
+    }
+  })
+  seededStaffUserIds.length = 0
+})
+
 test.describe("Receive screen (admin)", () => {
   // Browser is authed as superuser via auth.setup.ts storageState. Mirror that
   // for the Node-side SDK so seeding + search assertions are authorized too.
@@ -80,11 +94,11 @@ test.describe("Receive screen (admin)", () => {
     await page.goto("/receive")
 
     // Serialized tab is the default; select product + supplier by their labels.
-    await page.getByRole("combobox", { name: "Product" }).click()
+    await page.getByRole("combobox", { name: "Product", exact: true }).click()
     await page
       .getByRole("option", { name: `${product.model_name} (${product.sku})` })
       .click()
-    await page.getByRole("combobox", { name: "Supplier" }).click()
+    await page.getByRole("combobox", { name: "Supplier", exact: true }).click()
     await page.getByRole("option", { name: supplier.name }).click()
 
     // Fill one piece (serial + cost), Add, then Receive.
@@ -132,11 +146,11 @@ test.describe("Receive screen (admin)", () => {
     await page.goto("/receive")
     await page.getByRole("tab", { name: "Quantity" }).click()
 
-    await page.getByRole("combobox", { name: "Product" }).click()
+    await page.getByRole("combobox", { name: "Product", exact: true }).click()
     await page
       .getByRole("option", { name: `${product.model_name} (${product.sku})` })
       .click()
-    await page.getByRole("combobox", { name: "Supplier" }).click()
+    await page.getByRole("combobox", { name: "Supplier", exact: true }).click()
     await page.getByRole("option", { name: supplier.name }).click()
 
     await page.getByLabel("Received qty", { exact: false }).fill(String(qty))
@@ -201,9 +215,7 @@ test.describe("Receive screen (admin)", () => {
       true,
       "Stale local backend image (pre-Phase-1) does not enforce get_admin; source + pytest prove 403. Rebuild backend (docker compose up -d --build backend) to un-fixme.",
     )
-    const email = randomEmail()
-    const password = randomPassword()
-    await createStaffUser({ email, password })
+    const { email, password } = await seedStaffUser()
     const staffToken = await tokenFor(email, password)
 
     const product = await seedProduct("SERIALIZED")
@@ -253,9 +265,7 @@ test.describe("Receive screen access control (staff browser)", () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
   test("staff visiting /receive is redirected away", async ({ page }) => {
-    const email = randomEmail()
-    const password = randomPassword()
-    await createStaffUser({ email, password })
+    const { email, password } = await seedStaffUser()
     await logInUser(page, email, password)
 
     await page.goto("/receive")
