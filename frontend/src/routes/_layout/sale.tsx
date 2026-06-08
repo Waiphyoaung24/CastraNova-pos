@@ -1,11 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
   type CustomerPublic,
   CustomersService,
-  type ProductPublic,
   ProductsService,
   type SaleCreateRequest,
   type SalePublic,
@@ -42,16 +41,78 @@ export const Route = createFileRoute("/_layout/sale")({
   }),
 })
 
+const WALK_IN_RE = /walk[\s-]?in/i
+
 /** A walk-in customer is the default counter sale when no specific customer is chosen. */
 function findWalkIn(customers: CustomerPublic[]): CustomerPublic | undefined {
-  return customers.find((c) => /walk[\s-]?in/i.test(c.name))
+  return customers.find((c) => WALK_IN_RE.test(c.name))
+}
+
+interface CheckoutPanelProps {
+  customers: CustomerPublic[]
+  customerId: string
+  onCustomerChange: (value: string) => void
+  canCheckout: boolean
+  onCheckout: () => void
+  /** Drives the button label: queued (offline) vs. completing vs. idle. */
+  isPaused: boolean
+  isPending: boolean
+}
+
+/**
+ * Customer picker + checkout button. Extracted as its own component so each
+ * rendered instance (desktop pane + mobile sticky footer) gets a unique `useId`
+ * for the Customer label/select association — rendering one shared JSX node in
+ * two DOM slots would duplicate the id and break the label binding.
+ */
+function CheckoutPanel({
+  customers,
+  customerId,
+  onCustomerChange,
+  canCheckout,
+  onCheckout,
+  isPaused,
+  isPending,
+}: CheckoutPanelProps) {
+  const customerSelectId = useId()
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor={customerSelectId}>Customer</Label>
+        <Select value={customerId} onValueChange={onCustomerChange}>
+          <SelectTrigger id={customerSelectId} className="w-full">
+            <SelectValue placeholder="Select a customer" />
+          </SelectTrigger>
+          <SelectContent>
+            {customers.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <button
+        type="button"
+        onClick={onCheckout}
+        disabled={!canCheckout}
+        className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
+      >
+        {isPaused
+          ? "Queued (offline)…"
+          : isPending
+            ? "Completing…"
+            : "Complete sale"}
+      </button>
+    </div>
+  )
 }
 
 function Sale() {
   const { isAdmin } = useRole()
   const { showSuccessToast, showErrorToast } = useCustomToast()
-
-  const customerSelectId = useId()
 
   const [lines, setLines] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState<string>("")
@@ -61,20 +122,19 @@ function Sale() {
   const { data: products } = useQuery({
     queryKey: ["products"],
     queryFn: () => ProductsService.readProducts(),
+    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
+    staleTime: 5 * 60 * 1000,
   })
   const { data: customers } = useQuery({
     queryKey: ["customers"],
     queryFn: () => CustomersService.readCustomers(),
+    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
+    staleTime: 5 * 60 * 1000,
   })
 
   const priceMap = useMemo(
     () =>
-      new Map(
-        (products ?? []).map((p: ProductPublic) => [
-          p.id,
-          Number(p.retail_price_thb),
-        ]),
-      ),
+      new Map((products ?? []).map((p) => [p.id, Number(p.retail_price_thb)])),
     [products],
   )
 
@@ -123,53 +183,20 @@ function Sale() {
     },
   })
 
+  // Gating on !isPending intentionally locks checkout while a sale is in flight
+  // OR queued offline (isPaused keeps isPending true). This is the single-sale-
+  // offline design: the spec only requires one queued sale surviving reload +
+  // replay — multi-sale-offline cart-clearing is explicitly out of scope.
   const canCheckout =
     lines.length > 0 && customerId !== "" && !mutation.isPending
 
-  function handleCheckout() {
+  const handleCheckout = useCallback(() => {
     if (!canCheckout) return
     // One idempotency key per attempt, captured into the variables passed to
     // mutate — an offline replay reuses the same key so the backend dedupes.
     const request = buildSaleRequest(lines, customerId, crypto.randomUUID())
     mutation.mutate(request)
-  }
-
-  const scanStatus = isError
-    ? "Scan lookup failed. Try again."
-    : notFound
-      ? "No item found for that code."
-      : isSearching
-        ? "Searching…"
-        : ""
-
-  const checkoutPanel = (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor={customerSelectId}>Customer</Label>
-        <Select value={customerId} onValueChange={setCustomerId}>
-          <SelectTrigger id={customerSelectId} className="w-full">
-            <SelectValue placeholder="Select a customer" />
-          </SelectTrigger>
-          <SelectContent>
-            {(customers ?? []).map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <button
-        type="button"
-        onClick={handleCheckout}
-        disabled={!canCheckout}
-        className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
-      >
-        {mutation.isPending ? "Completing…" : "Complete sale"}
-      </button>
-    </div>
-  )
+  }, [canCheckout, lines, customerId, mutation])
 
   return (
     <div className="flex flex-col gap-6">
@@ -189,11 +216,24 @@ function Sale() {
             <p className="text-sm font-medium">Scan item</p>
             <ScanInput ref={scanRef} onScan={resolve} />
             <CameraScanFallback onScan={resolve} />
+            {/* Two statically-typed live regions: a dynamic aria-live value is
+                unreliable across screen readers, so each politeness level gets
+                its own always-present region. */}
             <p
-              aria-live={isError || notFound ? "assertive" : "polite"}
+              aria-live="assertive"
               className="text-muted-foreground min-h-5 text-sm"
             >
-              {scanStatus}
+              {isError
+                ? "Scan lookup failed. Try again."
+                : notFound
+                  ? "No item found for that code."
+                  : ""}
+            </p>
+            <p
+              aria-live="polite"
+              className="text-muted-foreground min-h-5 text-sm"
+            >
+              {isSearching ? "Searching…" : ""}
             </p>
           </div>
 
@@ -209,12 +249,32 @@ function Sale() {
         </div>
 
         {/* Right pane (desktop): customer + checkout */}
-        <div className="hidden md:block">{checkoutPanel}</div>
+        <div className="hidden md:block">
+          <CheckoutPanel
+            customers={customers ?? []}
+            customerId={customerId}
+            onCustomerChange={setCustomerId}
+            canCheckout={canCheckout}
+            onCheckout={handleCheckout}
+            isPaused={mutation.isPaused}
+            isPending={mutation.isPending}
+          />
+        </div>
       </div>
 
-      {/* Mobile/tablet: checkout pinned to a sticky footer */}
+      {/* Mobile/tablet: checkout pinned to a sticky footer. Rendered as a second
+          CheckoutPanel instance (not a shared node) so its useId stays unique;
+          only one slot is visible per breakpoint. */}
       <div className="bg-background sticky bottom-0 border-t py-4 md:hidden">
-        {checkoutPanel}
+        <CheckoutPanel
+          customers={customers ?? []}
+          customerId={customerId}
+          onCustomerChange={setCustomerId}
+          canCheckout={canCheckout}
+          onCheckout={handleCheckout}
+          isPaused={mutation.isPaused}
+          isPending={mutation.isPending}
+        />
       </div>
     </div>
   )
