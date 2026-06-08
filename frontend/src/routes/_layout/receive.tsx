@@ -1,10 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Printer, Trash2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 
 import {
   ProductsService,
+  type ReceiptsReceiveQuantityResponse,
+  ReceiptsService,
+  type ReceiveQuantityRequest,
   type ReceiveSerializedRequest,
   type ReceiveSerializedResponse,
   SuppliersService,
@@ -34,9 +37,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
 import {
   addPiece,
+  buildReceiveQuantityRequest,
   buildReceiveSerializedRequest,
+  canSubmitQuantity,
   canSubmitSerialized,
   type DraftPiece,
+  type QuantityDraft,
   removePiece,
 } from "@/lib/receive-form"
 import { requireAdmin } from "@/lib/route-guards"
@@ -67,8 +73,7 @@ function Receive() {
           <SerializedTab />
         </TabsContent>
         <TabsContent value="quantity">
-          {/* Task 4.3 fills this tab. */}
-          <p className="text-muted-foreground py-6">Coming soon.</p>
+          <QuantityTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -324,6 +329,214 @@ function SerializedTab() {
       </div>
 
       {received.length > 0 && <ReceivedUnits units={received} />}
+    </div>
+  )
+}
+
+const EMPTY_QUANTITY_DRAFT: QuantityDraft = {
+  productId: "",
+  supplierId: "",
+  receivedQty: "",
+  purchaseCostThb: "",
+  supplierBatchRef: "",
+  expectedQty: "",
+  note: "",
+}
+
+function QuantityTab() {
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+
+  const [draft, setDraft] = useState<QuantityDraft>(EMPTY_QUANTITY_DRAFT)
+  const [announce, setAnnounce] = useState("")
+
+  const productId = useId()
+  const supplierId = useId()
+  const qtyId = useId()
+  const costId = useId()
+  const batchRefId = useId()
+  const expectedId = useId()
+  const noteId = useId()
+
+  // Reference data — keyed identically to the Serialized tab, so TanStack Query
+  // serves both tabs from one shared cache entry (no duplicate fetch).
+  const { data: products = [], isPending: productsPending } = useQuery({
+    queryKey: ["products"],
+    queryFn: () => ProductsService.readProducts(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const { data: suppliers = [], isPending: suppliersPending } = useQuery({
+    queryKey: ["suppliers"],
+    queryFn: () => SuppliersService.readSuppliers(),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const quantityProducts = products.filter(
+    (p) => p.tracking_mode === "QUANTITY",
+  )
+
+  // Online-only: quantity receive has its OWN mutationFn and is intentionally
+  // NOT registered under the ["receipts"] offline default (that key replays
+  // receiveSerialized only). No mutationKey here.
+  const mutation = useMutation<
+    ReceiptsReceiveQuantityResponse,
+    Error,
+    ReceiveQuantityRequest
+  >({
+    mutationFn: (body) =>
+      ReceiptsService.receiveQuantity({ requestBody: body }),
+    onSuccess: (batch) => {
+      setDraft(EMPTY_QUANTITY_DRAFT)
+      setAnnounce(
+        `Received ${batch.received_qty} unit(s) into batch ${batch.batch_no}.`,
+      )
+      showSuccessToast(`Received batch ${batch.batch_no}.`)
+    },
+    onError: () => {
+      setAnnounce("Receive failed.")
+      showErrorToast("Could not receive batch. Please retry.")
+    },
+  })
+
+  function patch(field: keyof QuantityDraft, value: string) {
+    setDraft((prev) => ({ ...prev, [field]: value }))
+  }
+
+  function handleSubmit() {
+    // Generate the idempotency_key ONCE per attempt; resubmitting the same key
+    // lets the backend dedupe.
+    mutation.mutate(buildReceiveQuantityRequest(draft, crypto.randomUUID()))
+  }
+
+  const canSubmit = canSubmitQuantity(draft)
+
+  return (
+    <div className="flex flex-col gap-6 py-4">
+      <output className="sr-only">{announce}</output>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={productId}>Product</Label>
+          <Select
+            value={draft.productId}
+            onValueChange={(v) => patch("productId", v)}
+          >
+            <SelectTrigger
+              id={productId}
+              className="h-11 w-full"
+              disabled={productsPending}
+            >
+              <SelectValue placeholder="Select a quantity product" />
+            </SelectTrigger>
+            <SelectContent>
+              {quantityProducts.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.model_name} ({p.sku})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={supplierId}>Supplier</Label>
+          <Select
+            value={draft.supplierId}
+            onValueChange={(v) => patch("supplierId", v)}
+          >
+            <SelectTrigger
+              id={supplierId}
+              className="h-11 w-full"
+              disabled={suppliersPending}
+            >
+              <SelectValue placeholder="Select a supplier" />
+            </SelectTrigger>
+            <SelectContent>
+              {suppliers.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={qtyId}>Received qty</Label>
+          <Input
+            id={qtyId}
+            className="num h-11"
+            inputMode="numeric"
+            value={draft.receivedQty}
+            onChange={(e) => patch("receivedQty", e.target.value)}
+            placeholder="0"
+            autoComplete="off"
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={costId}>Purchase cost (THB)</Label>
+          <Input
+            id={costId}
+            className="num h-11"
+            inputMode="decimal"
+            value={draft.purchaseCostThb}
+            onChange={(e) => patch("purchaseCostThb", e.target.value)}
+            placeholder="0.00"
+            autoComplete="off"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={batchRefId}>Supplier batch ref (optional)</Label>
+          <Input
+            id={batchRefId}
+            className="h-11"
+            value={draft.supplierBatchRef}
+            onChange={(e) => patch("supplierBatchRef", e.target.value)}
+            placeholder="Supplier batch reference"
+            autoComplete="off"
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={expectedId}>Expected qty (optional)</Label>
+          <Input
+            id={expectedId}
+            className="num h-11"
+            inputMode="numeric"
+            value={draft.expectedQty}
+            onChange={(e) => patch("expectedQty", e.target.value)}
+            placeholder="0"
+            autoComplete="off"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={noteId}>Note (optional)</Label>
+        <Input
+          id={noteId}
+          className="h-11"
+          value={draft.note}
+          onChange={(e) => patch("note", e.target.value)}
+          placeholder="Optional note"
+          autoComplete="off"
+        />
+      </div>
+
+      <div>
+        <Button
+          type="button"
+          size="lg"
+          className="h-11"
+          disabled={!canSubmit || mutation.isPending}
+          onClick={handleSubmit}
+        >
+          {mutation.isPending ? "Receiving…" : "Receive"}
+        </Button>
+      </div>
     </div>
   )
 }
