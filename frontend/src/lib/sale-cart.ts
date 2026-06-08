@@ -17,18 +17,30 @@ import type { ScanLookupResult } from "@/hooks/useScanLookup"
 //     sku increments the quantity, and PART quantity is floored at 1.
 // ---------------------------------------------------------------------------
 
-export type CartLine = {
+type CartLineBase = {
   /** Stable id: barcode for UNIT, sku for PART. */
   key: string
-  lineKind: "UNIT" | "PART"
-  /** Set for UNIT lines only. */
-  barcode?: string
   sku: string
   productId: string
   quantity: number
   /** Selling price from priceMap; 0 when the product is missing from the map. */
   unitPriceThb: number
 }
+
+/** A single serialized piece, keyed and identified by its barcode. */
+export type UnitLine = CartLineBase & {
+  lineKind: "UNIT"
+  /** Always present for UNIT lines. */
+  barcode: string
+}
+
+/** Non-serialized stock, keyed by sku; never carries a barcode. */
+export type PartLine = CartLineBase & {
+  lineKind: "PART"
+  barcode?: never
+}
+
+export type CartLine = UnitLine | PartLine
 
 function priceFor(priceMap: Map<string, number>, productId: string): number {
   return priceMap.get(productId) ?? 0
@@ -50,7 +62,11 @@ export function addScanToCart(
 
   if (scan.kind === "UNIT") {
     const key = scan.data.castranova_barcode
-    if (lines.some((l) => l.key === key)) return lines // single serial, no dup
+    // Dedup against UNIT lines only, so a UNIT barcode that happens to equal a
+    // PART sku can't false-match an existing PART line.
+    if (lines.some((l) => l.lineKind === "UNIT" && l.key === key)) {
+      return lines // single serial, no dup
+    }
     return [
       ...lines,
       {
@@ -97,7 +113,13 @@ export function setLineQuantity(
   return lines.map((l) => {
     if (l.key !== key) return l
     if (l.lineKind === "UNIT") return l
-    return { ...l, quantity: Math.max(1, Math.floor(quantity)) }
+    return {
+      ...l,
+      quantity: Math.max(
+        1,
+        Math.floor(Number.isFinite(quantity) ? quantity : 1),
+      ),
+    }
   })
 }
 

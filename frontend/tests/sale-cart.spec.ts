@@ -87,6 +87,8 @@ test("scanning the same UNIT barcode again keeps quantity 1 (no duplicate)", () 
   const twice = addScanToCart(once, UNIT_SCAN, priceMap)
   expect(twice).toHaveLength(1)
   expect(twice[0].quantity).toBe(1)
+  // Re-scan is a no-op: the array reference is returned unchanged.
+  expect(twice).toBe(once)
 })
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,18 @@ test("setLineQuantity clamps PART quantity to a minimum of 1", () => {
   const lines = addScanToCart([], PART_SCAN, priceMap)
   const updated = setLineQuantity(lines, "SKU-PART-A", 0)
   expect(updated[0].quantity).toBe(1)
+})
+
+test("setLineQuantity coerces a non-finite quantity (NaN) to 1", () => {
+  const lines = addScanToCart([], PART_SCAN, priceMap)
+  const updated = setLineQuantity(lines, "SKU-PART-A", Number.NaN)
+  expect(updated[0].quantity).toBe(1)
+})
+
+test("setLineQuantity floors a fractional quantity (2.9 → 2)", () => {
+  const lines = addScanToCart([], PART_SCAN, priceMap)
+  const updated = setLineQuantity(lines, "SKU-PART-A", 2.9)
+  expect(updated[0].quantity).toBe(2)
 })
 
 test("setLineQuantity never changes a UNIT line off quantity 1", () => {
