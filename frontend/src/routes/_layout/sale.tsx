@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
   type CustomerPublic,
@@ -13,7 +13,7 @@ import {
 } from "@/client"
 import { CameraScanFallback } from "@/components/CameraScanFallback"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
-import { ScanInput } from "@/components/ScanInput"
+import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -56,6 +56,7 @@ function Sale() {
   const [lines, setLines] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState<string>("")
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
+  const scanRef = useRef<ScanInputHandle>(null)
 
   const { data: products } = useQuery({
     queryKey: ["products"],
@@ -114,6 +115,8 @@ function Sale() {
       })
       setLines([])
       showSuccessToast("Sale completed.")
+      // Return focus to the scan field so the next sale can begin immediately.
+      scanRef.current?.focus()
     },
     onError: () => {
       showErrorToast("Could not complete the sale. Please try again.")
@@ -184,7 +187,7 @@ function Sale() {
             {/* ScanInput carries its own aria-label="Scan barcode"; this is a
                 visible caption, not a form-control label. */}
             <p className="text-sm font-medium">Scan item</p>
-            <ScanInput onScan={resolve} />
+            <ScanInput ref={scanRef} onScan={resolve} />
             <CameraScanFallback onScan={resolve} />
             <p
               aria-live={isError || notFound ? "assertive" : "polite"}
