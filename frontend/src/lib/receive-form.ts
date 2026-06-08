@@ -64,7 +64,7 @@ export function buildReceiveSerializedRequest(
     supplier_id: supplierId,
     pieces: pieces.map((p) => ({
       supplier_serial: p.supplierSerial.trim(),
-      purchase_cost_thb: p.purchaseCostThb,
+      purchase_cost_thb: p.purchaseCostThb.trim(),
     })),
     idempotency_key: idempotencyKey,
   }
@@ -78,9 +78,10 @@ export function buildReceiveQuantityRequest(
     product_id: draft.productId,
     supplier_id: draft.supplierId,
     received_qty: Number(draft.receivedQty),
-    purchase_cost_thb: draft.purchaseCostThb,
+    purchase_cost_thb: draft.purchaseCostThb.trim(),
     supplier_batch_ref: draft.supplierBatchRef.trim() || null,
-    expected_qty: draft.expectedQty ? Number(draft.expectedQty) : null,
+    expected_qty:
+      draft.expectedQty.trim() !== "" ? Number(draft.expectedQty.trim()) : null,
     note: draft.note.trim() || null,
     idempotency_key: idempotencyKey,
   }

@@ -68,6 +68,18 @@ test("updatePiece patches only the matching key, immutably", () => {
   expect(next).not.toBe(input)
 })
 
+test("updatePiece is a no-op for a non-existent key", () => {
+  const input = [piece("a", "S1", "10"), piece("b", "S2", "20")]
+  const next = updatePiece(input, "missing", { purchaseCostThb: "99" })
+  expect(next).toEqual(input)
+})
+
+test("removePiece is a no-op for a non-existent key", () => {
+  const input = [piece("a", "S1", "10"), piece("b", "S2", "20")]
+  const next = removePiece(input, "missing")
+  expect(next).toEqual(input)
+})
+
 // ---------------------------------------------------------------------------
 // buildReceiveSerializedRequest
 // ---------------------------------------------------------------------------
@@ -129,6 +141,15 @@ test("buildReceiveQuantityRequest carries filled optionals (trimmed + coerced)",
   })
 })
 
+test("buildReceiveQuantityRequest nulls a whitespace-only expectedQty", () => {
+  const draft: QuantityDraft = {
+    ...validQuantityDraft(),
+    expectedQty: "   ",
+  }
+  const req = buildReceiveQuantityRequest(draft, "idem-q")
+  expect(req.expected_qty).toBe(null)
+})
+
 // ---------------------------------------------------------------------------
 // canSubmitSerialized
 // ---------------------------------------------------------------------------
@@ -166,6 +187,12 @@ test("canSubmitSerialized false when a piece cost is 0 or non-numeric", () => {
   ).toBe(false)
 })
 
+test("canSubmitSerialized false when a piece cost is negative", () => {
+  expect(
+    canSubmitSerialized([piece("a", "SER-1", "-5")], "prod-1", "sup-1"),
+  ).toBe(false)
+})
+
 // ---------------------------------------------------------------------------
 // canSubmitQuantity
 // ---------------------------------------------------------------------------
@@ -195,6 +222,18 @@ test("canSubmitQuantity false for non-integer qty", () => {
 test("canSubmitQuantity false when cost is 0", () => {
   expect(
     canSubmitQuantity({ ...validQuantityDraft(), purchaseCostThb: "0" }),
+  ).toBe(false)
+})
+
+test("canSubmitQuantity false for a negative qty", () => {
+  expect(
+    canSubmitQuantity({ ...validQuantityDraft(), receivedQty: "-1" }),
+  ).toBe(false)
+})
+
+test("canSubmitQuantity false for a negative cost", () => {
+  expect(
+    canSubmitQuantity({ ...validQuantityDraft(), purchaseCostThb: "-5" }),
   ).toBe(false)
 })
 
