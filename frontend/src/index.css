@@ -4,6 +4,10 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* Fonts */
+  --font-sans: "Fira Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, "SFMono-Regular", monospace;
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -39,75 +43,136 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* CTA (checkout / orange accent) — dedicated slot, does not hijack --accent */
+  --color-cta: var(--cta);
+  --color-cta-foreground: var(--cta-foreground);
+  /* Semantic status colours */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
 }
 
+/* ── Light mode ────────────────────────────────────────────────────────────── */
 :root {
   --radius: 0.625rem;
+
+  /* Neutral panels */
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.5982 0.10687 182.4689);
+
+  /* Primary — #2563EB blue-600 (darkened from blue-500 to meet WCAG AA 4.5:1 on near-white) */
+  --primary: oklch(0.5461 0.2153 262.89);
   --primary-foreground: oklch(0.985 0 0);
+
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
+
+  /* shadcn accent: subtle bg (unchanged role) */
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+
+  /* Destructive — #EF4444 red */
+  --destructive: oklch(0.6274 0.2226 27.33);
+
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
+
+  /* Charts */
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+
+  /* Sidebar */
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.5982 0.10687 182.4689);
+  --sidebar-primary: oklch(0.5461 0.2153 262.89);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* CTA — #F97316 orange (dark fg for WCAG AA: 5.40:1) */
+  --cta: oklch(0.7176 0.1921 47.6);
+  --cta-foreground: oklch(0.145 0 0);
+
+  /* Success — #22C55E green (dark fg for WCAG AA: 6.64:1) */
+  --success: oklch(0.7231 0.1919 142.5);
+  --success-foreground: oklch(0.145 0 0);
+
+  /* Warn — #F59E0B amber */
+  --warn: oklch(0.7686 0.1647 70.08);
+  --warn-foreground: oklch(0.145 0 0);
 }
 
+/* ── Dark mode (data-dense, industrial) ───────────────────────────────────── */
 .dark {
+  /* Deep neutral panels */
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.65 0.10687 182.4689);
+
+  /* Primary — #2563EB blue-600 (same as light; near-white fg → 4.95:1 WCAG AA) */
+  --primary: oklch(0.5461 0.2153 262.89);
   --primary-foreground: oklch(0.985 0 0);
+
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
+
+  /* shadcn accent: subtle bg (unchanged role) */
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+
+  /* Destructive — #EF4444 red (tuned for dark) */
+  --destructive: oklch(0.6706 0.2226 27.33);
+
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+
+  /* Charts */
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+
+  /* Sidebar */
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.65 0.10687 182.4689);
+  --sidebar-primary: oklch(0.5461 0.2153 262.89);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* CTA — #F97316 orange (slightly boosted for dark) */
+  --cta: oklch(0.7412 0.1921 47.6);
+  --cta-foreground: oklch(0.985 0 0);
+
+  /* Success — #22C55E green */
+  --success: oklch(0.7451 0.1919 142.5);
+  --success-foreground: oklch(0.985 0 0);
+
+  /* Warn — #F59E0B amber */
+  --warn: oklch(0.7882 0.1647 70.08);
+  --warn-foreground: oklch(0.145 0 0);
 }
 
 @layer base {
@@ -116,9 +181,18 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
   }
   button,
   [role="button"] {
     cursor: pointer;
+  }
+}
+
+/* ── .num: tabular monospace for codes, SKUs, prices, quantities ─────────── */
+@layer utilities {
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
   }
 }
