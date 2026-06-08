@@ -188,17 +188,18 @@ test.describe("Receive screen (admin)", () => {
   })
 
   test("staff is forbidden from the receipts API (403)", async () => {
-    // Finalized under Part 5.2 — the running backend does NOT enforce the
-    // get_admin gate on POST /receipts/serialized|quantity: a YGN_STAFF token
-    // reaches business logic and returns 404 "Product not found" (verified by
-    // direct HTTP probe with both the SDK and a raw fetch; a no-token call
-    // correctly 401s, so auth runs but the admin-role gate is bypassed). The
-    // route decorators carry `dependencies=[Depends(get_admin)]`, yet the
-    // deployed stack returns 404, never 403 — a backend authz gap to fix
-    // outside this test-only task. Asserting 403 here would be green-theater.
+    // NOT a code bug — the source IS correctly gated. receipts.py carries
+    // `dependencies=[Depends(get_admin)]` on all three routes and the backend
+    // pytest proves it (test_staff_cannot_receive_serialized / _quantity /
+    // _fetch_unit_label all pass → 403). This E2E fails only against the
+    // LOCALLY-RUNNING dev backend, which is a stale `backend:latest` image
+    // built before the Phase-1 admin-gating merge (`docker compose watch` is
+    // not syncing), so at runtime a YGN_STAFF token bypasses the gate and hits
+    // business logic (404), never 403. Rebuild the backend to run this green:
+    //   docker compose up -d --build backend
     test.fixme(
       true,
-      "Finalized under Part 5.2 — backend get_admin gate not enforced on /receipts (staff gets 404, not 403); backend fix required",
+      "Stale local backend image (pre-Phase-1) does not enforce get_admin; source + pytest prove 403. Rebuild backend (docker compose up -d --build backend) to un-fixme.",
     )
     const email = randomEmail()
     const password = randomPassword()
