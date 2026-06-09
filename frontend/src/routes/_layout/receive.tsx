@@ -194,7 +194,7 @@ function SerializedTab() {
               id="receive-product"
               className="h-11 w-full"
               aria-required="true"
-              disabled={productsPending}
+              disabled={productsPending || mutation.isPending}
             >
               <SelectValue placeholder="Select a serialized product" />
             </SelectTrigger>
@@ -221,7 +221,7 @@ function SerializedTab() {
               id="receive-supplier"
               className="h-11 w-full"
               aria-required="true"
-              disabled={suppliersPending}
+              disabled={suppliersPending || mutation.isPending}
             >
               <SelectValue placeholder="Select a supplier" />
             </SelectTrigger>
@@ -270,6 +270,7 @@ function SerializedTab() {
                 ref={serialInputRef}
                 className="num h-11"
                 aria-required="true"
+                disabled={mutation.isPending}
                 value={serial}
                 onChange={(e) => setSerial(e.target.value)}
                 onKeyDown={(e) => {
@@ -295,6 +296,7 @@ function SerializedTab() {
                 className="num h-11"
                 inputMode="decimal"
                 aria-required="true"
+                disabled={mutation.isPending}
                 value={cost}
                 onChange={(e) => setCost(e.target.value)}
                 placeholder="0.00"
@@ -306,7 +308,9 @@ function SerializedTab() {
               size="lg"
               className="h-11"
               onClick={handleAddPiece}
-              disabled={serial.trim() === "" || cost.trim() === ""}
+              disabled={
+                serial.trim() === "" || cost.trim() === "" || mutation.isPending
+              }
             >
               Add piece
             </Button>
@@ -341,6 +345,7 @@ function SerializedTab() {
                       size="icon"
                       className="size-11"
                       aria-label={`Remove piece ${p.supplierSerial}`}
+                      disabled={mutation.isPending}
                       onClick={() => handleRemovePiece(p.key, p.supplierSerial)}
                     >
                       <Trash2 className="size-4" />
