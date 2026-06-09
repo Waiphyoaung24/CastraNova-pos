@@ -201,53 +201,37 @@ test.describe("Receive screen (admin)", () => {
       .toBe(qty)
   })
 
-  test("staff is forbidden from the receipts API (403)", async () => {
-    // Verifies the Phase-1 admin gate (`dependencies=[Depends(get_admin)]` on
-    // all three /receipts routes) over raw HTTP: a YGN_STAFF token must 403.
-    // NOTE: requires the running backend to be current (the gate landed in the
-    // Phase-1 merge); if the dev `backend` image is stale this 403s→404s —
-    // rebuild with `docker compose up -d --build backend`. Backend pytest
-    // (test_staff_cannot_receive_*) is the source-of-truth companion check.
+  test("staff can receive over the receipts API", async () => {
     const { email, password } = await seedStaffUser()
     const staffToken = await tokenFor(email, password)
 
-    const product = await seedProduct("SERIALIZED")
+    const serProduct = await seedProduct("SERIALIZED")
     const qtyProduct = await seedProduct("QUANTITY")
     const supplier = await seedSupplier()
 
-    // Assert on the thrown error's `status` (the generated SDK throws ApiError
-    // with a numeric `status`); avoid `instanceof` which is brittle across the
-    // test transpiler's module boundaries.
-    const statusOf = (e: unknown): number | undefined =>
-      typeof e === "object" && e !== null && "status" in e
-        ? (e as { status?: number }).status
-        : undefined
-
     await withToken(staffToken, async () => {
-      // Serialized receive → 403 (backend get_admin gate, Phase 1).
-      const serializedErr = await ReceiptsService.receiveSerialized({
+      const ser = await ReceiptsService.receiveSerialized({
         requestBody: {
-          product_id: product.id,
+          product_id: serProduct.id,
           supplier_id: supplier.id,
-          pieces: [
-            { supplier_serial: `SER-${suffix()}`, purchase_cost_thb: "1" },
-          ],
           idempotency_key: crypto.randomUUID(),
+          pieces: [
+            { supplier_serial: `SN-${suffix()}`, purchase_cost_thb: "100.00" },
+          ],
         },
-      }).catch((e: unknown) => e)
-      expect(statusOf(serializedErr)).toBe(403)
+      })
+      expect(ser.units.length).toBe(1)
 
-      // Quantity receive → 403.
-      const quantityErr = await ReceiptsService.receiveQuantity({
+      const batch = await ReceiptsService.receiveQuantity({
         requestBody: {
           product_id: qtyProduct.id,
           supplier_id: supplier.id,
-          received_qty: 1,
-          purchase_cost_thb: "1",
+          received_qty: 5,
+          purchase_cost_thb: "10.00",
           idempotency_key: crypto.randomUUID(),
         },
-      }).catch((e: unknown) => e)
-      expect(statusOf(quantityErr)).toBe(403)
+      })
+      expect(batch.received_qty).toBe(5)
     })
   })
 })
@@ -257,16 +241,14 @@ test.describe("Receive screen access control (staff browser)", () => {
   // user in the UI so requireAdmin runs against a real staff session.
   test.use({ storageState: { cookies: [], origins: [] } })
 
-  test("staff visiting /receive is redirected away", async ({ page }) => {
+  test("staff can reach /receive", async ({ page }) => {
     const { email, password } = await seedStaffUser()
     await logInUser(page, email, password)
-
     await page.goto("/receive")
-
-    // requireAdmin → redirect to "/". The Receive heading must not render.
+    // Staff can now reach Receive (YGN warehouse intake).
     await expect(
       page.getByRole("heading", { name: "Receive stock" }),
-    ).not.toBeVisible()
-    await expect(page).not.toHaveURL(/\/receive/)
+    ).toBeVisible()
+    expect(new URL(page.url()).pathname).toBe("/receive")
   })
 })
