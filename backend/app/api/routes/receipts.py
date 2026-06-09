@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_admin
+from app.api.deps import CurrentUser, SessionDep, get_current_user
 from app.models import (
     PartBatchPublic,
     ReceiveQuantityRequest,
@@ -15,7 +15,7 @@ from app.services.barcode import render_unit_label
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 
 
-@router.post("/serialized", response_model=ReceiveSerializedResponse, dependencies=[Depends(get_admin)])
+@router.post("/serialized", response_model=ReceiveSerializedResponse)
 def receive_serialized(
     *,
     session: SessionDep,
@@ -33,7 +33,7 @@ def receive_serialized(
     return ReceiveSerializedResponse(units=units)
 
 
-@router.post("/quantity", response_model=PartBatchPublic, dependencies=[Depends(get_admin)])
+@router.post("/quantity", response_model=PartBatchPublic)
 def receive_quantity(
     *,
     session: SessionDep,
@@ -57,7 +57,7 @@ def receive_quantity(
 
 @router.get(
     "/serialized/{unit_id}/label.pdf",
-    dependencies=[Depends(get_admin)],
+    dependencies=[Depends(get_current_user)],
 )
 def read_unit_label(*, session: SessionDep, unit_id: uuid.UUID) -> Response:
     unit = crud.get_unit(session=session, unit_id=unit_id)

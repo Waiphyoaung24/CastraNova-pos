@@ -34,7 +34,7 @@ Build the operational frontend for CastraNova-POS so that:
 | D1 | **Full 5.3** scope: 4 screens + role-shells + offline counter | User selection |
 | D2 | **Staff = ops screens, cost/COGS hidden**; admin = everything | Matches DoD "no financial fields for staff" |
 | D3 | **Backend redaction included in 5.3** (not UI-only) | DoD requires redaction at the HTTP layer, not DOM |
-| D4 | **Receive = admin-only** | Receiving inherently enters `purchase_cost_thb`; staff must never see cost |
+| D4 | ~~**Receive = admin-only**~~ **SUPERSEDED 2026-06-09** | Receiving inherently enters `purchase_cost_thb`; staff must never see cost. **Superseded — staff receive per FR-005/006 (§8 receipts = staff); the redaction concern is sales COGS/margin, NOT the supplier purchase cost staff enter at receive. See `docs/superpowers/specs/2026-06-09-castranova-staff-receiving-design.md`.** |
 | D5 | **Architecture A** — thin role-guarded routes over shared primitives | Matches existing patterns; best isolation/testability |
 | D6 | **Responsive Sale** — two-pane desktop → single-column + sticky checkout on tablet | Staff use a mix of desktop + tablet |
 | D7 | **Visual direction** — industrial-utilitarian, data-dense; Fira Code (codes/prices) + Fira Sans; cool-blue primary + orange CTA, dark-first | ui-ux-pro-max "Data-Dense Dashboard"; frontend-design anchor |
@@ -76,7 +76,9 @@ Follow the established pattern in `customers.py` / `projects.py`: branch on `cur
 
 ### 4.3 Receive → admin-only (`app/api/routes/receipts.py`)
 
-Add `dependencies=[Depends(get_admin)]` to `/receipts/serialized`, `/receipts/quantity`, and the serialized label PDF route. (`get_admin` already exists and gates pull create/cancel + stock-adjustments.)
+> **Superseded 2026-06-09:** receiving is **staff + admin** (revert D4). Receipts routes authorize via `CurrentUser` (the label route via `get_current_user`), not `get_admin`. The redaction concern was sales COGS/margin, not the supplier purchase cost staff enter at receive. See `docs/superpowers/specs/2026-06-09-castranova-staff-receiving-design.md`.
+
+~~Add `dependencies=[Depends(get_admin)]` to `/receipts/serialized`, `/receipts/quantity`, and the serialized label PDF route. (`get_admin` already exists and gates pull create/cancel + stock-adjustments.)~~
 
 ### 4.4 Cleanup
 

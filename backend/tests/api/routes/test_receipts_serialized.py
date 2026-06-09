@@ -153,23 +153,47 @@ def test_label_pdf_returned_for_unit(
     assert r.content[:4] == b"%PDF"
 
 
-def test_staff_cannot_receive_serialized(
+def test_staff_can_receive_serialized(
     client: TestClient,
     staff_token_headers: dict[str, str],
+    seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
+    product_id, supplier_id = seed_product_supplier
     resp = client.post(
-        f"{PREFIX}/receipts/serialized", headers=staff_token_headers, json={}
+        f"{PREFIX}/receipts/serialized",
+        headers=staff_token_headers,
+        json=_body(product_id, supplier_id),
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200, resp.text
 
 
-def test_staff_cannot_fetch_unit_label(
+def test_staff_can_fetch_unit_label(
     client: TestClient,
     staff_token_headers: dict[str, str],
+    seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
-    unit_id = uuid.uuid4()
+    product_id, supplier_id = seed_product_supplier
+    recv = client.post(
+        f"{PREFIX}/receipts/serialized",
+        headers=staff_token_headers,
+        json=_body(product_id, supplier_id),
+    )
+    assert recv.status_code == 200, recv.text
+    unit_id = recv.json()["units"][0]["id"]
     resp = client.get(
         f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf",
         headers=staff_token_headers,
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.content[:4] == b"%PDF"
+
+
+def test_unauthenticated_cannot_receive_serialized(client: TestClient) -> None:
+    resp = client.post(f"{PREFIX}/receipts/serialized", json={})
+    assert resp.status_code == 401
+
+
+def test_unauthenticated_cannot_fetch_unit_label(client: TestClient) -> None:
+    unit_id = uuid.uuid4()
+    resp = client.get(f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf")
+    assert resp.status_code == 401
