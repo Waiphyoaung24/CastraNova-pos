@@ -51,6 +51,44 @@ function findWalkIn(customers: CustomerPublic[]): CustomerPublic | undefined {
   return customers.find((c) => WALK_IN_RE.test(c.name))
 }
 
+interface CustomerPickerProps {
+  customers: CustomerPublic[]
+  value: string
+  onChange: (value: string) => void
+  /** Set on desktop where an external <Label htmlFor> binds to it. */
+  triggerId?: string
+  /** Set on mobile where there is no visible label. */
+  ariaLabel?: string
+}
+
+/**
+ * Customer dropdown shared by the desktop pane and the mobile footer. Extracted
+ * so the option list lives in one place; the two call sites differ only in how
+ * the trigger is labelled (id+<Label> on desktop, aria-label on mobile).
+ */
+function CustomerPicker({
+  customers,
+  value,
+  onChange,
+  triggerId,
+  ariaLabel,
+}: CustomerPickerProps) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger id={triggerId} aria-label={ariaLabel} className="w-full">
+        <SelectValue placeholder="Select a customer" />
+      </SelectTrigger>
+      <SelectContent>
+        {customers.map((c) => (
+          <SelectItem key={c.id} value={c.id}>
+            {c.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
 /** Run the full ticket lifecycle in one online-only sequence. */
 async function submitTicket(s: TicketSubmission): Promise<ServiceTicketPublic> {
   const ticket = await ServiceTicketsService.openServiceTicket({
@@ -135,6 +173,8 @@ function Tickets() {
       setTicketResult(undefined)
     } else if (result.kind === "UNIT") {
       setScanNotice("Serialized units can't be added as repair parts.")
+    } else {
+      setScanNotice("")
     }
     reset()
   }, [result, partLookup, reset])
@@ -255,18 +295,12 @@ function Tickets() {
         <div className="hidden space-y-4 md:block">
           <div className="space-y-2">
             <Label htmlFor={customerSelectId}>Customer</Label>
-            <Select value={customerId} onValueChange={setCustomerId}>
-              <SelectTrigger id={customerSelectId} className="w-full">
-                <SelectValue placeholder="Select a customer" />
-              </SelectTrigger>
-              <SelectContent>
-                {(customers ?? []).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <CustomerPicker
+              customers={customers ?? []}
+              value={customerId}
+              onChange={setCustomerId}
+              triggerId={customerSelectId}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor={resolutionId}>Resolution (optional)</Label>
@@ -283,18 +317,12 @@ function Tickets() {
 
       {/* Mobile/tablet: customer + close pinned to a sticky footer. */}
       <div className="bg-background sticky bottom-0 space-y-3 border-t py-4 md:hidden">
-        <Select value={customerId} onValueChange={setCustomerId}>
-          <SelectTrigger className="w-full" aria-label="Customer">
-            <SelectValue placeholder="Select a customer" />
-          </SelectTrigger>
-          <SelectContent>
-            {(customers ?? []).map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <CustomerPicker
+          customers={customers ?? []}
+          value={customerId}
+          onChange={setCustomerId}
+          ariaLabel="Customer"
+        />
         {closeButton}
       </div>
     </div>
