@@ -1,4 +1,4 @@
-import { Home, PackagePlus, ShoppingCart, Users } from "lucide-react"
+import { Home, PackagePlus, ShoppingCart, Users, Wrench } from "lucide-react"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
@@ -20,6 +20,8 @@ const baseItems: Item[] = [
   // supplier purchase cost off the delivery invoice; sales COGS/margin stay
   // redacted. Backend authorizes both roles.
   { icon: PackagePlus, title: "Receive", path: "/receive" },
+  // Tickets: staff + admin maintenance flow (FR-008). Online-only, no cost.
+  { icon: Wrench, title: "Tickets", path: "/tickets" },
 ]
 
 // Admin-only (admin = is_superuser || BKK_ADMIN, per the role matrix); backend
