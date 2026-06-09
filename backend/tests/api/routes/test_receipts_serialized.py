@@ -191,3 +191,9 @@ def test_staff_can_fetch_unit_label(
 def test_unauthenticated_cannot_receive_serialized(client: TestClient) -> None:
     resp = client.post(f"{PREFIX}/receipts/serialized", json={})
     assert resp.status_code == 401
+
+
+def test_unauthenticated_cannot_fetch_unit_label(client: TestClient) -> None:
+    unit_id = uuid.uuid4()
+    resp = client.get(f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf")
+    assert resp.status_code == 401

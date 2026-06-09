@@ -1,9 +1,9 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, get_current_user
 from app.models import (
     PartBatchPublic,
     ReceiveQuantityRequest,
@@ -57,6 +57,7 @@ def receive_quantity(
 
 @router.get(
     "/serialized/{unit_id}/label.pdf",
+    dependencies=[Depends(get_current_user)],
 )
 def read_unit_label(*, session: SessionDep, unit_id: uuid.UUID) -> Response:
     unit = crud.get_unit(session=session, unit_id=unit_id)
