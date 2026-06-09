@@ -16,6 +16,7 @@ import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutSaleRouteImport } from './routes/_layout/sale'
+import { Route as LayoutReceiveRouteImport } from './routes/_layout/receive'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -52,6 +53,11 @@ const LayoutSaleRoute = LayoutSaleRouteImport.update({
   path: '/sale',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutReceiveRoute = LayoutReceiveRouteImport.update({
+  id: '/receive',
+  path: '/receive',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -64,6 +70,7 @@ export interface FileRoutesByFullPath {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/receive': typeof LayoutReceiveRoute
   '/sale': typeof LayoutSaleRoute
   '/settings': typeof LayoutSettingsRoute
 }
@@ -72,6 +79,7 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/receive': typeof LayoutReceiveRoute
   '/sale': typeof LayoutSaleRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/receive': typeof LayoutReceiveRoute
   '/_layout/sale': typeof LayoutSaleRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/receive'
     | '/sale'
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
@@ -103,6 +113,7 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/receive'
     | '/sale'
     | '/settings'
     | '/'
@@ -113,6 +124,7 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/_layout/admin'
+    | '/_layout/receive'
     | '/_layout/sale'
     | '/_layout/settings'
     | '/_layout/'
@@ -176,6 +188,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutSaleRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/receive': {
+      id: '/_layout/receive'
+      path: '/receive'
+      fullPath: '/receive'
+      preLoaderRoute: typeof LayoutReceiveRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/admin': {
       id: '/_layout/admin'
       path: '/admin'
@@ -188,6 +207,7 @@ declare module '@tanstack/react-router' {
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutReceiveRoute: typeof LayoutReceiveRoute
   LayoutSaleRoute: typeof LayoutSaleRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
@@ -195,6 +215,7 @@ interface LayoutRouteChildren {
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
+  LayoutReceiveRoute: LayoutReceiveRoute,
   LayoutSaleRoute: LayoutSaleRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,

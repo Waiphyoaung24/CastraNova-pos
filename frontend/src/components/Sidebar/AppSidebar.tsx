@@ -1,4 +1,4 @@
-import { Home, ShoppingCart, Users } from "lucide-react"
+import { Home, PackagePlus, ShoppingCart, Users } from "lucide-react"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
@@ -9,6 +9,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar"
 import useAuth from "@/hooks/useAuth"
+import { useRole } from "@/hooks/useRole"
 import { type Item, Main } from "./Main"
 import { User } from "./User"
 
@@ -17,12 +18,18 @@ const baseItems: Item[] = [
   { icon: ShoppingCart, title: "Sale", path: "/sale" },
 ]
 
+// Admin-only (admin = is_superuser || BKK_ADMIN, per the role matrix). Receive
+// enters purchase cost, so it is admin-only; backend get_admin is the real gate.
+const adminItems: Item[] = [
+  { icon: PackagePlus, title: "Receive", path: "/receive" },
+  { icon: Users, title: "Admin", path: "/admin" },
+]
+
 export function AppSidebar() {
   const { user: currentUser } = useAuth()
+  const { isAdmin } = useRole()
 
-  const items = currentUser?.is_superuser
-    ? [...baseItems, { icon: Users, title: "Admin", path: "/admin" }]
-    : baseItems
+  const items = isAdmin ? [...baseItems, ...adminItems] : baseItems
 
   return (
     <Sidebar collapsible="icon">
