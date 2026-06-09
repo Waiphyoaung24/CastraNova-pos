@@ -136,6 +136,7 @@ export function PullCreatePanel({
           <TableBody>
             {lines.map((line) => {
               const isUnit = line.lineKind === "UNIT"
+              const label = isUnit ? (line.unitSerial ?? line.sku) : line.sku
               return (
                 <TableRow key={line.key}>
                   <TableCell>
@@ -155,7 +156,7 @@ export function PullCreatePanel({
                         size="icon"
                         className="size-11"
                         disabled={isUnit || line.requestedQty <= 1}
-                        aria-label={`Decrease ${line.sku}`}
+                        aria-label={`Decrease ${label}`}
                         onClick={() =>
                           onQtyChange(line.key, line.requestedQty - 1)
                         }
@@ -171,7 +172,7 @@ export function PullCreatePanel({
                         size="icon"
                         className="size-11"
                         disabled={isUnit}
-                        aria-label={`Increase ${line.sku}`}
+                        aria-label={`Increase ${label}`}
                         onClick={() =>
                           onQtyChange(line.key, line.requestedQty + 1)
                         }
@@ -186,7 +187,7 @@ export function PullCreatePanel({
                       variant="ghost"
                       size="icon"
                       className="text-destructive size-11"
-                      aria-label={`Remove ${line.sku}`}
+                      aria-label={`Remove ${label}`}
                       onClick={() => onRemove(line.key)}
                     >
                       <Trash2 />
