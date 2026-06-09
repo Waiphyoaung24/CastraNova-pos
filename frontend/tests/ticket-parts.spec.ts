@@ -35,11 +35,13 @@ const partScan = (sku: string): ScanLookupResult => ({
   kind: "PART",
   data: {
     sku,
-    product_id: PART_LOOKUP.get(sku)?.productId ?? "prod-unknown",
+    // scan's product_id is intentionally unused by addScanToTicketParts —
+    // the catalog entry (PART_LOOKUP) supplies productId instead.
+    product_id: "scan-product-id",
     tracking_mode: "QUANTITY",
     total_on_hand: 10,
     batches: [],
-  } as SkuSearchResult,
+  } satisfies SkuSearchResult,
 })
 
 const UNIT_SCAN: ScanLookupResult = {
@@ -49,7 +51,9 @@ const UNIT_SCAN: ScanLookupResult = {
     product_id: "prod-fan",
     sku: "SKU-FAN",
     supplier_serial: "SUP-1",
-  } as SerialSearchResult,
+    current_state: "IN_STOCK",
+    movements: [],
+  } satisfies SerialSearchResult,
 }
 
 const NOT_FOUND_SCAN: ScanLookupResult = { kind: "NOT_FOUND" }
