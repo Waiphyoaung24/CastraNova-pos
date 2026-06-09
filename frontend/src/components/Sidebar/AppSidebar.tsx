@@ -16,14 +16,15 @@ import { User } from "./User"
 const baseItems: Item[] = [
   { icon: Home, title: "Dashboard", path: "/" },
   { icon: ShoppingCart, title: "Sale", path: "/sale" },
+  // Receive: staff + admin (YGN warehouse intake, FR-005/006). Staff enter the
+  // supplier purchase cost off the delivery invoice; sales COGS/margin stay
+  // redacted. Backend authorizes both roles.
+  { icon: PackagePlus, title: "Receive", path: "/receive" },
 ]
 
-// Admin-only (admin = is_superuser || BKK_ADMIN, per the role matrix). Receive
-// enters purchase cost, so it is admin-only; backend get_admin is the real gate.
-const adminItems: Item[] = [
-  { icon: PackagePlus, title: "Receive", path: "/receive" },
-  { icon: Users, title: "Admin", path: "/admin" },
-]
+// Admin-only (admin = is_superuser || BKK_ADMIN, per the role matrix); backend
+// get_admin is the real gate.
+const adminItems: Item[] = [{ icon: Users, title: "Admin", path: "/admin" }]
 
 export function AppSidebar() {
   const { user: currentUser } = useAuth()
