@@ -202,19 +202,12 @@ test.describe("Receive screen (admin)", () => {
   })
 
   test("staff is forbidden from the receipts API (403)", async () => {
-    // NOT a code bug — the source IS correctly gated. receipts.py carries
-    // `dependencies=[Depends(get_admin)]` on all three routes and the backend
-    // pytest proves it (test_staff_cannot_receive_serialized / _quantity /
-    // _fetch_unit_label all pass → 403). This E2E fails only against the
-    // LOCALLY-RUNNING dev backend, which is a stale `backend:latest` image
-    // built before the Phase-1 admin-gating merge (`docker compose watch` is
-    // not syncing), so at runtime a YGN_STAFF token bypasses the gate and hits
-    // business logic (404), never 403. Rebuild the backend to run this green:
-    //   docker compose up -d --build backend
-    test.fixme(
-      true,
-      "Stale local backend image (pre-Phase-1) does not enforce get_admin; source + pytest prove 403. Rebuild backend (docker compose up -d --build backend) to un-fixme.",
-    )
+    // Verifies the Phase-1 admin gate (`dependencies=[Depends(get_admin)]` on
+    // all three /receipts routes) over raw HTTP: a YGN_STAFF token must 403.
+    // NOTE: requires the running backend to be current (the gate landed in the
+    // Phase-1 merge); if the dev `backend` image is stale this 403s→404s —
+    // rebuild with `docker compose up -d --build backend`. Backend pytest
+    // (test_staff_cannot_receive_*) is the source-of-truth companion check.
     const { email, password } = await seedStaffUser()
     const staffToken = await tokenFor(email, password)
 
