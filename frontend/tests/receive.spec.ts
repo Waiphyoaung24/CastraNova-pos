@@ -238,7 +238,8 @@ test.describe("Receive screen (admin)", () => {
 
 test.describe("Receive screen access control (staff browser)", () => {
   // Fresh browser context, NOT the superuser storageState — log in as a staff
-  // user in the UI so requireAdmin runs against a real staff session.
+  // user in the UI so the requireAuth guard is exercised by a real staff
+  // session (staff are now allowed into Receive, not redirected).
   test.use({ storageState: { cookies: [], origins: [] } })
 
   test("staff can reach /receive", async ({ page }) => {
