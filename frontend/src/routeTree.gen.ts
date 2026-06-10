@@ -25,6 +25,7 @@ import { Route as LayoutPullsRouteImport } from './routes/_layout/pulls'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutPricingOverridesRouteImport } from './routes/_layout/pricing-overrides'
 import { Route as LayoutOverrideExceptionsRouteImport } from './routes/_layout/override-exceptions'
+import { Route as LayoutLowStockRouteImport } from './routes/_layout/low-stock'
 import { Route as LayoutHoldingPeriodRouteImport } from './routes/_layout/holding-period'
 import { Route as LayoutChannelMarginRouteImport } from './routes/_layout/channel-margin'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
@@ -111,6 +112,11 @@ const LayoutOverrideExceptionsRoute =
     path: '/override-exceptions',
     getParentRoute: () => LayoutRoute,
   } as any)
+const LayoutLowStockRoute = LayoutLowStockRouteImport.update({
+  id: '/low-stock',
+  path: '/low-stock',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutHoldingPeriodRoute = LayoutHoldingPeriodRouteImport.update({
   id: '/holding-period',
   path: '/holding-period',
@@ -146,6 +152,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof LayoutAdminRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
+  '/low-stock': typeof LayoutLowStockRoute
   '/override-exceptions': typeof LayoutOverrideExceptionsRoute
   '/pricing-overrides': typeof LayoutPricingOverridesRoute
   '/projects': typeof LayoutProjectsRoute
@@ -167,6 +174,7 @@ export interface FileRoutesByTo {
   '/admin': typeof LayoutAdminRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
+  '/low-stock': typeof LayoutLowStockRoute
   '/override-exceptions': typeof LayoutOverrideExceptionsRoute
   '/pricing-overrides': typeof LayoutPricingOverridesRoute
   '/projects': typeof LayoutProjectsRoute
@@ -191,6 +199,7 @@ export interface FileRoutesById {
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/channel-margin': typeof LayoutChannelMarginRoute
   '/_layout/holding-period': typeof LayoutHoldingPeriodRoute
+  '/_layout/low-stock': typeof LayoutLowStockRoute
   '/_layout/override-exceptions': typeof LayoutOverrideExceptionsRoute
   '/_layout/pricing-overrides': typeof LayoutPricingOverridesRoute
   '/_layout/projects': typeof LayoutProjectsRoute
@@ -216,6 +225,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/channel-margin'
     | '/holding-period'
+    | '/low-stock'
     | '/override-exceptions'
     | '/pricing-overrides'
     | '/projects'
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/channel-margin'
     | '/holding-period'
+    | '/low-stock'
     | '/override-exceptions'
     | '/pricing-overrides'
     | '/projects'
@@ -260,6 +271,7 @@ export interface FileRouteTypes {
     | '/_layout/admin'
     | '/_layout/channel-margin'
     | '/_layout/holding-period'
+    | '/_layout/low-stock'
     | '/_layout/override-exceptions'
     | '/_layout/pricing-overrides'
     | '/_layout/projects'
@@ -397,6 +409,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutOverrideExceptionsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/low-stock': {
+      id: '/_layout/low-stock'
+      path: '/low-stock'
+      fullPath: '/low-stock'
+      preLoaderRoute: typeof LayoutLowStockRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/holding-period': {
       id: '/_layout/holding-period'
       path: '/holding-period'
@@ -439,6 +458,7 @@ interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
   LayoutChannelMarginRoute: typeof LayoutChannelMarginRoute
   LayoutHoldingPeriodRoute: typeof LayoutHoldingPeriodRoute
+  LayoutLowStockRoute: typeof LayoutLowStockRoute
   LayoutOverrideExceptionsRoute: typeof LayoutOverrideExceptionsRoute
   LayoutPricingOverridesRoute: typeof LayoutPricingOverridesRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
@@ -459,6 +479,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
   LayoutChannelMarginRoute: LayoutChannelMarginRoute,
   LayoutHoldingPeriodRoute: LayoutHoldingPeriodRoute,
+  LayoutLowStockRoute: LayoutLowStockRoute,
   LayoutOverrideExceptionsRoute: LayoutOverrideExceptionsRoute,
   LayoutPricingOverridesRoute: LayoutPricingOverridesRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,

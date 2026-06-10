@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BadgePercent,
   ClipboardList,
   Clock,
@@ -32,6 +33,8 @@ const baseItems: Item[] = [
   { icon: Home, title: "Dashboard", path: "/" },
   // Stock-on-hand + serial/SKU lookup: both roles, no cost fields (FR-012/015).
   { icon: Warehouse, title: "Stock", path: "/stock" },
+  // Low-stock reorder list: both roles read, admin edits thresholds (FR-016).
+  { icon: AlertTriangle, title: "Low stock", path: "/low-stock" },
   { icon: Search, title: "Search", path: "/search" },
   { icon: ShoppingCart, title: "Sale", path: "/sale" },
   // Receive: staff + admin (YGN warehouse intake, FR-005/006). Staff enter the
