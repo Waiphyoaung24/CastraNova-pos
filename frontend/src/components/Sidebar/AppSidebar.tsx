@@ -1,16 +1,21 @@
 import {
   AlertTriangle,
   BadgePercent,
+  Bell,
   ClipboardList,
   Clock,
   FileWarning,
   FolderKanban,
   Home,
+  Package,
   PackagePlus,
   PieChart,
+  RefreshCw,
+  ScrollText,
   Search,
   ShoppingCart,
   SlidersHorizontal,
+  Truck,
   Users,
   Warehouse,
   Wrench,
@@ -45,16 +50,23 @@ const baseItems: Item[] = [
   { icon: Wrench, title: "Tickets", path: "/tickets" },
   // Pulls: staff + admin fulfill; admin create/cancel (FR-009). Online-only, no cost.
   { icon: ClipboardList, title: "Pulls", path: "/pulls" },
+  // Notification opt-in (LINE/Viber), per-user, both roles (FR-018).
+  { icon: Bell, title: "Notifications", path: "/notifications" },
 ]
 
 // Admin-only (admin = is_superuser || BKK_ADMIN, per the role matrix); backend
 // get_admin is the real gate. Projects list/create are admin-gated, so project
 // management lives here rather than in the staff-visible base nav.
 const adminItems: Item[] = [
+  { icon: Package, title: "Products", path: "/products" },
+  { icon: Truck, title: "Suppliers", path: "/suppliers" },
   { icon: FolderKanban, title: "Projects", path: "/projects" },
   { icon: SlidersHorizontal, title: "Adjust", path: "/stock-adjustment" },
   // Pricing-override approval queue — admin decides PENDING deviations (FR-010).
   { icon: BadgePercent, title: "Overrides", path: "/pricing-overrides" },
+  // Append-only audit ledger viewer + offline sync-review queue — admin-only.
+  { icon: ScrollText, title: "Audit", path: "/audit" },
+  { icon: RefreshCw, title: "Sync review", path: "/sync-review" },
   // Reports expose revenue/COGS/margin + holding ageing — admin-only (FR-013/014).
   { icon: PieChart, title: "Channel margin", path: "/channel-margin" },
   { icon: Clock, title: "Holding period", path: "/holding-period" },

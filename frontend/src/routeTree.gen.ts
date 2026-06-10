@@ -15,6 +15,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutTicketsRouteImport } from './routes/_layout/tickets'
+import { Route as LayoutSyncReviewRouteImport } from './routes/_layout/sync-review'
+import { Route as LayoutSuppliersRouteImport } from './routes/_layout/suppliers'
 import { Route as LayoutStockAdjustmentRouteImport } from './routes/_layout/stock-adjustment'
 import { Route as LayoutStockRouteImport } from './routes/_layout/stock'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
@@ -23,11 +25,14 @@ import { Route as LayoutSaleRouteImport } from './routes/_layout/sale'
 import { Route as LayoutReceiveRouteImport } from './routes/_layout/receive'
 import { Route as LayoutPullsRouteImport } from './routes/_layout/pulls'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
+import { Route as LayoutProductsRouteImport } from './routes/_layout/products'
 import { Route as LayoutPricingOverridesRouteImport } from './routes/_layout/pricing-overrides'
 import { Route as LayoutOverrideExceptionsRouteImport } from './routes/_layout/override-exceptions'
+import { Route as LayoutNotificationsRouteImport } from './routes/_layout/notifications'
 import { Route as LayoutLowStockRouteImport } from './routes/_layout/low-stock'
 import { Route as LayoutHoldingPeriodRouteImport } from './routes/_layout/holding-period'
 import { Route as LayoutChannelMarginRouteImport } from './routes/_layout/channel-margin'
+import { Route as LayoutAuditRouteImport } from './routes/_layout/audit'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProjectProjectIdRouteImport } from './routes/_layout/project.$projectId'
 import { Route as LayoutCustomerCustomerIdRouteImport } from './routes/_layout/customer.$customerId'
@@ -59,6 +64,16 @@ const LayoutIndexRoute = LayoutIndexRouteImport.update({
 const LayoutTicketsRoute = LayoutTicketsRouteImport.update({
   id: '/tickets',
   path: '/tickets',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutSyncReviewRoute = LayoutSyncReviewRouteImport.update({
+  id: '/sync-review',
+  path: '/sync-review',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutSuppliersRoute = LayoutSuppliersRouteImport.update({
+  id: '/suppliers',
+  path: '/suppliers',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutStockAdjustmentRoute = LayoutStockAdjustmentRouteImport.update({
@@ -101,6 +116,11 @@ const LayoutProjectsRoute = LayoutProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutProductsRoute = LayoutProductsRouteImport.update({
+  id: '/products',
+  path: '/products',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutPricingOverridesRoute = LayoutPricingOverridesRouteImport.update({
   id: '/pricing-overrides',
   path: '/pricing-overrides',
@@ -112,6 +132,11 @@ const LayoutOverrideExceptionsRoute =
     path: '/override-exceptions',
     getParentRoute: () => LayoutRoute,
   } as any)
+const LayoutNotificationsRoute = LayoutNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutLowStockRoute = LayoutLowStockRouteImport.update({
   id: '/low-stock',
   path: '/low-stock',
@@ -125,6 +150,11 @@ const LayoutHoldingPeriodRoute = LayoutHoldingPeriodRouteImport.update({
 const LayoutChannelMarginRoute = LayoutChannelMarginRouteImport.update({
   id: '/channel-margin',
   path: '/channel-margin',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutAuditRoute = LayoutAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
@@ -150,11 +180,14 @@ export interface FileRoutesByFullPath {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/audit': typeof LayoutAuditRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
   '/low-stock': typeof LayoutLowStockRoute
+  '/notifications': typeof LayoutNotificationsRoute
   '/override-exceptions': typeof LayoutOverrideExceptionsRoute
   '/pricing-overrides': typeof LayoutPricingOverridesRoute
+  '/products': typeof LayoutProductsRoute
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
@@ -163,6 +196,8 @@ export interface FileRoutesByFullPath {
   '/settings': typeof LayoutSettingsRoute
   '/stock': typeof LayoutStockRoute
   '/stock-adjustment': typeof LayoutStockAdjustmentRoute
+  '/suppliers': typeof LayoutSuppliersRoute
+  '/sync-review': typeof LayoutSyncReviewRoute
   '/tickets': typeof LayoutTicketsRoute
   '/customer/$customerId': typeof LayoutCustomerCustomerIdRoute
   '/project/$projectId': typeof LayoutProjectProjectIdRoute
@@ -172,11 +207,14 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/audit': typeof LayoutAuditRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
   '/low-stock': typeof LayoutLowStockRoute
+  '/notifications': typeof LayoutNotificationsRoute
   '/override-exceptions': typeof LayoutOverrideExceptionsRoute
   '/pricing-overrides': typeof LayoutPricingOverridesRoute
+  '/products': typeof LayoutProductsRoute
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
@@ -185,6 +223,8 @@ export interface FileRoutesByTo {
   '/settings': typeof LayoutSettingsRoute
   '/stock': typeof LayoutStockRoute
   '/stock-adjustment': typeof LayoutStockAdjustmentRoute
+  '/suppliers': typeof LayoutSuppliersRoute
+  '/sync-review': typeof LayoutSyncReviewRoute
   '/tickets': typeof LayoutTicketsRoute
   '/': typeof LayoutIndexRoute
   '/customer/$customerId': typeof LayoutCustomerCustomerIdRoute
@@ -197,11 +237,14 @@ export interface FileRoutesById {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/audit': typeof LayoutAuditRoute
   '/_layout/channel-margin': typeof LayoutChannelMarginRoute
   '/_layout/holding-period': typeof LayoutHoldingPeriodRoute
   '/_layout/low-stock': typeof LayoutLowStockRoute
+  '/_layout/notifications': typeof LayoutNotificationsRoute
   '/_layout/override-exceptions': typeof LayoutOverrideExceptionsRoute
   '/_layout/pricing-overrides': typeof LayoutPricingOverridesRoute
+  '/_layout/products': typeof LayoutProductsRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/pulls': typeof LayoutPullsRoute
   '/_layout/receive': typeof LayoutReceiveRoute
@@ -210,6 +253,8 @@ export interface FileRoutesById {
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/stock': typeof LayoutStockRoute
   '/_layout/stock-adjustment': typeof LayoutStockAdjustmentRoute
+  '/_layout/suppliers': typeof LayoutSuppliersRoute
+  '/_layout/sync-review': typeof LayoutSyncReviewRoute
   '/_layout/tickets': typeof LayoutTicketsRoute
   '/_layout/': typeof LayoutIndexRoute
   '/_layout/customer/$customerId': typeof LayoutCustomerCustomerIdRoute
@@ -223,11 +268,14 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/audit'
     | '/channel-margin'
     | '/holding-period'
     | '/low-stock'
+    | '/notifications'
     | '/override-exceptions'
     | '/pricing-overrides'
+    | '/products'
     | '/projects'
     | '/pulls'
     | '/receive'
@@ -236,6 +284,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stock'
     | '/stock-adjustment'
+    | '/suppliers'
+    | '/sync-review'
     | '/tickets'
     | '/customer/$customerId'
     | '/project/$projectId'
@@ -245,11 +295,14 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/audit'
     | '/channel-margin'
     | '/holding-period'
     | '/low-stock'
+    | '/notifications'
     | '/override-exceptions'
     | '/pricing-overrides'
+    | '/products'
     | '/projects'
     | '/pulls'
     | '/receive'
@@ -258,6 +311,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stock'
     | '/stock-adjustment'
+    | '/suppliers'
+    | '/sync-review'
     | '/tickets'
     | '/'
     | '/customer/$customerId'
@@ -269,11 +324,14 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/_layout/admin'
+    | '/_layout/audit'
     | '/_layout/channel-margin'
     | '/_layout/holding-period'
     | '/_layout/low-stock'
+    | '/_layout/notifications'
     | '/_layout/override-exceptions'
     | '/_layout/pricing-overrides'
+    | '/_layout/products'
     | '/_layout/projects'
     | '/_layout/pulls'
     | '/_layout/receive'
@@ -282,6 +340,8 @@ export interface FileRouteTypes {
     | '/_layout/settings'
     | '/_layout/stock'
     | '/_layout/stock-adjustment'
+    | '/_layout/suppliers'
+    | '/_layout/sync-review'
     | '/_layout/tickets'
     | '/_layout/'
     | '/_layout/customer/$customerId'
@@ -337,6 +397,20 @@ declare module '@tanstack/react-router' {
       path: '/tickets'
       fullPath: '/tickets'
       preLoaderRoute: typeof LayoutTicketsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/sync-review': {
+      id: '/_layout/sync-review'
+      path: '/sync-review'
+      fullPath: '/sync-review'
+      preLoaderRoute: typeof LayoutSyncReviewRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/suppliers': {
+      id: '/_layout/suppliers'
+      path: '/suppliers'
+      fullPath: '/suppliers'
+      preLoaderRoute: typeof LayoutSuppliersRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/stock-adjustment': {
@@ -395,6 +469,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProjectsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/products': {
+      id: '/_layout/products'
+      path: '/products'
+      fullPath: '/products'
+      preLoaderRoute: typeof LayoutProductsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/pricing-overrides': {
       id: '/_layout/pricing-overrides'
       path: '/pricing-overrides'
@@ -407,6 +488,13 @@ declare module '@tanstack/react-router' {
       path: '/override-exceptions'
       fullPath: '/override-exceptions'
       preLoaderRoute: typeof LayoutOverrideExceptionsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/notifications': {
+      id: '/_layout/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof LayoutNotificationsRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/low-stock': {
@@ -428,6 +516,13 @@ declare module '@tanstack/react-router' {
       path: '/channel-margin'
       fullPath: '/channel-margin'
       preLoaderRoute: typeof LayoutChannelMarginRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/audit': {
+      id: '/_layout/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof LayoutAuditRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/admin': {
@@ -456,11 +551,14 @@ declare module '@tanstack/react-router' {
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutAuditRoute: typeof LayoutAuditRoute
   LayoutChannelMarginRoute: typeof LayoutChannelMarginRoute
   LayoutHoldingPeriodRoute: typeof LayoutHoldingPeriodRoute
   LayoutLowStockRoute: typeof LayoutLowStockRoute
+  LayoutNotificationsRoute: typeof LayoutNotificationsRoute
   LayoutOverrideExceptionsRoute: typeof LayoutOverrideExceptionsRoute
   LayoutPricingOverridesRoute: typeof LayoutPricingOverridesRoute
+  LayoutProductsRoute: typeof LayoutProductsRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutPullsRoute: typeof LayoutPullsRoute
   LayoutReceiveRoute: typeof LayoutReceiveRoute
@@ -469,6 +567,8 @@ interface LayoutRouteChildren {
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutStockRoute: typeof LayoutStockRoute
   LayoutStockAdjustmentRoute: typeof LayoutStockAdjustmentRoute
+  LayoutSuppliersRoute: typeof LayoutSuppliersRoute
+  LayoutSyncReviewRoute: typeof LayoutSyncReviewRoute
   LayoutTicketsRoute: typeof LayoutTicketsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LayoutCustomerCustomerIdRoute: typeof LayoutCustomerCustomerIdRoute
@@ -477,11 +577,14 @@ interface LayoutRouteChildren {
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
+  LayoutAuditRoute: LayoutAuditRoute,
   LayoutChannelMarginRoute: LayoutChannelMarginRoute,
   LayoutHoldingPeriodRoute: LayoutHoldingPeriodRoute,
   LayoutLowStockRoute: LayoutLowStockRoute,
+  LayoutNotificationsRoute: LayoutNotificationsRoute,
   LayoutOverrideExceptionsRoute: LayoutOverrideExceptionsRoute,
   LayoutPricingOverridesRoute: LayoutPricingOverridesRoute,
+  LayoutProductsRoute: LayoutProductsRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutPullsRoute: LayoutPullsRoute,
   LayoutReceiveRoute: LayoutReceiveRoute,
@@ -490,6 +593,8 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutStockRoute: LayoutStockRoute,
   LayoutStockAdjustmentRoute: LayoutStockAdjustmentRoute,
+  LayoutSuppliersRoute: LayoutSuppliersRoute,
+  LayoutSyncReviewRoute: LayoutSyncReviewRoute,
   LayoutTicketsRoute: LayoutTicketsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LayoutCustomerCustomerIdRoute: LayoutCustomerCustomerIdRoute,
