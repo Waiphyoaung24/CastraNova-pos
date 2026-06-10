@@ -23,6 +23,7 @@ import { Route as LayoutSaleRouteImport } from './routes/_layout/sale'
 import { Route as LayoutReceiveRouteImport } from './routes/_layout/receive'
 import { Route as LayoutPullsRouteImport } from './routes/_layout/pulls'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
+import { Route as LayoutPricingOverridesRouteImport } from './routes/_layout/pricing-overrides'
 import { Route as LayoutHoldingPeriodRouteImport } from './routes/_layout/holding-period'
 import { Route as LayoutChannelMarginRouteImport } from './routes/_layout/channel-margin'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
@@ -98,6 +99,11 @@ const LayoutProjectsRoute = LayoutProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutPricingOverridesRoute = LayoutPricingOverridesRouteImport.update({
+  id: '/pricing-overrides',
+  path: '/pricing-overrides',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutHoldingPeriodRoute = LayoutHoldingPeriodRouteImport.update({
   id: '/holding-period',
   path: '/holding-period',
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof LayoutAdminRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
+  '/pricing-overrides': typeof LayoutPricingOverridesRoute
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
@@ -152,6 +159,7 @@ export interface FileRoutesByTo {
   '/admin': typeof LayoutAdminRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
+  '/pricing-overrides': typeof LayoutPricingOverridesRoute
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
@@ -174,6 +182,7 @@ export interface FileRoutesById {
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/channel-margin': typeof LayoutChannelMarginRoute
   '/_layout/holding-period': typeof LayoutHoldingPeriodRoute
+  '/_layout/pricing-overrides': typeof LayoutPricingOverridesRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/pulls': typeof LayoutPullsRoute
   '/_layout/receive': typeof LayoutReceiveRoute
@@ -197,6 +206,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/channel-margin'
     | '/holding-period'
+    | '/pricing-overrides'
     | '/projects'
     | '/pulls'
     | '/receive'
@@ -216,6 +226,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/channel-margin'
     | '/holding-period'
+    | '/pricing-overrides'
     | '/projects'
     | '/pulls'
     | '/receive'
@@ -237,6 +248,7 @@ export interface FileRouteTypes {
     | '/_layout/admin'
     | '/_layout/channel-margin'
     | '/_layout/holding-period'
+    | '/_layout/pricing-overrides'
     | '/_layout/projects'
     | '/_layout/pulls'
     | '/_layout/receive'
@@ -358,6 +370,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProjectsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/pricing-overrides': {
+      id: '/_layout/pricing-overrides'
+      path: '/pricing-overrides'
+      fullPath: '/pricing-overrides'
+      preLoaderRoute: typeof LayoutPricingOverridesRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/holding-period': {
       id: '/_layout/holding-period'
       path: '/holding-period'
@@ -400,6 +419,7 @@ interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
   LayoutChannelMarginRoute: typeof LayoutChannelMarginRoute
   LayoutHoldingPeriodRoute: typeof LayoutHoldingPeriodRoute
+  LayoutPricingOverridesRoute: typeof LayoutPricingOverridesRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutPullsRoute: typeof LayoutPullsRoute
   LayoutReceiveRoute: typeof LayoutReceiveRoute
@@ -418,6 +438,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
   LayoutChannelMarginRoute: LayoutChannelMarginRoute,
   LayoutHoldingPeriodRoute: LayoutHoldingPeriodRoute,
+  LayoutPricingOverridesRoute: LayoutPricingOverridesRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutPullsRoute: LayoutPullsRoute,
   LayoutReceiveRoute: LayoutReceiveRoute,

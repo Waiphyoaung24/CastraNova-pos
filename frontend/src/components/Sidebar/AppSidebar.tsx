@@ -1,4 +1,5 @@
 import {
+  BadgePercent,
   ClipboardList,
   Clock,
   FolderKanban,
@@ -48,6 +49,8 @@ const baseItems: Item[] = [
 const adminItems: Item[] = [
   { icon: FolderKanban, title: "Projects", path: "/projects" },
   { icon: SlidersHorizontal, title: "Adjust", path: "/stock-adjustment" },
+  // Pricing-override approval queue — admin decides PENDING deviations (FR-010).
+  { icon: BadgePercent, title: "Overrides", path: "/pricing-overrides" },
   // Reports expose revenue/COGS/margin + holding ageing — admin-only (FR-013/014).
   { icon: PieChart, title: "Channel margin", path: "/channel-margin" },
   { icon: Clock, title: "Holding period", path: "/holding-period" },
