@@ -2,6 +2,7 @@ import {
   BadgePercent,
   ClipboardList,
   Clock,
+  FileWarning,
   FolderKanban,
   Home,
   PackagePlus,
@@ -54,6 +55,12 @@ const adminItems: Item[] = [
   // Reports expose revenue/COGS/margin + holding ageing — admin-only (FR-013/014).
   { icon: PieChart, title: "Channel margin", path: "/channel-margin" },
   { icon: Clock, title: "Holding period", path: "/holding-period" },
+  // Monthly pricing-override exceptions audit (FR-010 §8).
+  {
+    icon: FileWarning,
+    title: "Overrides report",
+    path: "/override-exceptions",
+  },
   { icon: Users, title: "Admin", path: "/admin" },
 ]
 

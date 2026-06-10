@@ -41,6 +41,17 @@ export function channelMarginExport(
   }
 }
 
+/** Authed-download path + filename for the override-exceptions export. */
+export function overrideExceptionsExport(
+  month: string,
+  fmt: ReportFormat,
+): ReportExport {
+  return {
+    path: `/api/v1/reports/override-exceptions.${fmt}?month=${month}`,
+    filename: `override-exceptions-${month}.${fmt}`,
+  }
+}
+
 /** Authed-download path + filename for the holding-period export. */
 export function holdingPeriodExport(
   overThresholdOnly: boolean,
