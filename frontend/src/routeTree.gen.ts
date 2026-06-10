@@ -23,6 +23,8 @@ import { Route as LayoutSaleRouteImport } from './routes/_layout/sale'
 import { Route as LayoutReceiveRouteImport } from './routes/_layout/receive'
 import { Route as LayoutPullsRouteImport } from './routes/_layout/pulls'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
+import { Route as LayoutHoldingPeriodRouteImport } from './routes/_layout/holding-period'
+import { Route as LayoutChannelMarginRouteImport } from './routes/_layout/channel-margin'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -94,6 +96,16 @@ const LayoutProjectsRoute = LayoutProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutHoldingPeriodRoute = LayoutHoldingPeriodRouteImport.update({
+  id: '/holding-period',
+  path: '/holding-period',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutChannelMarginRoute = LayoutChannelMarginRouteImport.update({
+  id: '/channel-margin',
+  path: '/channel-margin',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -106,6 +118,8 @@ export interface FileRoutesByFullPath {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/channel-margin': typeof LayoutChannelMarginRoute
+  '/holding-period': typeof LayoutHoldingPeriodRoute
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
@@ -121,6 +135,8 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/channel-margin': typeof LayoutChannelMarginRoute
+  '/holding-period': typeof LayoutHoldingPeriodRoute
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
@@ -139,6 +155,8 @@ export interface FileRoutesById {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/channel-margin': typeof LayoutChannelMarginRoute
+  '/_layout/holding-period': typeof LayoutHoldingPeriodRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/pulls': typeof LayoutPullsRoute
   '/_layout/receive': typeof LayoutReceiveRoute
@@ -158,6 +176,8 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/channel-margin'
+    | '/holding-period'
     | '/projects'
     | '/pulls'
     | '/receive'
@@ -173,6 +193,8 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/channel-margin'
+    | '/holding-period'
     | '/projects'
     | '/pulls'
     | '/receive'
@@ -190,6 +212,8 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/_layout/admin'
+    | '/_layout/channel-margin'
+    | '/_layout/holding-period'
     | '/_layout/projects'
     | '/_layout/pulls'
     | '/_layout/receive'
@@ -309,6 +333,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProjectsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/holding-period': {
+      id: '/_layout/holding-period'
+      path: '/holding-period'
+      fullPath: '/holding-period'
+      preLoaderRoute: typeof LayoutHoldingPeriodRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/channel-margin': {
+      id: '/_layout/channel-margin'
+      path: '/channel-margin'
+      fullPath: '/channel-margin'
+      preLoaderRoute: typeof LayoutChannelMarginRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/admin': {
       id: '/_layout/admin'
       path: '/admin'
@@ -321,6 +359,8 @@ declare module '@tanstack/react-router' {
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutChannelMarginRoute: typeof LayoutChannelMarginRoute
+  LayoutHoldingPeriodRoute: typeof LayoutHoldingPeriodRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutPullsRoute: typeof LayoutPullsRoute
   LayoutReceiveRoute: typeof LayoutReceiveRoute
@@ -335,6 +375,8 @@ interface LayoutRouteChildren {
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
+  LayoutChannelMarginRoute: LayoutChannelMarginRoute,
+  LayoutHoldingPeriodRoute: LayoutHoldingPeriodRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutPullsRoute: LayoutPullsRoute,
   LayoutReceiveRoute: LayoutReceiveRoute,
