@@ -1,9 +1,13 @@
 import {
   ClipboardList,
+  FolderKanban,
   Home,
   PackagePlus,
+  Search,
   ShoppingCart,
+  SlidersHorizontal,
   Users,
+  Warehouse,
   Wrench,
 } from "lucide-react"
 
@@ -22,6 +26,9 @@ import { User } from "./User"
 
 const baseItems: Item[] = [
   { icon: Home, title: "Dashboard", path: "/" },
+  // Stock-on-hand + serial/SKU lookup: both roles, no cost fields (FR-012/015).
+  { icon: Warehouse, title: "Stock", path: "/stock" },
+  { icon: Search, title: "Search", path: "/search" },
   { icon: ShoppingCart, title: "Sale", path: "/sale" },
   // Receive: staff + admin (YGN warehouse intake, FR-005/006). Staff enter the
   // supplier purchase cost off the delivery invoice; sales COGS/margin stay
@@ -34,8 +41,13 @@ const baseItems: Item[] = [
 ]
 
 // Admin-only (admin = is_superuser || BKK_ADMIN, per the role matrix); backend
-// get_admin is the real gate.
-const adminItems: Item[] = [{ icon: Users, title: "Admin", path: "/admin" }]
+// get_admin is the real gate. Projects list/create are admin-gated, so project
+// management lives here rather than in the staff-visible base nav.
+const adminItems: Item[] = [
+  { icon: FolderKanban, title: "Projects", path: "/projects" },
+  { icon: SlidersHorizontal, title: "Adjust", path: "/stock-adjustment" },
+  { icon: Users, title: "Admin", path: "/admin" },
+]
 
 export function AppSidebar() {
   const { user: currentUser } = useAuth()

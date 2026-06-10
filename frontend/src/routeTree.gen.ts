@@ -15,10 +15,14 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutTicketsRouteImport } from './routes/_layout/tickets'
+import { Route as LayoutStockAdjustmentRouteImport } from './routes/_layout/stock-adjustment'
+import { Route as LayoutStockRouteImport } from './routes/_layout/stock'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
+import { Route as LayoutSearchRouteImport } from './routes/_layout/search'
 import { Route as LayoutSaleRouteImport } from './routes/_layout/sale'
 import { Route as LayoutReceiveRouteImport } from './routes/_layout/receive'
 import { Route as LayoutPullsRouteImport } from './routes/_layout/pulls'
+import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -50,9 +54,24 @@ const LayoutTicketsRoute = LayoutTicketsRouteImport.update({
   path: '/tickets',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutStockAdjustmentRoute = LayoutStockAdjustmentRouteImport.update({
+  id: '/stock-adjustment',
+  path: '/stock-adjustment',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutStockRoute = LayoutStockRouteImport.update({
+  id: '/stock',
+  path: '/stock',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutSettingsRoute = LayoutSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutSearchRoute = LayoutSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutSaleRoute = LayoutSaleRouteImport.update({
@@ -70,6 +89,11 @@ const LayoutPullsRoute = LayoutPullsRouteImport.update({
   path: '/pulls',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutProjectsRoute = LayoutProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -82,10 +106,14 @@ export interface FileRoutesByFullPath {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
   '/sale': typeof LayoutSaleRoute
+  '/search': typeof LayoutSearchRoute
   '/settings': typeof LayoutSettingsRoute
+  '/stock': typeof LayoutStockRoute
+  '/stock-adjustment': typeof LayoutStockAdjustmentRoute
   '/tickets': typeof LayoutTicketsRoute
 }
 export interface FileRoutesByTo {
@@ -93,10 +121,14 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof LayoutAdminRoute
+  '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
   '/sale': typeof LayoutSaleRoute
+  '/search': typeof LayoutSearchRoute
   '/settings': typeof LayoutSettingsRoute
+  '/stock': typeof LayoutStockRoute
+  '/stock-adjustment': typeof LayoutStockAdjustmentRoute
   '/tickets': typeof LayoutTicketsRoute
   '/': typeof LayoutIndexRoute
 }
@@ -107,10 +139,14 @@ export interface FileRoutesById {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/pulls': typeof LayoutPullsRoute
   '/_layout/receive': typeof LayoutReceiveRoute
   '/_layout/sale': typeof LayoutSaleRoute
+  '/_layout/search': typeof LayoutSearchRoute
   '/_layout/settings': typeof LayoutSettingsRoute
+  '/_layout/stock': typeof LayoutStockRoute
+  '/_layout/stock-adjustment': typeof LayoutStockAdjustmentRoute
   '/_layout/tickets': typeof LayoutTicketsRoute
   '/_layout/': typeof LayoutIndexRoute
 }
@@ -122,10 +158,14 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/projects'
     | '/pulls'
     | '/receive'
     | '/sale'
+    | '/search'
     | '/settings'
+    | '/stock'
+    | '/stock-adjustment'
     | '/tickets'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -133,10 +173,14 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/admin'
+    | '/projects'
     | '/pulls'
     | '/receive'
     | '/sale'
+    | '/search'
     | '/settings'
+    | '/stock'
+    | '/stock-adjustment'
     | '/tickets'
     | '/'
   id:
@@ -146,10 +190,14 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/_layout/admin'
+    | '/_layout/projects'
     | '/_layout/pulls'
     | '/_layout/receive'
     | '/_layout/sale'
+    | '/_layout/search'
     | '/_layout/settings'
+    | '/_layout/stock'
+    | '/_layout/stock-adjustment'
     | '/_layout/tickets'
     | '/_layout/'
   fileRoutesById: FileRoutesById
@@ -205,11 +253,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutTicketsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/stock-adjustment': {
+      id: '/_layout/stock-adjustment'
+      path: '/stock-adjustment'
+      fullPath: '/stock-adjustment'
+      preLoaderRoute: typeof LayoutStockAdjustmentRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/stock': {
+      id: '/_layout/stock'
+      path: '/stock'
+      fullPath: '/stock'
+      preLoaderRoute: typeof LayoutStockRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/settings': {
       id: '/_layout/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof LayoutSettingsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/search': {
+      id: '/_layout/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof LayoutSearchRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/sale': {
@@ -233,6 +302,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutPullsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/projects': {
+      id: '/_layout/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof LayoutProjectsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/admin': {
       id: '/_layout/admin'
       path: '/admin'
@@ -245,20 +321,28 @@ declare module '@tanstack/react-router' {
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutPullsRoute: typeof LayoutPullsRoute
   LayoutReceiveRoute: typeof LayoutReceiveRoute
   LayoutSaleRoute: typeof LayoutSaleRoute
+  LayoutSearchRoute: typeof LayoutSearchRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
+  LayoutStockRoute: typeof LayoutStockRoute
+  LayoutStockAdjustmentRoute: typeof LayoutStockAdjustmentRoute
   LayoutTicketsRoute: typeof LayoutTicketsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
+  LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutPullsRoute: LayoutPullsRoute,
   LayoutReceiveRoute: LayoutReceiveRoute,
   LayoutSaleRoute: LayoutSaleRoute,
+  LayoutSearchRoute: LayoutSearchRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
+  LayoutStockRoute: LayoutStockRoute,
+  LayoutStockAdjustmentRoute: LayoutStockAdjustmentRoute,
   LayoutTicketsRoute: LayoutTicketsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
 }
