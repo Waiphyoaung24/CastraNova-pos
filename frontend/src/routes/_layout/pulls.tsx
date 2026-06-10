@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CustomersService,
   ProductsService,
+  type ProjectPullCreate,
   type ProjectPullFulfill,
   type ProjectPullLinePublic,
   type ProjectPullPublic,
@@ -165,11 +166,13 @@ function Pulls() {
       showErrorToast("Could not fulfill the pull. Please try again."),
   })
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      ProjectPullsService.createProjectPull({
-        requestBody: buildCreatePayload(createLines, projectId, adminNotes),
-      }),
+  const createMutation = useMutation<
+    ProjectPullPublic,
+    Error,
+    ProjectPullCreate
+  >({
+    mutationFn: (payload) =>
+      ProjectPullsService.createProjectPull({ requestBody: payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
       showSuccessToast("Pull created.")
@@ -196,6 +199,9 @@ function Pulls() {
 
   const handleSelect = useCallback((pull: ProjectPullPublic) => {
     setSelectedPullId(pull.id)
+    // Draft is seeded once here; a pull's lines are immutable after creation
+    // (only fulfilled_qty/line_state change, at fulfill), so the 30s refetch
+    // cannot invalidate the draft's line-id mapping.
     setFulfillDraft(seedFulfillDraft(pull.lines))
     setScanNotice("")
   }, [])
@@ -252,7 +258,11 @@ function Pulls() {
           onRemove={(key) =>
             setCreateLines((prev) => removeCreateLine(prev, key))
           }
-          onSubmit={() => createMutation.mutate()}
+          onSubmit={() =>
+            createMutation.mutate(
+              buildCreatePayload(createLines, projectId, adminNotes),
+            )
+          }
           onBack={handleBackToQueue}
           isPending={createMutation.isPending}
         />
