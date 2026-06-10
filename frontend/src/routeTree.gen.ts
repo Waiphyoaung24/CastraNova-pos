@@ -26,6 +26,8 @@ import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutHoldingPeriodRouteImport } from './routes/_layout/holding-period'
 import { Route as LayoutChannelMarginRouteImport } from './routes/_layout/channel-margin'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
+import { Route as LayoutProjectProjectIdRouteImport } from './routes/_layout/project.$projectId'
+import { Route as LayoutCustomerCustomerIdRouteImport } from './routes/_layout/customer.$customerId'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
@@ -111,6 +113,17 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutProjectProjectIdRoute = LayoutProjectProjectIdRouteImport.update({
+  id: '/project/$projectId',
+  path: '/project/$projectId',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutCustomerCustomerIdRoute =
+  LayoutCustomerCustomerIdRouteImport.update({
+    id: '/customer/$customerId',
+    path: '/customer/$customerId',
+    getParentRoute: () => LayoutRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof LayoutIndexRoute
@@ -129,6 +142,8 @@ export interface FileRoutesByFullPath {
   '/stock': typeof LayoutStockRoute
   '/stock-adjustment': typeof LayoutStockAdjustmentRoute
   '/tickets': typeof LayoutTicketsRoute
+  '/customer/$customerId': typeof LayoutCustomerCustomerIdRoute
+  '/project/$projectId': typeof LayoutProjectProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -147,6 +162,8 @@ export interface FileRoutesByTo {
   '/stock-adjustment': typeof LayoutStockAdjustmentRoute
   '/tickets': typeof LayoutTicketsRoute
   '/': typeof LayoutIndexRoute
+  '/customer/$customerId': typeof LayoutCustomerCustomerIdRoute
+  '/project/$projectId': typeof LayoutProjectProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -167,6 +184,8 @@ export interface FileRoutesById {
   '/_layout/stock-adjustment': typeof LayoutStockAdjustmentRoute
   '/_layout/tickets': typeof LayoutTicketsRoute
   '/_layout/': typeof LayoutIndexRoute
+  '/_layout/customer/$customerId': typeof LayoutCustomerCustomerIdRoute
+  '/_layout/project/$projectId': typeof LayoutProjectProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -187,6 +206,8 @@ export interface FileRouteTypes {
     | '/stock'
     | '/stock-adjustment'
     | '/tickets'
+    | '/customer/$customerId'
+    | '/project/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -205,6 +226,8 @@ export interface FileRouteTypes {
     | '/stock-adjustment'
     | '/tickets'
     | '/'
+    | '/customer/$customerId'
+    | '/project/$projectId'
   id:
     | '__root__'
     | '/_layout'
@@ -224,6 +247,8 @@ export interface FileRouteTypes {
     | '/_layout/stock-adjustment'
     | '/_layout/tickets'
     | '/_layout/'
+    | '/_layout/customer/$customerId'
+    | '/_layout/project/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -354,6 +379,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAdminRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/project/$projectId': {
+      id: '/_layout/project/$projectId'
+      path: '/project/$projectId'
+      fullPath: '/project/$projectId'
+      preLoaderRoute: typeof LayoutProjectProjectIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/customer/$customerId': {
+      id: '/_layout/customer/$customerId'
+      path: '/customer/$customerId'
+      fullPath: '/customer/$customerId'
+      preLoaderRoute: typeof LayoutCustomerCustomerIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
   }
 }
 
@@ -371,6 +410,8 @@ interface LayoutRouteChildren {
   LayoutStockAdjustmentRoute: typeof LayoutStockAdjustmentRoute
   LayoutTicketsRoute: typeof LayoutTicketsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
+  LayoutCustomerCustomerIdRoute: typeof LayoutCustomerCustomerIdRoute
+  LayoutProjectProjectIdRoute: typeof LayoutProjectProjectIdRoute
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
@@ -387,6 +428,8 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutStockAdjustmentRoute: LayoutStockAdjustmentRoute,
   LayoutTicketsRoute: LayoutTicketsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
+  LayoutCustomerCustomerIdRoute: LayoutCustomerCustomerIdRoute,
+  LayoutProjectProjectIdRoute: LayoutProjectProjectIdRoute,
 }
 
 const LayoutRouteWithChildren =
