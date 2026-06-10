@@ -56,13 +56,14 @@ test("User can reset password successfully using the link", async ({
 
   const selector = 'a[href*="/reset-password?token="]'
 
-  let url = await page.getAttribute(selector, "href")
+  const href = await page.getAttribute(selector, "href")
 
-  // TODO: update var instead of doing a replace
-  url = url!.replace("http://localhost/", "http://localhost:5173/")
+  // The emailed link's host is FRONTEND_HOST, which need not match the host
+  // the suite runs on — navigate to its path relative to our baseURL instead.
+  const linkUrl = new URL(href!, "http://localhost")
 
   // Set the new password and confirm it
-  await page.goto(url)
+  await page.goto(`${linkUrl.pathname}${linkUrl.search}`)
 
   await page.getByTestId("new-password-input").fill(newPassword)
   await page.getByTestId("confirm-password-input").fill(newPassword)
@@ -109,11 +110,13 @@ test("Weak new password validation", async ({ page, request }) => {
   )
 
   const selector = 'a[href*="/reset-password?token="]'
-  let url = await page.getAttribute(selector, "href")
-  url = url!.replace("http://localhost/", "http://localhost:5173/")
+  const href = await page.getAttribute(selector, "href")
+
+  // Same baseURL-relative navigation as the successful-reset test above.
+  const linkUrl = new URL(href!, "http://localhost")
 
   // Set a weak new password
-  await page.goto(url)
+  await page.goto(`${linkUrl.pathname}${linkUrl.search}`)
   await page.getByTestId("new-password-input").fill(weakPassword)
   await page.getByTestId("confirm-password-input").fill(weakPassword)
   await page.getByRole("button", { name: "Reset Password" }).click()

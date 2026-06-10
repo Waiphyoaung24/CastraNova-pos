@@ -689,7 +689,7 @@ No new schema except `sync_review_item` (M020).
 |---|---|---|
 | 5.1 Auth hardening ✅ | `slowapi` rate-limit **`"5 per 15 minutes"`** on `/login` (route needs a `request: Request` param; `@router.post` decorator above `@limiter.limit`); refresh cookie `httpOnly secure sameSite=lax` | 6th login attempt in window → 429 |
 | 5.3 Frontend SDK + screens *(do before 5.2)* | `bun run generate-client` after backend stable; admin + staff role-shells; offline indicator + queue counter; per-flow inventory screens (receive, sale, ticket, pull) | SDK regenerates; staff cannot see admin routes |
-| 5.2 Playwright E2E ⛔ *(BLOCKED-BY 5.3)* | 5 paths: receive (serial+qty), sale online, **sale offline→reconnect→replay**, ticket close, pull fulfill (with short) | Offline queue survives reload; no dup on replay |
+| 5.2 Playwright E2E ✅ (done 2026-06-11) | 5 paths: receive (serial+qty), sale online, **sale offline→reconnect→replay**, ticket close, pull fulfill (with short) | Offline queue survives reload; no dup on replay |
 | 5.4 Deploy | Hostinger KVM 8: Traefik + Let's Encrypt + `pg_dump` cron + Sentry DSN; seed import; LINE/Viber bot enroll 10 users; BT scanner (TYSSO/Posiflex) tuning | Restore drill on staging; 8h offline drill |
 
 **E2E suite stabilization (done 2026-06-07, prerequisite for 5.2):**
@@ -701,6 +701,30 @@ No new schema except `sync_review_item` (M020).
   Disabled it for local dev + E2E via `RATE_LIMIT_ENABLED: "false"` in
   `compose.override.yml`; production (compose.yml, no override) keeps the secure
   default `True`. Suite is green: **46 passed**.
+
+**5.2 completion notes (2026-06-11):**
+- New browser specs: `tickets.spec.ts` (ticket close → parts consumed FIFO) and
+  `pulls.spec.ts` (fulfill 2-of-3 → pull + line settle SHORT, stock −2). The
+  fixme'd offline sale test in `sale.spec.ts` is now real: synthetic window
+  `offline` event (no service worker in dev, so a network-level offline would
+  break the post-queue reload), poll IndexedDB until the persister flushes the
+  paused `["sales"]` mutation, reload, rehydrate-replay; asserts unit SOLD with
+  **exactly one** SOLD movement (no dup on replay).
+- Harness hardening found en route: scan input now driven by a single in-page
+  keydown burst (the wedge buffer resets on >50ms inter-key gaps and per-key
+  CDP typing stalls past that under load); `playwright.config.ts` pinned to
+  `127.0.0.1:5173` + `--strictPort` (a foreign dev server squatting
+  `[::1]:5173` silently intercepted the suite) with the matching loopback
+  origin added to `BACKEND_CORS_ORIGINS`; reset-password specs navigate the
+  emailed link baseURL-relative; `workers: 1` enforced in config.
+- Known debt (→ 5.4 test-infra hardening): the shared dev DB accumulates
+  ~5 products + ~4 customers per full run, and `list_products` /
+  `list_customers` / `list_projects` are unordered `LIMIT 100` — once a table
+  crosses 100 rows, freshly seeded rows silently vanish from screen catalogs
+  and scans/pickers fail confusingly. Reset recipe: truncate app tables, then
+  `docker compose up -d prestart`. Durable fix: `ORDER BY created_at DESC` on
+  those list endpoints + per-run DB isolation. Suite at completion: **175
+  passed**, 4 consecutive green full runs.
 
 ---
 
