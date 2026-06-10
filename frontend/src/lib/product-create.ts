@@ -47,6 +47,9 @@ export function buildProductPayload(d: ProductDraft): ProductCreate {
   const minStock = d.minStock.trim()
   if (brand) payload.brand = brand
   if (category) payload.category = category
-  if (minStock !== "") payload.default_min_stock_level = Number(minStock)
+  const minStockNum = Number(minStock)
+  if (minStock !== "" && Number.isFinite(minStockNum) && minStockNum >= 0) {
+    payload.default_min_stock_level = minStockNum
+  }
   return payload
 }

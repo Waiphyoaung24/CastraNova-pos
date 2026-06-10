@@ -199,6 +199,8 @@ function Products() {
               <TableRow>
                 <TableHead>SKU</TableHead>
                 <TableHead>Model</TableHead>
+                <TableHead>Brand</TableHead>
+                <TableHead>Category</TableHead>
                 <TableHead>Tracking</TableHead>
                 <TableHead className="text-right">Retail</TableHead>
                 <TableHead className="text-right">Repair</TableHead>
@@ -210,6 +212,12 @@ function Products() {
                 <TableRow key={p.id}>
                   <TableCell className="num font-medium">{p.sku}</TableCell>
                   <TableCell>{p.model_name}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {p.brand ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {p.category ?? "—"}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary">
                       {p.tracking_mode ?? "QUANTITY"}
@@ -269,7 +277,8 @@ function PriceHistoryDialog({
   sku: string
 }) {
   const [open, setOpen] = useState(false)
-  const { data, isPending, isError } = useQuery({
+  // isLoading (not isPending) so a disabled/closed query doesn't show "Loading…".
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["price-history", productId],
     queryFn: () => ProductsService.readPriceHistory({ productId }),
     enabled: open,
@@ -287,7 +296,7 @@ function PriceHistoryDialog({
         <DialogHeader>
           <DialogTitle>Price history — {sku}</DialogTitle>
         </DialogHeader>
-        {isPending ? (
+        {isLoading ? (
           <p className="text-muted-foreground py-4 text-center text-sm">
             Loading…
           </p>

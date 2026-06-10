@@ -28,6 +28,18 @@ test("canCreateProduct requires sku, model, and valid non-negative prices", () =
   expect(canCreateProduct({ ...base, retailPrice: "-5" })).toBe(false)
 })
 
+test("buildProductPayload drops a non-numeric or negative min stock level", () => {
+  expect(
+    buildProductPayload({ ...base, minStock: "abc" }).default_min_stock_level,
+  ).toBeUndefined()
+  expect(
+    buildProductPayload({ ...base, minStock: "-1" }).default_min_stock_level,
+  ).toBeUndefined()
+  expect(
+    buildProductPayload({ ...base, minStock: "5" }).default_min_stock_level,
+  ).toBe(5)
+})
+
 test("buildProductPayload trims, sends prices as strings, drops blank optionals", () => {
   expect(
     buildProductPayload({

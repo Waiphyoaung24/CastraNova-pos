@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
+import { useId, useState } from "react"
 
 import { AuditService, type MovementType } from "@/client"
 import { Badge } from "@/components/ui/badge"
@@ -44,6 +44,9 @@ const EVENT_TYPES: MovementType[] = [
 ]
 
 function Audit() {
+  const eventId = useId()
+  const fromId = useId()
+  const toId = useId()
   const [filter, setFilter] = useState<AuditFilter>({
     eventType: "",
     fromDate: "",
@@ -68,14 +71,14 @@ function Audit() {
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="event">Event</Label>
+          <Label htmlFor={eventId}>Event</Label>
           <Select
             value={filter.eventType || ALL}
             onValueChange={(v) =>
               setFilter((f) => ({ ...f, eventType: v === ALL ? "" : v }))
             }
           >
-            <SelectTrigger id="event" className="w-full sm:w-48">
+            <SelectTrigger id={eventId} className="w-full sm:w-48">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -89,9 +92,9 @@ function Audit() {
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="from">From</Label>
+          <Label htmlFor={fromId}>From</Label>
           <Input
-            id="from"
+            id={fromId}
             type="date"
             value={filter.fromDate}
             onChange={(e) =>
@@ -101,9 +104,9 @@ function Audit() {
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="to">To</Label>
+          <Label htmlFor={toId}>To</Label>
           <Input
-            id="to"
+            id={toId}
             type="date"
             value={filter.toDate}
             onChange={(e) =>
