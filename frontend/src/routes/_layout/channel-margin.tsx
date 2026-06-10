@@ -18,6 +18,13 @@ import {
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { downloadReport } from "@/lib/report-download"
+import {
+  channelMarginExport,
+  currentMonth,
+  formatThb,
+  isValidMonth,
+  type ReportFormat,
+} from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
 
 // Admin-only: revenue/COGS/margin are financial fields redacted from staff.
@@ -29,23 +36,10 @@ export const Route = createFileRoute("/_layout/channel-margin")({
   }),
 })
 
-const fmtThb = (v: string) =>
-  `฿${new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number(v))}`
-
-// Current month as YYYY-MM, the shape the backend expects (and what an
-// <input type="month"> emits).
-function currentMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-}
-
 function ChannelMargin() {
   const { showErrorToast } = useCustomToast()
   const [month, setMonth] = useState(currentMonth())
-  const validMonth = /^\d{4}-\d{2}$/.test(month)
+  const validMonth = isValidMonth(month)
 
   const { data, isPending, isError } = useQuery({
     queryKey: ["channel-margin", month],
@@ -53,12 +47,10 @@ function ChannelMargin() {
     enabled: validMonth,
   })
 
-  async function handleExport(fmt: "pdf" | "xlsx") {
+  async function handleExport(fmt: ReportFormat) {
     try {
-      await downloadReport(
-        `/api/v1/reports/channel-margin.${fmt}?month=${month}`,
-        `channel-margin-${month}.${fmt}`,
-      )
+      const { path, filename } = channelMarginExport(month, fmt)
+      await downloadReport(path, filename)
     } catch (e) {
       showErrorToast(e instanceof Error ? e.message : "Export failed.")
     }
@@ -137,13 +129,13 @@ function ChannelMargin() {
               <TableRow key={r.channel}>
                 <TableCell className="font-medium">{r.channel}</TableCell>
                 <TableCell className="num text-right">
-                  {fmtThb(r.revenue_thb)}
+                  {formatThb(r.revenue_thb)}
                 </TableCell>
                 <TableCell className="num text-right">
-                  {fmtThb(r.cogs_thb)}
+                  {formatThb(r.cogs_thb)}
                 </TableCell>
                 <TableCell className="num text-right">
-                  {fmtThb(r.margin_thb)}
+                  {formatThb(r.margin_thb)}
                 </TableCell>
               </TableRow>
             ))}
@@ -152,13 +144,13 @@ function ChannelMargin() {
             <TableRow>
               <TableCell className="font-medium">Total</TableCell>
               <TableCell className="num text-right">
-                {fmtThb(data.total_revenue_thb)}
+                {formatThb(data.total_revenue_thb)}
               </TableCell>
               <TableCell className="num text-right">
-                {fmtThb(data.total_cogs_thb)}
+                {formatThb(data.total_cogs_thb)}
               </TableCell>
               <TableCell className="num text-right">
-                {fmtThb(data.total_margin_thb)}
+                {formatThb(data.total_margin_thb)}
               </TableCell>
             </TableRow>
           </TableFooter>

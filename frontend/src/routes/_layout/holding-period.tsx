@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { downloadReport } from "@/lib/report-download"
+import { holdingPeriodExport, type ReportFormat } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
 
 // Admin-only: holding period exposes received_at/cost-adjacent ageing the
@@ -39,12 +40,10 @@ function HoldingPeriod() {
     queryFn: () => ReportsService.holdingPeriod({ overThresholdOnly }),
   })
 
-  async function handleExport(fmt: "pdf" | "xlsx") {
+  async function handleExport(fmt: ReportFormat) {
     try {
-      await downloadReport(
-        `/api/v1/reports/holding-period.${fmt}?over_threshold_only=${overThresholdOnly}`,
-        `holding-period.${fmt}`,
-      )
+      const { path, filename } = holdingPeriodExport(overThresholdOnly, fmt)
+      await downloadReport(path, filename)
     } catch (e) {
       showErrorToast(e instanceof Error ? e.message : "Export failed.")
     }
