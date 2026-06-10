@@ -1,4 +1,11 @@
-import { Home, PackagePlus, ShoppingCart, Users, Wrench } from "lucide-react"
+import {
+  ClipboardList,
+  Home,
+  PackagePlus,
+  ShoppingCart,
+  Users,
+  Wrench,
+} from "lucide-react"
 
 import { SidebarAppearance } from "@/components/Common/Appearance"
 import { Logo } from "@/components/Common/Logo"
@@ -22,6 +29,8 @@ const baseItems: Item[] = [
   { icon: PackagePlus, title: "Receive", path: "/receive" },
   // Tickets: staff + admin maintenance flow (FR-008). Online-only, no cost.
   { icon: Wrench, title: "Tickets", path: "/tickets" },
+  // Pulls: staff + admin fulfill; admin create/cancel (FR-009). Online-only, no cost.
+  { icon: ClipboardList, title: "Pulls", path: "/pulls" },
 ]
 
 // Admin-only (admin = is_superuser || BKK_ADMIN, per the role matrix); backend
