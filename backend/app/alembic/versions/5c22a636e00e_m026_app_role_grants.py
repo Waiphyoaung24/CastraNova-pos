@@ -10,6 +10,7 @@ Create Date: 2026-06-11 15:53:47.581109
 
 """
 import os
+import re
 
 from alembic import op
 import sqlalchemy as sa
@@ -31,6 +32,10 @@ def _role():
     role = os.environ.get("POSTGRES_APP_USER", "")
     if not role:
         return None  # role not configured — grants are a no-op (e.g. CI without env)
+    # The role name is interpolated into GRANT/REVOKE statements below —
+    # guard against injection via a malicious/typo'd env value.
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", role):
+        raise RuntimeError("POSTGRES_APP_USER must match [a-z][a-z0-9_]{0,62}")
     conn = op.get_bind()
     exists = conn.execute(
         sa.text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role}
@@ -56,13 +61,18 @@ def upgrade():
         f"GRANT USAGE, SELECT ON SEQUENCES TO {q}"
     )
     # Spec §4.6: REVOKE on the append-only ledgers — now real (non-superuser role).
+    # FUTURE LEDGER NOTE: any ledger table added in a later migration must
+    # explicitly REVOKE UPDATE, DELETE from the app role in that migration —
+    # the DEFAULT PRIVILEGES above grant UPDATE to new tables by default.
     for t in LEDGERS:
         op.execute(f"REVOKE UPDATE, DELETE ON {t} FROM {q}")
     # Hard-deletes exist only on "user": delete_user_me + delete_user in
     # app/api/routes/users.py (the only session.delete() calls in the codebase;
     # the item table with its CASCADE FK was dropped in 6177c90e7673).
     op.execute(f'GRANT DELETE ON "user" TO {q}')
-    # alembic_version stays admin-only. No DDL, no table ownership.
+    # alembic_version stays admin-only (an app role that could UPDATE it could
+    # skip future security migrations). No DDL, no table ownership.
+    op.execute(f"REVOKE ALL ON alembic_version FROM {q}")
 
 
 def downgrade():
