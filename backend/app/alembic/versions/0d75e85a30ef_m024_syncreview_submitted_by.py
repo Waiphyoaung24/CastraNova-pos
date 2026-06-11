@@ -20,8 +20,15 @@ depends_on = None
 def upgrade():
     op.add_column('syncreviewitem', sa.Column('submitted_by_user_id', sa.Uuid(), nullable=True))
     op.create_foreign_key('fk_syncreviewitem_submitted_by_user_id', 'syncreviewitem', 'user', ['submitted_by_user_id'], ['id'], ondelete='SET NULL')
+    # ON DELETE SET NULL maintenance path scans this column on user deletion.
+    op.create_index(
+        "ix_syncreviewitem_submitted_by_user_id",
+        "syncreviewitem", ["submitted_by_user_id"],
+        postgresql_where=sa.text("submitted_by_user_id IS NOT NULL"),
+    )
 
 
 def downgrade():
+    op.drop_index("ix_syncreviewitem_submitted_by_user_id", table_name="syncreviewitem")
     op.drop_constraint('fk_syncreviewitem_submitted_by_user_id', 'syncreviewitem', type_='foreignkey')
     op.drop_column('syncreviewitem', 'submitted_by_user_id')

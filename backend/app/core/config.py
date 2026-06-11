@@ -146,6 +146,10 @@ class Settings(BaseSettings):
         self._check_default_secret(
             "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD
         )
+        if self.POSTGRES_APP_PASSWORD:
+            self._check_default_secret(
+                "POSTGRES_APP_PASSWORD", self.POSTGRES_APP_PASSWORD
+            )
 
         return self
 

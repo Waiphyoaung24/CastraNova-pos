@@ -997,6 +997,12 @@ class SyncReviewItem(SQLModel, table=True):
             "idempotency_key", name="uq_syncreviewitem_idempotency_key"
         ),
         Index("ix_syncreviewitem_state_created", "state", "created_at"),
+        Index(
+            "ix_syncreviewitem_submitted_by_user_id",
+            "submitted_by_user_id",
+            unique=False,
+            postgresql_where=text("submitted_by_user_id IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

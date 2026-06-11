@@ -4,6 +4,13 @@ Least-privilege runtime role grants (hardening spec §4.2.3 / spec §4.6).
 The role itself is created by app/ensure_app_role.py (prestart, before
 `alembic upgrade head`) — secrets stay in env, never in migrations.
 
+RECOVERY NOTE (bootstrap gap): if this migration ran in an environment WITHOUT
+POSTGRES_APP_USER set (e.g. CI), it no-ops but is still stamped as applied.
+To apply the grants later: set the env vars, run `python app/ensure_app_role.py`,
+then re-execute this revision's grants by stamping back and upgrading:
+  alembic stamp 311a921ce5e2 && alembic upgrade head
+(Pre-deploy checklist item for Part 5.4.)
+
 Revision ID: 5c22a636e00e
 Revises: 311a921ce5e2
 Create Date: 2026-06-11 15:53:47.581109
@@ -24,6 +31,7 @@ depends_on = None
 
 # Append-only ledgers (M021 triggers); spec §4.6 REVOKE now bites because the
 # app connects as a non-superuser role.
+# syncreviewitem is intentionally excluded: its resolve workflow requires UPDATE.
 LEDGERS = ("unitmovement", "partmovement", "costline", "pricechange", "notificationlog")
 
 
