@@ -12,7 +12,12 @@ from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.core import security
 from app.core.config import settings
-from app.core.limiter import LOGIN_RATE_LIMIT, limiter
+from app.core.limiter import (
+    LOGIN_RATE_LIMIT,
+    LOGOUT_RATE_LIMIT,
+    REFRESH_RATE_LIMIT,
+    limiter,
+)
 from app.models import (
     Message,
     NewPassword,
@@ -76,6 +81,7 @@ def login_access_token(
 
 
 @router.post("/login/refresh-token")
+@limiter.limit(REFRESH_RATE_LIMIT)
 def refresh_access_token(
     request: Request, response: Response, session: SessionDep
 ) -> Token:
@@ -114,7 +120,11 @@ def refresh_access_token(
 
 
 @router.post("/login/logout")
-def logout(response: Response) -> Message:
+@limiter.limit(LOGOUT_RATE_LIMIT)
+def logout(
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
+    response: Response,
+) -> Message:
     """
     Clear the refresh cookie.
     """

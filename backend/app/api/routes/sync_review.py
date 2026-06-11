@@ -1,10 +1,11 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app import crud
 from app.api.deps import AdminUser, CurrentUser, SessionDep, get_admin
+from app.core.limiter import SYNC_INGEST_RATE_LIMIT, limiter
 from app.models import (
     SyncReviewItemCreate,
     SyncReviewItemPublic,
@@ -20,8 +21,10 @@ router = APIRouter(prefix="/sync-review", tags=["sync-review"])
     "",
     response_model=SyncReviewItemStaffPublic,
 )
+@limiter.limit(SYNC_INGEST_RATE_LIMIT)
 def ingest_sync_review_item(
     *,
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
     session: SessionDep,
     current_user: CurrentUser,
     data: SyncReviewItemCreate,
