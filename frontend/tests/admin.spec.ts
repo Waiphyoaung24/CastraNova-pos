@@ -93,7 +93,11 @@ test.describe("Admin user management", () => {
     await page.getByRole("button", { name: "Save" }).click()
 
     await expect(page.getByText("User updated successfully")).toBeVisible()
-    await expect(page.getByText(updatedName)).toBeVisible()
+    // Scope to the user's own row — a page-wide getByText flakes once the
+    // table paginates (>100 users) or other specs add rows concurrently.
+    await expect(
+      page.getByRole("row").filter({ hasText: email }).getByText(updatedName),
+    ).toBeVisible()
   })
 
   test("Delete a user successfully", async ({ page }) => {
