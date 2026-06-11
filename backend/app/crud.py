@@ -153,6 +153,21 @@ def get_or_replay(
     return obj, False
 
 
+def _assert_replay_actor(
+    *, stored_user_id: uuid.UUID, caller_user_id: uuid.UUID
+) -> None:
+    """Same-key replays must come from the original actor (spec §6.6 addendum).
+
+    Client idempotency keys are 122-bit UUIDs; a same-key/different-user hit is
+    a stolen/duplicated key, never a legitimate offline retry.
+    """
+    if stored_user_id != caller_user_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key was already used by a different user.",
+        )
+
+
 def seed_locations(*, session: Session) -> None:
     """Idempotently seed the fixed warehouse + virtual locations."""
     seeds = [
@@ -480,6 +495,12 @@ def receive_serialized(
     # commit is atomic, so a partial match means a tampered/foreign row, not a
     # legitimate prior receive — fall through and let UNIQUE catch it).
     if len(replay) == len(move_keys):
+        if replay:
+            # All units of one receipt share the actor — bind on the first.
+            _assert_replay_actor(
+                stored_user_id=next(iter(replay.values())).received_by_user_id,
+                caller_user_id=received_by_user_id,
+            )
         return [replay[key] for key in move_keys]
 
     state = assert_unit_transition(UnitState.RECEIVED, MovementType.RECEIVED)
@@ -515,6 +536,11 @@ def receive_serialized(
         # already expires the in-memory objects we mutated).
         session.rollback()
         replay = _units_by_movement_key(session=session, move_keys=move_keys)
+        if replay:
+            _assert_replay_actor(
+                stored_user_id=next(iter(replay.values())).received_by_user_id,
+                caller_user_id=received_by_user_id,
+            )
         return [replay[key] for key in move_keys if key in replay]
     for unit in units:
         session.refresh(unit)
@@ -611,6 +637,10 @@ def receive_quantity(
     §11)."""
     replay = _batch_for_receive_key(session=session, idempotency_key=idempotency_key)
     if replay is not None:
+        _assert_replay_actor(
+            stored_user_id=replay.received_by_user_id,
+            caller_user_id=received_by_user_id,
+        )
         return replay
 
     product = session.get(Product, product_id)
@@ -668,6 +698,10 @@ def receive_quantity(
         )
         if replay is None:
             raise
+        _assert_replay_actor(
+            stored_user_id=replay.received_by_user_id,
+            caller_user_id=received_by_user_id,
+        )
         return replay
     session.refresh(batch)
     return batch
@@ -1555,6 +1589,10 @@ def create_sale(
     existing sale, S6)."""
     replay = _sale_by_key(session=session, idempotency_key=idempotency_key)
     if replay is not None:
+        _assert_replay_actor(
+            stored_user_id=replay.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
         return replay
 
     if not session.get(Customer, customer_id):
@@ -1790,6 +1828,10 @@ def create_sale(
         winner = _sale_by_key(session=session, idempotency_key=idempotency_key)
         if winner is None:
             raise
+        _assert_replay_actor(
+            stored_user_id=winner.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
         return winner
     session.refresh(sale)
     return sale
@@ -1834,10 +1876,14 @@ def open_service_ticket(
         )
     ).first()
     if existing is not None:
+        _assert_replay_actor(
+            stored_user_id=existing.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
         return existing
     if not session.get(Customer, customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
-    ticket, _ = get_or_replay(
+    ticket, replayed = get_or_replay(
         session=session,
         statement=select(ServiceTicket).where(
             ServiceTicket.idempotency_key == idempotency_key
@@ -1850,6 +1896,12 @@ def open_service_ticket(
             idempotency_key=idempotency_key,
         ),
     )
+    if replayed:
+        # Concurrent same-key writer won the UNIQUE race — still bind the actor.
+        _assert_replay_actor(
+            stored_user_id=ticket.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
     return ticket
 
 
