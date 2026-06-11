@@ -1168,6 +1168,8 @@ export type SyncReviewIngestSyncReviewItemData = {
 export type SyncReviewIngestSyncReviewItemResponse = (SyncReviewItemStaffPublic);
 
 export type SyncReviewListSyncReviewItemsData = {
+    limit?: number;
+    skip?: number;
     state?: (SyncReviewState | null);
 };
 

@@ -12,6 +12,8 @@ BOUNDED_LIST_PATHS = [
     "/suppliers/",
     "/projects/",
     "/project-pulls",
+    "/audit",
+    "/sync-review",
 ]
 
 

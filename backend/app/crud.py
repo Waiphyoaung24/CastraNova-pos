@@ -1474,12 +1474,16 @@ def get_sync_review_item(
 
 
 def list_sync_review_items(
-    *, session: Session, state: SyncReviewState | None = None
+    *,
+    session: Session,
+    state: SyncReviewState | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[SyncReviewItem]:
     stmt = select(SyncReviewItem)
     if state is not None:
         stmt = stmt.where(col(SyncReviewItem.state) == state)
-    stmt = stmt.order_by(col(SyncReviewItem.created_at))
+    stmt = stmt.order_by(col(SyncReviewItem.created_at)).offset(skip).limit(limit)
     return list(session.exec(stmt).all())
 
 

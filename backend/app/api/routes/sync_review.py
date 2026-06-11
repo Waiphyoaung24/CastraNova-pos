@@ -1,6 +1,7 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app import crud
 from app.api.deps import AdminUser, SessionDep, get_admin, get_current_user
@@ -40,9 +41,13 @@ def list_sync_review_items(
     *,
     session: SessionDep,
     state: SyncReviewState | None = None,
+    skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[SyncReviewItemPublic]:
     """Admin review queue, optionally filtered by state (FR-021)."""
-    items = crud.list_sync_review_items(session=session, state=state)
+    items = crud.list_sync_review_items(
+        session=session, state=state, skip=skip, limit=limit
+    )
     return [SyncReviewItemPublic.model_validate(i) for i in items]
 
 
