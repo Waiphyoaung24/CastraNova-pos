@@ -1,6 +1,7 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_admin, get_current_user
@@ -54,8 +55,8 @@ def read_project_pulls(
     *,
     session: SessionDep,
     state: ProjectPullState | None = None,
-    skip: int = 0,
-    limit: int = 100,
+    skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[ProjectPullPublic]:
     pulls = crud.list_project_pulls(
         session=session, state=state, skip=skip, limit=limit

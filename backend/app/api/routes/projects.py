@@ -1,6 +1,7 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_admin, is_admin
@@ -20,7 +21,9 @@ router = APIRouter(prefix="/projects", tags=["projects"])
     "/", response_model=list[ProjectPublic], dependencies=[Depends(get_admin)]
 )
 def read_projects(
-    session: SessionDep, skip: int = 0, limit: int = 100
+    session: SessionDep,
+    skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[ProjectPublic]:
     return crud.list_projects(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
 
