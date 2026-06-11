@@ -223,7 +223,10 @@ class SystemSetting(SQLModel, table=True):
     key: str = Field(unique=True, index=True, max_length=64)
     value: Any = Field(sa_column=Column(JSONB, nullable=False))
     updated_by_user_id: uuid.UUID | None = Field(
-        default=None, foreign_key="user.id"
+        default=None,
+        sa_column=Column(
+            Uuid(), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+        ),
     )
     updated_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -370,6 +373,11 @@ class ProductBase(SQLModel):
 
 
 class Product(ProductBase, table=True):
+    __table_args__ = (
+        CheckConstraint("retail_price_thb >= 0", name="ck_product_retail_price_nonneg"),
+        CheckConstraint("repair_price_thb >= 0", name="ck_product_repair_price_nonneg"),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -1114,6 +1122,7 @@ class SaleLine(SQLModel, table=True):
             "line_kind != 'UNIT' OR unit_id IS NOT NULL",
             name="ck_saleline_unit_requires_unit_id",
         ),
+        CheckConstraint("quantity > 0", name="ck_saleline_quantity_positive"),
         # An override applies to at most one line (nullable unique → many NULLs OK).
         UniqueConstraint(
             "pricing_override_request_id",
