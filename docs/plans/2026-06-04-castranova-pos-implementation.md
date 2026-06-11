@@ -692,6 +692,25 @@ No new schema except `sync_review_item` (M020).
 | 5.2 Playwright E2E ✅ (done 2026-06-11) | 5 paths: receive (serial+qty), sale online, **sale offline→reconnect→replay**, ticket close, pull fulfill (with short) | Offline queue survives reload; no dup on replay |
 | 5.4 Deploy | Hostinger KVM 8: Traefik + Let's Encrypt + `pg_dump` cron + Sentry DSN; seed import; LINE/Viber bot enroll 10 users; BT scanner (TYSSO/Posiflex) tuning | Restore drill on staging; 8h offline drill |
 
+**Pre-deploy hardening pass (done 2026-06-12, spec
+`docs/superpowers/specs/2026-06-11-castranova-predeploy-hardening-design.md`):**
+three stacked PRs (#6 catalog ordering/bounds → #7 security → #8 E2E infra) +
+DoD sweep. Highlights: least-privilege `castranova_app` runtime role (the whole
+suite + E2E run as it — spec §4.6 REVOKE finally real), replay user-binding,
+sync-review submitter audit, rate limits on refresh/logout/pricing/sync-ingest,
+YGN_STAFF default, refresh 7d, redaction lock tests, movement→service-ticket
+FKs, ordered+bounded list endpoints, per-run E2E DB reset. DoD verified:
+coverage **91%** on crud+api (gate 80%), append-only proven at DB level as the
+app role, FIFO + redaction suites green, autogenerate drift empty, 455 backend
++ 176 E2E green. **Carried to 5.4 checklist:** SECRET_KEY/.env rotation;
+M026 no-op-on-CI grant recovery (note in migration docstring); prestart
+password-rotation ordering (backend_pre_start connects as app role BEFORE
+ensure_app_role rotates — reorder or use admin URI); ACCESS_TOKEN_EXPIRE 8d vs
+spec §6.2 30min (needs frontend silent-refresh decision); proxy-aware
+rate-limit key; refresh-token denylist; migration-lock runbook (NOT VALID
+pattern); stockadjustment not trigger/REVOKE-protected (pre-existing M021
+scope); admin UI has no control to grant BKK_ADMIN (promotion is API-only).
+
 **E2E suite stabilization (done 2026-06-07, prerequisite for 5.2):**
 - Removed stale template specs `tests/items.spec.ts` (drove the removed `/items`
   route) and `tests/sign-up.spec.ts` (drove the removed `/signup` route); repointed
