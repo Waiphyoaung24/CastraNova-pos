@@ -49,6 +49,27 @@ def test_list_products_newest_first(db: Session) -> None:
     assert ids.index(second.id) < ids.index(first.id)
 
 
+def test_list_products_boundary_newest_within_default_page(db: Session) -> None:
+    """Regression lock for the original incident: with >100 products, the
+    newest one must still appear within the default LIMIT-100 page."""
+    last = None
+    for i in range(101):
+        last = crud.create_product(
+            session=db,
+            product_in=ProductCreate(
+                sku=f"ORD-PAGE-{i}-{_suffix()}",
+                model_name=f"Ordering Page {i}",
+                tracking_mode=TrackingMode.QUANTITY,
+                retail_price_thb="50.00",
+                repair_price_thb="10.00",
+            ),
+        )
+    assert last is not None
+    listed = crud.list_products(session=db, skip=0, limit=100)
+    assert len(listed) == 100
+    assert last.id in [p.id for p in listed]
+
+
 def test_list_customers_newest_first(db: Session) -> None:
     first = crud.create_customer(
         session=db, customer_in=CustomerCreate(name=f"Ordering Cust A {_suffix()}")
