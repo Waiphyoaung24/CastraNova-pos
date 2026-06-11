@@ -11,6 +11,7 @@ from app import crud
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.models import ProductCreate, SyncReviewItem, TrackingMode
+from tests.conftest import admin_engine
 
 
 @pytest.fixture
@@ -110,7 +111,6 @@ def test_thirty_first_pricing_override_is_rate_limited(
 def test_121st_sync_ingest_is_rate_limited(
     client: TestClient,
     staff_token_headers: dict[str, str],
-    db: Session,
     rate_limit_on: None,  # noqa: ARG001 — side-effect fixture; enables rate limiting
 ) -> None:
     """Sync-review ingest is rate limited (hardening spec §4.1.4)."""
@@ -137,8 +137,13 @@ def test_121st_sync_ingest_is_rate_limited(
         assert "Rate limit" in r121.json().get("error", "")
     finally:
         # 120 leftover PENDING rows would drown later list tests (limit=100);
-        # remove exactly the rows this test created.
+        # remove exactly the rows this test created. Test-only cleanup runs on
+        # the admin engine — the app role has no DELETE on syncreviewitem
+        # (M026 grants are scoped to real app delete paths only).
         ids = [uuid.UUID(r.json()["id"]) for r in responses if r.status_code == 200]
         if ids:
-            db.execute(delete(SyncReviewItem).where(col(SyncReviewItem.id).in_(ids)))
-            db.commit()
+            with Session(admin_engine) as admin_session:
+                admin_session.execute(
+                    delete(SyncReviewItem).where(col(SyncReviewItem.id).in_(ids))
+                )
+                admin_session.commit()

@@ -1,13 +1,14 @@
-"""DB-level append-only enforcement (M021 triggers) + scheduled CHECK
-constraints. These assert the Postgres triggers fire even against the
-superuser connection the app uses, and that the new CHECK constraints reject
-bad rows."""
+"""DB-level append-only enforcement (M021 triggers + M026 role grants) and
+scheduled CHECK constraints. With the least-privilege app role configured
+(hardening spec §4.2.3) the REVOKE denies ledger UPDATE/DELETE outright; on
+the admin fallback connection the M021 triggers still fire."""
 
 import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy import create_engine
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlmodel import Session, select, text
 
 from app import crud
@@ -181,7 +182,10 @@ def test_update_rejected_on_ledger(
                 text(f"UPDATE {table} SET {_UPDATE_SETS[table]} WHERE id = :id"),
                 {"id": str(row_id)},
             )
-        assert "append-only" in str(exc.value)
+        # App role: REVOKE denies before the trigger fires ("permission denied");
+        # admin fallback: the M021 trigger raises ("append-only").
+        msg = str(exc.value)
+        assert "append-only" in msg or "permission denied" in msg
     finally:
         db.rollback()
 
@@ -199,9 +203,56 @@ def test_delete_rejected_on_ledger(
             db.execute(
                 text(f"DELETE FROM {table} WHERE id = :id"), {"id": str(row_id)}
             )
-        assert "append-only" in str(exc.value)
+        # App role: REVOKE denies before the trigger fires ("permission denied");
+        # admin fallback: the M021 trigger raises ("append-only").
+        msg = str(exc.value)
+        assert "append-only" in msg or "permission denied" in msg
     finally:
         db.rollback()
+
+
+# --- least-privilege app role (M026 grants, hardening spec §4.2.3) -------------
+
+requires_app_role = pytest.mark.skipif(
+    not settings.POSTGRES_APP_USER, reason="app role not configured"
+)
+
+
+@requires_app_role
+@pytest.mark.parametrize(
+    "table",
+    ["unitmovement", "partmovement", "costline", "pricechange", "notificationlog"],
+)
+def test_app_role_cannot_truncate_ledger(table: str) -> None:
+    # Fresh engine so a denied statement can't poison the shared pool.
+    app_engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+    try:
+        with app_engine.connect() as conn:
+            with pytest.raises(ProgrammingError) as exc:
+                conn.execute(text(f"TRUNCATE TABLE {table}"))
+            assert "permission denied" in str(exc.value)
+            conn.rollback()
+    finally:
+        app_engine.dispose()
+
+
+@requires_app_role
+def test_app_role_cannot_disable_triggers_or_ddl() -> None:
+    app_engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+    try:
+        with app_engine.connect() as conn:
+            # Disabling the M021 append-only triggers requires table ownership.
+            with pytest.raises(ProgrammingError) as exc:
+                conn.execute(text("ALTER TABLE unitmovement DISABLE TRIGGER ALL"))
+            assert "must be owner" in str(exc.value)
+            conn.rollback()
+            # So does any destructive DDL.
+            with pytest.raises(ProgrammingError) as exc:
+                conn.execute(text("DROP TABLE unitmovement"))
+            assert "must be owner" in str(exc.value)
+            conn.rollback()
+    finally:
+        app_engine.dispose()
 
 
 def test_select_still_allowed_on_ledger(

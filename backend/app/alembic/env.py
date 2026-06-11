@@ -31,7 +31,9 @@ target_metadata = SQLModel.metadata
 
 
 def get_url():
-    return str(settings.SQLALCHEMY_DATABASE_URI)
+    # Migrations always run on the admin connection — the least-privilege app
+    # role (POSTGRES_APP_USER) has no DDL rights (hardening spec §4.2.3).
+    return str(settings.SQLALCHEMY_ADMIN_DATABASE_URI)
 
 
 def run_migrations_offline():
