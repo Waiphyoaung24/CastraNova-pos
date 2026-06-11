@@ -135,6 +135,8 @@ def test_receive_serialized_replay_same_user_returns_same_units(db: Session) -> 
         received_by_user_id=actor.id,
     )
     assert [u.id for u in replay] == [u.id for u in first]
+    # Identity is pinned from the stored row, not rebuilt from the caller.
+    assert replay[0].received_by_user_id == actor.id
 
 
 # --- receive_quantity ----------------------------------------------------------
@@ -191,6 +193,8 @@ def test_receive_quantity_replay_same_user_returns_same_batch(db: Session) -> No
         received_by_user_id=actor.id,
     )
     assert replay.id == first.id
+    # Identity is pinned from the stored row, not rebuilt from the caller.
+    assert replay.received_by_user_id == actor.id
 
 
 # --- create_sale ----------------------------------------------------------------
@@ -254,6 +258,8 @@ def test_create_sale_replay_same_user_returns_same_sale(db: Session) -> None:
         created_by_user_id=actor.id,
     )
     assert replay.id == sale_id
+    # Identity is pinned from the stored row, not rebuilt from the caller.
+    assert replay.created_by_user_id == actor.id
 
 
 # --- open_service_ticket ---------------------------------------------------------
@@ -308,3 +314,5 @@ def test_open_service_ticket_replay_same_user_returns_same_ticket(
         created_by_user_id=actor.id,
     )
     assert replay.id == first.id
+    # Identity is pinned from the stored row, not rebuilt from the caller.
+    assert replay.created_by_user_id == actor.id

@@ -494,13 +494,13 @@ def receive_serialized(
     # Only treat as a replay when *every* piece is already present (the receive
     # commit is atomic, so a partial match means a tampered/foreign row, not a
     # legitimate prior receive — fall through and let UNIQUE catch it).
-    if len(replay) == len(move_keys):
-        if replay:
-            # All units of one receipt share the actor — bind on the first.
-            _assert_replay_actor(
-                stored_user_id=next(iter(replay.values())).received_by_user_id,
-                caller_user_id=received_by_user_id,
-            )
+    if len(replay) == len(move_keys) and replay:
+        # All units of one receipt share the actor — bind on the first.
+        # (A zero-piece request falls through as a harmless non-replay.)
+        _assert_replay_actor(
+            stored_user_id=next(iter(replay.values())).received_by_user_id,
+            caller_user_id=received_by_user_id,
+        )
         return [replay[key] for key in move_keys]
 
     state = assert_unit_transition(UnitState.RECEIVED, MovementType.RECEIVED)
@@ -1820,6 +1820,9 @@ def create_sale(
         # surface it as a clean 409 instead of looking up a non-existent winner
         # and re-raising a raw 500 (the FOR UPDATE pre-check normally prevents
         # reaching here, but the DB constraint is the backstop).
+        # Override collision is not an idempotency race — no winner row exists
+        # to bind, so the actor check below is intentionally not reached on
+        # this path.
         if "pricing_override_request_id" in str(exc.orig):
             raise HTTPException(
                 status_code=409, detail="Override already applied to a line"
