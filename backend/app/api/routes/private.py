@@ -8,6 +8,7 @@ from app.core.security import get_password_hash
 from app.models import (
     User,
     UserPublic,
+    UserRole,
 )
 
 router = APIRouter(tags=["private"], prefix="/private")
@@ -18,6 +19,7 @@ class PrivateUserCreate(BaseModel):
     password: str
     full_name: str
     is_verified: bool = False
+    role: UserRole = UserRole.YGN_STAFF
 
 
 @router.post("/users/", response_model=UserPublic)
@@ -30,6 +32,7 @@ def create_user(user_in: PrivateUserCreate, session: SessionDep) -> Any:
         email=user_in.email,
         full_name=user_in.full_name,
         hashed_password=get_password_hash(user_in.password),
+        role=user_in.role,
     )
 
     session.add(user)
