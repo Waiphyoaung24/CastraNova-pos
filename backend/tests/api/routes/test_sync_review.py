@@ -11,7 +11,10 @@ from app.models import (
     SyncReviewItemCreate,
     SyncReviewReason,
     SyncReviewState,
+    UserCreate,
 )
+from tests.utils.user import user_authentication_headers
+from tests.utils.utils import random_email, random_lower_string
 
 
 def _admin_id(db: Session) -> uuid.UUID:
@@ -287,6 +290,36 @@ def test_admin_resolves_item(
     assert body["state"] == "DISCARDED"
     assert body["resolved_by_user_id"] is not None
     assert body["resolved_at"] is not None
+
+
+def test_deleting_submitter_keeps_item_with_null_submitter(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    """ON DELETE SET NULL keeps the audit row when the submitter is deleted
+    (DB review fix)."""
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db, user_create=UserCreate(email=email, password=password)
+    )
+    headers = user_authentication_headers(
+        client=client, email=email, password=password
+    )
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=headers
+    )
+    assert r.status_code == 200
+    item_id = uuid.UUID(r.json()["id"])
+
+    r = client.delete(
+        f"{settings.API_V1_STR}/users/{user.id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+
+    db.expire_all()  # the delete ran in the API's session; drop stale state
+    item = crud.get_sync_review_item(session=db, item_id=item_id)
+    assert item is not None  # audit row retained
+    assert item.submitted_by_user_id is None  # submitter becomes unknown
 
 
 def test_resolve_404(

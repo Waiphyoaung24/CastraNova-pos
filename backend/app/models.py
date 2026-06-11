@@ -9,9 +9,11 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    ForeignKey,
     Index,
     Numeric,
     UniqueConstraint,
+    Uuid,
     func,
     text,
 )
@@ -1004,8 +1006,18 @@ class SyncReviewItem(SQLModel, table=True):
     resolved_by_user_id: uuid.UUID | None = Field(
         default=None, foreign_key="user.id", index=True
     )
+    # ON DELETE SET NULL: keep the audit row when the submitter is deleted.
     submitted_by_user_id: uuid.UUID | None = Field(
-        default=None, foreign_key="user.id", index=True
+        default=None,
+        sa_column=Column(
+            Uuid,
+            ForeignKey(
+                "user.id",
+                ondelete="SET NULL",
+                name="fk_syncreviewitem_submitted_by_user_id",
+            ),
+            nullable=True,
+        ),
     )
     resolved_at: datetime | None = Field(
         default=None,
