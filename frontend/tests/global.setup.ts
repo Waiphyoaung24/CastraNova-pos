@@ -27,13 +27,21 @@ setup("reset dev database", () => {
     END $$;`
   // SQL goes via stdin: interpolating it into the shell command would let
   // sh expand the plpgsql `$$` quoting to its own PID.
+  // timeout on each child: Playwright's test timeout can't preempt a blocked
+  // execSync, so the budget must be enforced by Node killing the child.
   execSync(
     "docker compose exec -T db psql -U postgres -d app -v ON_ERROR_STOP=1 -f -",
-    { cwd: repoRoot, input: truncate, stdio: ["pipe", "inherit", "inherit"] },
+    {
+      cwd: repoRoot,
+      input: truncate,
+      stdio: ["pipe", "inherit", "inherit"],
+      timeout: 30_000,
+    },
   )
   // `run --rm` blocks until prestart finishes (deterministic, no sleeps).
   execSync("docker compose run --rm prestart", {
     cwd: repoRoot,
     stdio: "inherit",
+    timeout: 120_000,
   })
 })
