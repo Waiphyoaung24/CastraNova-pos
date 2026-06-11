@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str = secrets.token_urlsafe(32)
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
-    # 60 minutes * 24 hours * 30 days = 30 days. Rotated on each /login/refresh-token
-    # call (sliding expiry), so the static 30-day window is an upper bound, not a fixed TTL.
-    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30
+    # 60 minutes * 24 hours * 7 days = 7 days. Rotated on each /login/refresh-token
+    # call (sliding expiry), so the static 7-day window is an upper bound, not a fixed TTL.
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # spec §6.2: refresh tokens live 7 days
     # Rate limiting is enabled by default; the test session disables it globally
     # and re-enables it only inside the dedicated rate-limit test.
     RATE_LIMIT_ENABLED: bool = True
