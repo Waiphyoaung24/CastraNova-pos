@@ -1004,6 +1004,9 @@ class SyncReviewItem(SQLModel, table=True):
     resolved_by_user_id: uuid.UUID | None = Field(
         default=None, foreign_key="user.id", index=True
     )
+    submitted_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id", index=True
+    )
     resolved_at: datetime | None = Field(
         default=None,
         sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
@@ -1039,6 +1042,7 @@ class SyncReviewItemPublic(SQLModel):
     reason: SyncReviewReason
     state: SyncReviewState
     created_at: datetime
+    submitted_by_user_id: uuid.UUID | None
     resolved_by_user_id: uuid.UUID | None
     resolved_at: datetime | None
     resolution_note: str | None

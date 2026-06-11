@@ -1479,14 +1479,16 @@ def create_stock_adjustment(
 
 
 def create_sync_review_item(
-    *, session: Session, data: SyncReviewItemCreate
+    *, session: Session, data: SyncReviewItemCreate, submitted_by_user_id: uuid.UUID
 ) -> SyncReviewItem:
     """Ingest a STALE/CONFLICT offline mutation into the admin review queue.
 
     Idempotent by ``idempotency_key``: a re-POST of the same offline item
     returns the existing row (UNIQUE constraint + IntegrityError rollback path
-    via ``get_or_replay``), never a duplicate."""
-    item, _ = get_or_replay(
+    via ``get_or_replay``), never a duplicate. Replays are bound to the
+    original submitter (hardening spec §4.1.3); legacy NULL rows replay
+    unbound."""
+    item, replayed = get_or_replay(
         session=session,
         statement=select(SyncReviewItem).where(
             col(SyncReviewItem.idempotency_key) == data.idempotency_key
@@ -1496,8 +1498,14 @@ def create_sync_review_item(
             mutation_kind=data.mutation_kind,
             payload=data.payload,
             reason=data.reason,
+            submitted_by_user_id=submitted_by_user_id,
         ),
     )
+    if replayed and item.submitted_by_user_id is not None:
+        _assert_replay_actor(
+            stored_user_id=item.submitted_by_user_id,
+            caller_user_id=submitted_by_user_id,
+        )
     return item
 
 

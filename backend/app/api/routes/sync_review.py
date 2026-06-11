@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app import crud
-from app.api.deps import AdminUser, SessionDep, get_admin, get_current_user
+from app.api.deps import AdminUser, CurrentUser, SessionDep, get_admin
 from app.models import (
     SyncReviewItemCreate,
     SyncReviewItemPublic,
@@ -19,16 +19,18 @@ router = APIRouter(prefix="/sync-review", tags=["sync-review"])
 @router.post(
     "",
     response_model=SyncReviewItemStaffPublic,
-    dependencies=[Depends(get_current_user)],
 )
 def ingest_sync_review_item(
     *,
     session: SessionDep,
+    current_user: CurrentUser,
     data: SyncReviewItemCreate,
 ) -> SyncReviewItemStaffPublic:
     """Report a STALE/CONFLICT offline mutation for review (FR-021). Any
     authenticated device may ingest; idempotent on idempotency_key."""
-    item = crud.create_sync_review_item(session=session, data=data)
+    item = crud.create_sync_review_item(
+        session=session, data=data, submitted_by_user_id=current_user.id
+    )
     return SyncReviewItemStaffPublic.model_validate(item)
 
 
