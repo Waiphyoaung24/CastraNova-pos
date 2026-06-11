@@ -265,6 +265,7 @@ export type PrivateUserCreate = {
     password: string;
     full_name: string;
     is_verified?: boolean;
+    role?: UserRole;
 };
 
 export type ProductCreate = {
@@ -656,6 +657,7 @@ export type SyncReviewItemPublic = {
     reason: SyncReviewReason;
     state: SyncReviewState;
     created_at: string;
+    submitted_by_user_id: (string | null);
     resolved_by_user_id: (string | null);
     resolved_at: (string | null);
     resolution_note: (string | null);

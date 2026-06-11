@@ -1255,6 +1255,10 @@ export const PrivateUserCreateSchema = {
             type: 'boolean',
             title: 'Is Verified',
             default: false
+        },
+        role: {
+            '$ref': '#/components/schemas/UserRole',
+            default: 'YGN_STAFF'
         }
     },
     type: 'object',
@@ -3406,6 +3410,18 @@ export const SyncReviewItemPublicSchema = {
             format: 'date-time',
             title: 'Created At'
         },
+        submitted_by_user_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Submitted By User Id'
+        },
         resolved_by_user_id: {
             anyOf: [
                 {
@@ -3443,7 +3459,7 @@ export const SyncReviewItemPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'idempotency_key', 'mutation_kind', 'payload', 'reason', 'state', 'created_at', 'resolved_by_user_id', 'resolved_at', 'resolution_note'],
+    required: ['id', 'idempotency_key', 'mutation_kind', 'payload', 'reason', 'state', 'created_at', 'submitted_by_user_id', 'resolved_by_user_id', 'resolved_at', 'resolution_note'],
     title: 'SyncReviewItemPublic'
 } as const;
 
@@ -3669,7 +3685,7 @@ export const UserCreateSchema = {
         },
         role: {
             '$ref': '#/components/schemas/UserRole',
-            default: 'BKK_ADMIN'
+            default: 'YGN_STAFF'
         },
         full_name: {
             anyOf: [
@@ -3715,7 +3731,7 @@ export const UserPublicSchema = {
         },
         role: {
             '$ref': '#/components/schemas/UserRole',
-            default: 'BKK_ADMIN'
+            default: 'YGN_STAFF'
         },
         full_name: {
             anyOf: [
@@ -3785,7 +3801,7 @@ export const UserUpdateSchema = {
         },
         role: {
             '$ref': '#/components/schemas/UserRole',
-            default: 'BKK_ADMIN'
+            default: 'YGN_STAFF'
         },
         full_name: {
             anyOf: [
