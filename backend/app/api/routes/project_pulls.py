@@ -80,6 +80,11 @@ def read_project_pull(
 
 # Fulfill is intentionally open to staff + admin per the 5.3 role matrix
 # (create/cancel are admin-only, already gated above).
+# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
+# authenticated staff/admin may act on any project pull — the ~5-person
+# warehouse team works shifts over shared objects (PRD §5). Ownership scoping
+# was considered and rejected. No derived financials are exposed on this
+# surface.
 @router.post(
     "/{pull_id}/fulfill",
     response_model=ProjectPullPublic,

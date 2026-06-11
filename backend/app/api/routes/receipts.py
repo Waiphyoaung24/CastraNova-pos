@@ -55,6 +55,11 @@ def receive_quantity(
     return PartBatchPublic.model_validate(batch)
 
 
+# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
+# authenticated staff/admin may act on any unit label — the ~5-person
+# warehouse team works shifts over shared objects (PRD §5). Ownership scoping
+# was considered and rejected. No derived financials are exposed on this
+# surface.
 @router.get(
     "/serialized/{unit_id}/label.pdf",
     dependencies=[Depends(get_current_user)],
