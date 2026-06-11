@@ -237,7 +237,14 @@ def get_supplier(*, session: Session, supplier_id: Any) -> Supplier | None:
 def list_suppliers(
     *, session: Session, skip: int = 0, limit: int = 100
 ) -> list[Supplier]:
-    return list(session.exec(select(Supplier).offset(skip).limit(limit)).all())
+    return list(
+        session.exec(
+            select(Supplier)
+            .order_by(col(Supplier.created_at).desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+    )
 
 
 def update_supplier(
@@ -269,7 +276,14 @@ def get_customer(*, session: Session, customer_id: Any) -> Customer | None:
 def list_customers(
     *, session: Session, skip: int = 0, limit: int = 100
 ) -> list[Customer]:
-    return list(session.exec(select(Customer).offset(skip).limit(limit)).all())
+    return list(
+        session.exec(
+            select(Customer)
+            .order_by(col(Customer.created_at).desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+    )
 
 
 def update_customer(
@@ -307,7 +321,14 @@ def get_project(*, session: Session, project_id: Any) -> Project | None:
 def list_projects(
     *, session: Session, skip: int = 0, limit: int = 100
 ) -> list[Project]:
-    return list(session.exec(select(Project).offset(skip).limit(limit)).all())
+    return list(
+        session.exec(
+            select(Project)
+            .order_by(col(Project.created_at).desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+    )
 
 
 def update_project(
@@ -349,7 +370,14 @@ def get_product(*, session: Session, product_id: Any) -> Product | None:
 def list_products(
     *, session: Session, skip: int = 0, limit: int = 100
 ) -> list[Product]:
-    return list(session.exec(select(Product).offset(skip).limit(limit)).all())
+    return list(
+        session.exec(
+            select(Product)
+            .order_by(col(Product.created_at).desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
+    )
 
 
 def update_product(
