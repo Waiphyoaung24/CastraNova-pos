@@ -524,11 +524,12 @@ class UnitMovementBase(SQLModel):
         default=None, foreign_key="location.id"
     )
     to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
-    # FK targets (service_ticket/stock_adjustment) are introduced
-    # in later migrations; those columns stay bare-nullable and their FK
-    # constraints are wired when each table lands (M013, M014).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
-    service_ticket_id: uuid.UUID | None = Field(default=None)
+    # No ondelete: serviceticket rows are never deleted (no delete endpoint;
+    # append-only domain).
+    service_ticket_id: uuid.UUID | None = Field(
+        default=None, foreign_key="serviceticket.id"
+    )
     project_pull_id: uuid.UUID | None = Field(
         default=None, foreign_key="projectpull.id"
     )
@@ -554,6 +555,12 @@ class UnitMovement(UnitMovementBase, table=True):
             "project_pull_id",
             unique=False,
             postgresql_where=text("project_pull_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_service_ticket_id",
+            "service_ticket_id",
+            unique=False,
+            postgresql_where=text("service_ticket_id IS NOT NULL"),
         ),
     )
 
@@ -685,11 +692,12 @@ class PartMovementBase(SQLModel):
         default=None, foreign_key="location.id"
     )
     to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
-    # FK targets (service_ticket/stock_adjustment) land in later
-    # migrations; these stay bare-nullable until their tables exist (mirrors
-    # unit_movement). sale_id's FK target already exists (M010).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
-    service_ticket_id: uuid.UUID | None = Field(default=None)
+    # No ondelete: serviceticket rows are never deleted (no delete endpoint;
+    # append-only domain).
+    service_ticket_id: uuid.UUID | None = Field(
+        default=None, foreign_key="serviceticket.id"
+    )
     project_pull_id: uuid.UUID | None = Field(
         default=None, foreign_key="projectpull.id"
     )
