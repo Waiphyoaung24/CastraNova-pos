@@ -14,6 +14,7 @@ BOUNDED_LIST_PATHS = [
     "/project-pulls",
     "/audit",
     "/sync-review",
+    "/pricing-overrides",
 ]
 
 

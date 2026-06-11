@@ -52,7 +52,8 @@ function SyncReview() {
     isError,
   } = useQuery({
     queryKey: ["sync-review", state],
-    queryFn: () => SyncReviewService.listSyncReviewItems({ state }),
+    // Review queue reads the full bounded window (backend caps at 500) — no pagination UI yet.
+    queryFn: () => SyncReviewService.listSyncReviewItems({ state, limit: 500 }),
   })
 
   const resolveMutation = useMutation({

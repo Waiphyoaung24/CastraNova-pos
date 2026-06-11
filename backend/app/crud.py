@@ -240,7 +240,7 @@ def list_suppliers(
     return list(
         session.exec(
             select(Supplier)
-            .order_by(col(Supplier.created_at).desc().nulls_last())
+            .order_by(col(Supplier.created_at).desc().nulls_last(), col(Supplier.id))
             .offset(skip)
             .limit(limit)
         ).all()
@@ -279,7 +279,7 @@ def list_customers(
     return list(
         session.exec(
             select(Customer)
-            .order_by(col(Customer.created_at).desc().nulls_last())
+            .order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
             .offset(skip)
             .limit(limit)
         ).all()
@@ -324,7 +324,7 @@ def list_projects(
     return list(
         session.exec(
             select(Project)
-            .order_by(col(Project.created_at).desc().nulls_last())
+            .order_by(col(Project.created_at).desc().nulls_last(), col(Project.id))
             .offset(skip)
             .limit(limit)
         ).all()
@@ -373,7 +373,7 @@ def list_products(
     return list(
         session.exec(
             select(Product)
-            .order_by(col(Product.created_at).desc().nulls_last())
+            .order_by(col(Product.created_at).desc().nulls_last(), col(Product.id))
             .offset(skip)
             .limit(limit)
         ).all()
