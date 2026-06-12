@@ -3,11 +3,12 @@
 set -e
 set -x
 
-# Let the DB start
-python app/backend_pre_start.py
-
-# Ensure the least-privilege app role exists before migrations grant to it
+# Ensure the least-privilege app role exists before anything connects as it
+# (runs on the admin connection; the db service is already `service_healthy`).
 python app/ensure_app_role.py
+
+# Let the DB start — probes with the runtime (app-role) engine, which now exists
+python app/backend_pre_start.py
 
 # Run migrations
 alembic upgrade head
