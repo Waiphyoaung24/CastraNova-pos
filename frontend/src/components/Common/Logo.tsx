@@ -1,11 +1,7 @@
 import { Link } from "@tanstack/react-router"
 
-import { useTheme } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
-import icon from "/assets/images/fastapi-icon.svg"
-import iconLight from "/assets/images/fastapi-icon-light.svg"
-import logo from "/assets/images/fastapi-logo.svg"
-import logoLight from "/assets/images/fastapi-logo-light.svg"
+import logo from "/assets/images/castranova-logo.jpg"
 
 interface LogoProps {
   variant?: "full" | "icon" | "responsive"
@@ -13,42 +9,46 @@ interface LogoProps {
   asLink?: boolean
 }
 
+// The brand mark is a gold-on-black JPG. `mix-blend-lighten` drops the pure-black
+// background against the app's dark surfaces so only the gold mark shows.
+const BLEND = "mix-blend-lighten"
+
 export function Logo({
   variant = "full",
   className,
   asLink = true,
 }: LogoProps) {
-  const { resolvedTheme } = useTheme()
-  const isDark = resolvedTheme === "dark"
-
-  const fullLogo = isDark ? logoLight : logo
-  const iconLogo = isDark ? iconLight : icon
-
   const content =
     variant === "responsive" ? (
       <>
         <img
-          src={fullLogo}
-          alt="FastAPI"
+          src={logo}
+          alt="CASTRA NOVA"
           className={cn(
-            "h-6 w-auto group-data-[collapsible=icon]:hidden",
+            BLEND,
+            "h-10 w-auto group-data-[collapsible=icon]:hidden",
             className,
           )}
         />
         <img
-          src={iconLogo}
-          alt="FastAPI"
+          src={logo}
+          alt="CASTRA NOVA"
           className={cn(
-            "size-5 hidden group-data-[collapsible=icon]:block",
+            BLEND,
+            "size-7 hidden group-data-[collapsible=icon]:block",
             className,
           )}
         />
       </>
     ) : (
       <img
-        src={variant === "full" ? fullLogo : iconLogo}
-        alt="FastAPI"
-        className={cn(variant === "full" ? "h-6 w-auto" : "size-5", className)}
+        src={logo}
+        alt="CASTRA NOVA"
+        className={cn(
+          BLEND,
+          variant === "full" ? "h-12 w-auto" : "size-7",
+          className,
+        )}
       />
     )
 

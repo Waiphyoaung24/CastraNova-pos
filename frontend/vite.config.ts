@@ -22,14 +22,23 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        globPatterns: ["**/*.{js,css,html,ico,png,jpg,svg,woff2}"],
       },
       manifest: {
-        name: "CastraNova POS",
-        short_name: "CastraNova",
-        theme_color: "#0f172a",
+        name: "CASTRA NOVA POS",
+        short_name: "CASTRA NOVA",
+        theme_color: "#0B0B0D",
+        background_color: "#0B0B0D",
         display: "standalone",
         start_url: "/",
+        icons: [
+          {
+            src: "/assets/images/castranova-logo.jpg",
+            sizes: "512x512",
+            type: "image/jpeg",
+            purpose: "any",
+          },
+        ],
       },
     }),
   ],
