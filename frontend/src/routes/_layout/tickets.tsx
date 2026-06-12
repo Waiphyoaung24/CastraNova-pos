@@ -94,16 +94,29 @@ async function submitTicket(s: TicketSubmission): Promise<ServiceTicketPublic> {
   const ticket = await ServiceTicketsService.openServiceTicket({
     requestBody: s.open,
   })
-  for (const part of s.parts) {
-    await ServiceTicketsService.addServiceTicketPart({
+  // The ticket is now open server-side. There is no cancel/void endpoint, so a
+  // failure here cannot be rolled back — surface a clear message and let the
+  // user retry. The retry reuses the same idempotency key (see handleClose), so
+  // openServiceTicket dedupes onto this same ticket instead of orphaning it.
+  try {
+    for (const part of s.parts) {
+      await ServiceTicketsService.addServiceTicketPart({
+        ticketId: ticket.id,
+        requestBody: part,
+      })
+    }
+    return await ServiceTicketsService.closeServiceTicket({
       ticketId: ticket.id,
-      requestBody: part,
+      requestBody: s.close,
     })
+  } catch {
+    // No cancel/void endpoint exists to roll the opened ticket back, so surface
+    // a clear retry message; the retry reuses the same idempotency key and
+    // resumes this ticket rather than opening a duplicate.
+    throw new Error(
+      "Ticket opened but could not be completed. Retry to resume it.",
+    )
   }
-  return ServiceTicketsService.closeServiceTicket({
-    ticketId: ticket.id,
-    requestBody: s.close,
-  })
 }
 
 function Tickets() {
@@ -121,6 +134,10 @@ function Tickets() {
   // so it needs its own message slot, cleared on the next successful PART add.
   const [scanNotice, setScanNotice] = useState<string>("")
   const scanRef = useRef<ScanInputHandle>(null)
+  // One idempotency key per logical submission. Reused across retries so a retry
+  // after a partial failure resumes the same ticket instead of opening a duplicate.
+  // Rotated only after a ticket successfully closes.
+  const idempotencyKeyRef = useRef<string>(crypto.randomUUID())
 
   const customerSelectId = useId()
   const issueId = useId()
@@ -191,11 +208,14 @@ function Tickets() {
       setIssue("")
       setNotes("")
       setResolution("")
+      idempotencyKeyRef.current = crypto.randomUUID()
       showSuccessToast("Ticket closed.")
       scanRef.current?.focus()
     },
-    onError: () => {
-      showErrorToast("Could not close the ticket. Please try again.")
+    onError: (err) => {
+      showErrorToast(
+        err.message || "Could not close the ticket. Please try again.",
+      )
     },
   })
 
@@ -210,7 +230,7 @@ function Tickets() {
       issue,
       notes,
       resolution,
-      crypto.randomUUID(),
+      idempotencyKeyRef.current,
     )
     mutation.mutate(submission)
   }, [canClose, parts, customerId, issue, notes, resolution, mutation])

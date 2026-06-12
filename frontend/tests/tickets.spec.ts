@@ -141,4 +141,68 @@ test.describe("Tickets screen", () => {
       )
       .toBe(onHand - 2)
   })
+
+  test("retry after a failed part-add reuses the same idempotency key", async ({
+    page,
+  }) => {
+    const { sku, modelName, customerName } = await seedRepairPart(5)
+
+    // Capture the idempotency_key sent on every openServiceTicket POST, and fail
+    // the FIRST add-part so the ticket opens but never completes — exercising the
+    // orphan/retry path.
+    const openKeys: string[] = []
+    let failNextPartAdd = true
+
+    await page.route("**/api/v1/service-tickets", async (route) => {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON() as {
+          idempotency_key: string
+        }
+        openKeys.push(body.idempotency_key)
+      }
+      await route.continue()
+    })
+    await page.route("**/api/v1/service-tickets/*/parts", async (route) => {
+      if (failNextPartAdd) {
+        failNextPartAdd = false
+        await route.fulfill({ status: 500, body: "{}" })
+        return
+      }
+      await route.continue()
+    })
+
+    // Same UI drive as the happy-path test above.
+    const productsLoaded = page.waitForResponse((r) =>
+      r.url().includes("/api/v1/products"),
+    )
+    await page.goto("/tickets")
+    await expect(
+      page.getByRole("heading", { name: "Service ticket" }),
+    ).toBeVisible()
+
+    await page.getByLabel("Issue").fill("Won't power on")
+
+    await productsLoaded
+    await scanCode(page, sku)
+    await expect(page.getByText(modelName)).toBeVisible()
+
+    await page.getByRole("combobox", { name: "Customer" }).click()
+    await page.getByRole("option", { name: customerName, exact: true }).click()
+
+    // First close: ticket opens, the part-add fails → explicit "retry to resume"
+    // message (no cancel endpoint exists to roll the orphan back).
+    await page.getByRole("button", { name: "Close ticket" }).click()
+    await expect(page.getByText(/retry to resume it/i)).toBeVisible()
+
+    // Retry: this time the part-add and close succeed.
+    await page.getByRole("button", { name: "Close ticket" }).click()
+    await expect(
+      page.getByText("Ticket closed.", { exact: true }),
+    ).toBeVisible()
+
+    // The retry must reuse the SAME idempotency key, so the backend dedupes onto
+    // the already-opened ticket instead of creating a duplicate.
+    expect(openKeys.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(openKeys).size).toBe(1)
+  })
 })
