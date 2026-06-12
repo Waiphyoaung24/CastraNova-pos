@@ -225,7 +225,7 @@ class SystemSetting(SQLModel, table=True):
     updated_by_user_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
-            Uuid(), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+            Uuid, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
         ),
     )
     updated_at: datetime | None = Field(

@@ -72,6 +72,19 @@ def test_saleline_quantity_must_be_positive(db: Session) -> None:
         db.commit()
     db.rollback()
 
+    line_negative = SaleLine(
+        sale_id=sale.id,
+        line_kind=SaleLineKind.PART,
+        product_id=product.id,
+        quantity=-1,
+        unit_price_thb=Decimal("10.00"),
+        unit_cost_thb=Decimal("5.00"),
+    )
+    db.add(line_negative)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
 
 def test_product_prices_must_be_non_negative(db: Session) -> None:
     """#6: negative retail/repair price must be rejected by the DB."""
@@ -82,6 +95,20 @@ def test_product_prices_must_be_non_negative(db: Session) -> None:
         repair_price_thb=Decimal("20.00"),
     )
     db.add(bad_retail)
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_product_repair_price_must_be_non_negative(db: Session) -> None:
+    """#6: a negative repair price (with valid retail) must be rejected by the DB."""
+    bad_repair = Product(
+        sku=f"M027-{uuid.uuid4().hex[:8]}",
+        model_name="Widget",
+        retail_price_thb=Decimal("100.00"),
+        repair_price_thb=Decimal("-1.00"),
+    )
+    db.add(bad_repair)
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
