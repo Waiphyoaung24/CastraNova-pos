@@ -202,7 +202,7 @@ test.describe("Tickets screen", () => {
 
     // The retry must reuse the SAME idempotency key, so the backend dedupes onto
     // the already-opened ticket instead of creating a duplicate.
-    expect(openKeys.length).toBeGreaterThanOrEqual(2)
+    expect(openKeys.length).toBe(2)
     expect(new Set(openKeys).size).toBe(1)
   })
 })

@@ -89,7 +89,19 @@ function CustomerPicker({
   )
 }
 
-/** Run the full ticket lifecycle in one online-only sequence. */
+/**
+ * Run the full ticket lifecycle online: open -> add parts -> close.
+ *
+ * The idempotency key is reused across retries (see idempotencyKeyRef), so a
+ * retry resumes the SAME ticket via the idempotent openServiceTicket — no
+ * duplicate ticket shell. Known residual: addServiceTicketPart is NOT
+ * idempotent (the backend appends a row per call), so if a multi-part
+ * submission fails AFTER some parts were already added, a retry re-adds those
+ * parts and duplicates part lines on the resumed ticket. Fully fixing this
+ * needs an idempotent backend part-add (or client-side tracking of confirmed
+ * parts) — deferred per the remediation spec. On any post-open failure we
+ * surface a clear message instead of silently leaving the ticket inconsistent.
+ */
 async function submitTicket(s: TicketSubmission): Promise<ServiceTicketPublic> {
   const ticket = await ServiceTicketsService.openServiceTicket({
     requestBody: s.open,
