@@ -57,10 +57,11 @@ test("User can reset password successfully using the link", async ({
   const selector = 'a[href*="/reset-password?token="]'
 
   const href = await page.getAttribute(selector, "href")
+  if (!href) throw new Error("Password reset link not found in email")
 
   // The emailed link's host is FRONTEND_HOST, which need not match the host
   // the suite runs on — navigate to its path relative to our baseURL instead.
-  const linkUrl = new URL(href!, "http://localhost")
+  const linkUrl = new URL(href, "http://localhost")
 
   // Set the new password and confirm it
   await page.goto(`${linkUrl.pathname}${linkUrl.search}`)
@@ -111,9 +112,10 @@ test("Weak new password validation", async ({ page, request }) => {
 
   const selector = 'a[href*="/reset-password?token="]'
   const href = await page.getAttribute(selector, "href")
+  if (!href) throw new Error("Password reset link not found in email")
 
   // Same baseURL-relative navigation as the successful-reset test above.
-  const linkUrl = new URL(href!, "http://localhost")
+  const linkUrl = new URL(href, "http://localhost")
 
   // Set a weak new password
   await page.goto(`${linkUrl.pathname}${linkUrl.search}`)
