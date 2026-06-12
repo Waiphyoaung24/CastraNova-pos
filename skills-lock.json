@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "brand-architect": {
+      "source": "shipshitdev/library",
+      "sourceType": "github",
+      "skillPath": "skills/brand-architect/SKILL.md",
+      "computedHash": "0b0c803293ea21f33a2e9743227063f69841a08a46d8dcf29208bf36599c7f90"
+    },
+    "product-name": {
+      "source": "phuryn/pm-skills",
+      "sourceType": "github",
+      "skillPath": "pm-marketing-growth/skills/product-name/SKILL.md",
+      "computedHash": "37cca037c08948af87728d31b676c2192029fa8ca0a4dd62584ad0839dee55a7"
+    }
+  }
+}
