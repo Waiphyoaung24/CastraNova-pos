@@ -82,15 +82,14 @@ export function AppSidebar() {
   const { user: currentUser } = useAuth()
   const { isAdmin } = useRole()
 
-  const items = isAdmin ? [...baseItems, ...adminItems] : baseItems
-
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="px-4 py-6 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:items-center">
         <Logo variant="responsive" />
       </SidebarHeader>
       <SidebarContent>
-        <Main items={items} />
+        <Main items={baseItems} label="Workspace" />
+        {isAdmin ? <Main items={adminItems} label="Admin" /> : null}
       </SidebarContent>
       <SidebarFooter>
         <User user={currentUser} />
