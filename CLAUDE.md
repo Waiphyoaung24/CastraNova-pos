@@ -71,6 +71,15 @@ For multi-step tasks, state a brief plan with verification per step.
 
 CastraNova-POS is an **inventory tracking & management system**. Forked from `fastapi/full-stack-fastapi-template`. Core domain (forward-looking): products, stock movements, suppliers, sales, audit trails.
 
+## Project Status (as of 2026-06-12)
+
+- **Default working branch: `dev`.** Flow is feature branch → PR → `dev`. `master` is the upstream `full-stack-fastapi-template` base — never target or push it.
+- **Core POS implementation** (plan Parts 0–2) is built; Parts 3–5 remain a roadmap to expand on demand.
+- **Pre-deploy hardening shipped** (merged to `dev` 2026-06-12 via PRs #6/#7/#8; per-PR branches deleted): bounded/ordered catalog endpoints; security (idempotency replay→actor binding, rate limits, least-privilege `castranova_app` DB role); E2E per-run DB reset + admin de-flake.
+- **CodeRabbit whole-repo remediation done:** migration `m027` (saleline `quantity > 0`, product `retail/repair_price_thb >= 0` CHECKs, `systemsetting.updated_by_user_id` FK `ON DELETE SET NULL`) + `tickets.tsx` idempotency-key reuse on retry. Design/plan under `docs/superpowers/`.
+- **Alembic head: `m027`** (`586bc2d1d79d`). Run `alembic upgrade head` on any DB still on an older revision.
+- **Known backlog:** `ServiceTicketPart` has no `idempotency_key`, so a multi-part ticket retry can duplicate part lines — add one (mirroring `Sale`/`PartMovement`) in a future hardening pass. Remaining deploy-checklist leftovers are tracked outside this file.
+
 ## Stack
 
 | Layer    | Tech                                                                 |
