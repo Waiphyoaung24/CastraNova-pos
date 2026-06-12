@@ -1,10 +1,11 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app import crud
 from app.api.deps import AdminUser, CurrentUser, SessionDep, get_admin
+from app.core.limiter import PRICING_OVERRIDE_RATE_LIMIT, limiter
 from app.models import (
     OverrideState,
     PricingOverrideCreate,
@@ -17,8 +18,10 @@ router = APIRouter(prefix="/pricing-overrides", tags=["pricing-overrides"])
 
 
 @router.post("", response_model=PricingOverridePublic)
+@limiter.limit(PRICING_OVERRIDE_RATE_LIMIT)
 def create_pricing_override(
     *,
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
     session: SessionDep,
     current_user: CurrentUser,
     background_tasks: BackgroundTasks,

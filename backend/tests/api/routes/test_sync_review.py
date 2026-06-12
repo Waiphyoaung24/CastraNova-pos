@@ -11,7 +11,10 @@ from app.models import (
     SyncReviewItemCreate,
     SyncReviewReason,
     SyncReviewState,
+    UserCreate,
 )
+from tests.utils.user import user_authentication_headers
+from tests.utils.utils import random_email, random_lower_string
 
 
 def _admin_id(db: Session) -> uuid.UUID:
@@ -31,7 +34,9 @@ def _ingest(
         payload={"customer_id": str(uuid.uuid4()), "total_thb": "1200.00"},
         reason=reason,
     )
-    return crud.create_sync_review_item(session=db, data=data).id
+    return crud.create_sync_review_item(
+        session=db, data=data, submitted_by_user_id=_admin_id(db)
+    ).id
 
 
 def test_ingest_creates_pending_item(db: Session) -> None:
@@ -179,6 +184,44 @@ def test_admin_list_includes_payload(
     assert "payload" in item  # admins are entitled to the full payload
 
 
+def test_ingest_records_submitter(
+    client: TestClient, staff_token_headers: dict[str, str], db: Session
+) -> None:
+    """Ingest stamps the submitting user on the row (hardening spec §4.1.3)."""
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(),
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Staff-facing response must NOT expose the submitter (admin-only field).
+    assert "submitted_by_user_id" not in body
+    item = crud.get_sync_review_item(session=db, item_id=uuid.UUID(body["id"]))
+    staff = crud.get_user_by_email(session=db, email="staff@example.com")
+    assert item is not None and staff is not None
+    assert item.submitted_by_user_id == staff.id
+
+
+def test_replay_by_different_user_is_rejected(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
+) -> None:
+    """Same idempotency_key replayed by a DIFFERENT user -> 409
+    (hardening spec §4.1.3): a 122-bit key collision across users is a
+    stolen/duplicated key, never a legitimate offline retry."""
+    body = _payload()
+    r1 = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=body, headers=staff_token_headers
+    )
+    assert r1.status_code == 200
+    r2 = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=body,
+        headers=superuser_token_headers,
+    )
+    assert r2.status_code == 409
+
+
 def test_ingest_is_idempotent_over_http(
     client: TestClient, staff_token_headers: dict[str, str]
 ) -> None:
@@ -247,6 +290,36 @@ def test_admin_resolves_item(
     assert body["state"] == "DISCARDED"
     assert body["resolved_by_user_id"] is not None
     assert body["resolved_at"] is not None
+
+
+def test_deleting_submitter_keeps_item_with_null_submitter(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    """ON DELETE SET NULL keeps the audit row when the submitter is deleted
+    (DB review fix)."""
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db, user_create=UserCreate(email=email, password=password)
+    )
+    headers = user_authentication_headers(
+        client=client, email=email, password=password
+    )
+    r = client.post(
+        f"{settings.API_V1_STR}/sync-review", json=_payload(), headers=headers
+    )
+    assert r.status_code == 200
+    item_id = uuid.UUID(r.json()["id"])
+
+    r = client.delete(
+        f"{settings.API_V1_STR}/users/{user.id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+
+    db.expire_all()  # the delete ran in the API's session; drop stale state
+    item = crud.get_sync_review_item(session=db, item_id=item_id)
+    assert item is not None  # audit row retained
+    assert item.submitted_by_user_id is None  # submitter becomes unknown
 
 
 def test_resolve_404(

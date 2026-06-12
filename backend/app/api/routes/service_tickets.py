@@ -60,6 +60,11 @@ def read_service_ticket(
     return _to_public(session=session, ticket=ticket)
 
 
+# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
+# authenticated staff/admin may act on any service ticket — the ~5-person
+# warehouse team works shifts over shared objects (PRD §5). Ownership scoping
+# was considered and rejected. No derived financials are exposed on this
+# surface.
 @router.post(
     "/{ticket_id}/parts",
     response_model=ServiceTicketPartPublic,
@@ -78,6 +83,11 @@ def add_service_ticket_part(
     return ServiceTicketPartPublic.model_validate(part)
 
 
+# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
+# authenticated staff/admin may act on any service ticket — the ~5-person
+# warehouse team works shifts over shared objects (PRD §5). Ownership scoping
+# was considered and rejected. No derived financials are exposed on this
+# surface.
 @router.post("/{ticket_id}/close", response_model=ServiceTicketPublic)
 def close_service_ticket(
     *,

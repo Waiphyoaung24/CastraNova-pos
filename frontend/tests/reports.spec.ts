@@ -5,6 +5,7 @@ import {
   formatThb,
   holdingPeriodExport,
   isValidMonth,
+  overrideExceptionsExport,
 } from "../src/lib/reports"
 
 // Pure-logic coverage of the admin report screens (FR-013 channel margin,
@@ -63,5 +64,18 @@ test("holdingPeriodExport encodes the over-threshold flag per format", () => {
   expect(holdingPeriodExport(false, "xlsx")).toEqual({
     path: "/api/v1/reports/holding-period.xlsx?over_threshold_only=false",
     filename: "holding-period.xlsx",
+  })
+})
+
+// --- overrideExceptionsExport -----------------------------------------------
+
+test("overrideExceptionsExport builds the authed path + filename per format", () => {
+  expect(overrideExceptionsExport("2026-06", "pdf")).toEqual({
+    path: "/api/v1/reports/override-exceptions.pdf?month=2026-06",
+    filename: "override-exceptions-2026-06.pdf",
+  })
+  expect(overrideExceptionsExport("2026-06", "xlsx")).toEqual({
+    path: "/api/v1/reports/override-exceptions.xlsx?month=2026-06",
+    filename: "override-exceptions-2026-06.xlsx",
   })
 })

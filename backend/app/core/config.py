@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str = secrets.token_urlsafe(32)
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
-    # 60 minutes * 24 hours * 30 days = 30 days. Rotated on each /login/refresh-token
-    # call (sliding expiry), so the static 30-day window is an upper bound, not a fixed TTL.
-    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30
+    # 60 minutes * 24 hours * 7 days = 7 days. Rotated on each /login/refresh-token
+    # call (sliding expiry), so the static 7-day window is an upper bound, not a fixed TTL.
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # spec §6.2: refresh tokens live 7 days
     # Rate limiting is enabled by default; the test session disables it globally
     # and re-enables it only inside the dedicated rate-limit test.
     RATE_LIMIT_ENABLED: bool = True
@@ -67,10 +67,27 @@ class Settings(BaseSettings):
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = ""
+    # Least-privilege runtime role (hardening spec §4.2.3). When unset, the app
+    # falls back to the admin (POSTGRES_USER) connection — pre-hardening behavior.
+    POSTGRES_APP_USER: str = ""
+    POSTGRES_APP_PASSWORD: str = ""
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> PostgresDsn:
+        return PostgresDsn.build(
+            scheme="postgresql+psycopg",
+            username=self.POSTGRES_APP_USER or self.POSTGRES_USER,
+            password=self.POSTGRES_APP_PASSWORD or self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_SERVER,
+            port=self.POSTGRES_PORT,
+            path=self.POSTGRES_DB,
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def SQLALCHEMY_ADMIN_DATABASE_URI(self) -> PostgresDsn:
+        """Superuser connection — migrations, role management, test teardown."""
         return PostgresDsn.build(
             scheme="postgresql+psycopg",
             username=self.POSTGRES_USER,
@@ -129,6 +146,10 @@ class Settings(BaseSettings):
         self._check_default_secret(
             "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD
         )
+        if self.POSTGRES_APP_PASSWORD:
+            self._check_default_secret(
+                "POSTGRES_APP_PASSWORD", self.POSTGRES_APP_PASSWORD
+            )
 
         return self
 

@@ -1,6 +1,7 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_admin, get_current_user, is_admin
@@ -22,8 +23,8 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 )
 def read_customers(
     session: SessionDep,
-    skip: int = 0,
-    limit: int = 100,
+    skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[CustomerPublic]:
     return crud.list_customers(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
 

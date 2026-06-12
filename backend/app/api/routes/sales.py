@@ -63,6 +63,11 @@ def create_sale(
     return _to_public(session=session, sale=sale, user=current_user)
 
 
+# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
+# authenticated staff/admin may act on any sale receipt — the ~5-person
+# warehouse team works shifts over shared objects (PRD §5). Ownership scoping
+# was considered and rejected. No derived financials are exposed on this
+# surface.
 @router.get("/{sale_id}/receipt.pdf", dependencies=[Depends(get_current_user)])
 def read_sale_receipt(*, session: SessionDep, sale_id: uuid.UUID) -> Response:
     sale = crud.get_sale(session=session, sale_id=sale_id)

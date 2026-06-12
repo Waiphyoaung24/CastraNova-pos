@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { useId, useMemo, useState } from "react"
 
 import {
@@ -163,10 +163,24 @@ function Projects() {
             <TableBody>
               {(projects ?? []).map((p) => (
                 <TableRow key={p.id}>
-                  <TableCell className="num font-medium">{p.code}</TableCell>
+                  <TableCell className="num font-medium">
+                    <Link
+                      to="/project/$projectId"
+                      params={{ projectId: p.id }}
+                      className="hover:underline"
+                    >
+                      {p.code}
+                    </Link>
+                  </TableCell>
                   <TableCell>{p.name}</TableCell>
                   <TableCell className="text-muted-foreground">
-                    {customerLabels.get(p.customer_id) ?? p.customer_id}
+                    <Link
+                      to="/customer/$customerId"
+                      params={{ customerId: p.customer_id }}
+                      className="hover:underline"
+                    >
+                      {customerLabels.get(p.customer_id) ?? p.customer_id}
+                    </Link>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{p.status ?? "ACTIVE"}</Badge>

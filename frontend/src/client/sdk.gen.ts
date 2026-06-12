@@ -1304,6 +1304,8 @@ export class SyncReviewService {
      * Admin review queue, optionally filtered by state (FR-021).
      * @param data The data for the request.
      * @param data.state
+     * @param data.skip
+     * @param data.limit
      * @returns SyncReviewItemPublic Successful Response
      * @throws ApiError
      */
@@ -1312,7 +1314,9 @@ export class SyncReviewService {
             method: 'GET',
             url: '/api/v1/sync-review',
             query: {
-                state: data.state
+                state: data.state,
+                skip: data.skip,
+                limit: data.limit
             },
             errors: {
                 422: 'Validation Error'

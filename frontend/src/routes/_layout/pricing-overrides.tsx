@@ -1,0 +1,217 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import { useMemo, useState } from "react"
+
+import {
+  type OverrideState,
+  type PricingOverrideDecision,
+  PricingOverridesService,
+  ProductsService,
+} from "@/client"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import useCustomToast from "@/hooks/useCustomToast"
+import { formatDeviationPct, isPending } from "@/lib/pricing-overrides"
+import { formatThb } from "@/lib/reports"
+import { requireAdmin } from "@/lib/route-guards"
+
+// Admin-only: the pricing-override approval queue (FR-010). Staff request a
+// price deviation mid-sale; deviations above the configured threshold land here
+// PENDING for an admin to approve or reject.
+export const Route = createFileRoute("/_layout/pricing-overrides")({
+  component: PricingOverrides,
+  beforeLoad: requireAdmin,
+  head: () => ({
+    meta: [{ title: "Pricing overrides - CastraNova POS" }],
+  }),
+})
+
+const STATES: OverrideState[] = [
+  "PENDING",
+  "AUTO_APPROVED",
+  "APPROVED",
+  "REJECTED",
+]
+
+function PricingOverrides() {
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const queryClient = useQueryClient()
+  const [state, setState] = useState<OverrideState>("PENDING")
+
+  const {
+    data: overrides,
+    isPending: isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["pricing-overrides", state],
+    queryFn: () => PricingOverridesService.listPricingOverrides({ state }),
+  })
+  const { data: products } = useQuery({
+    queryKey: ["products"],
+    queryFn: () => ProductsService.readProducts(),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const productLabels = useMemo(
+    () => new Map((products ?? []).map((p) => [p.id, p.sku])),
+    [products],
+  )
+
+  const decideMutation = useMutation({
+    mutationFn: ({
+      overrideId,
+      decision,
+    }: {
+      overrideId: string
+      decision: PricingOverrideDecision["decision"]
+    }) =>
+      PricingOverridesService.decidePricingOverride({
+        overrideId,
+        requestBody: { decision },
+      }),
+    onSuccess: (_data, { decision }) => {
+      // Invalidate all state slices — a decided override moves between views.
+      queryClient.invalidateQueries({ queryKey: ["pricing-overrides"] })
+      showSuccessToast(
+        decision === "APPROVED" ? "Override approved." : "Override rejected.",
+      )
+    },
+    onError: () => showErrorToast("Could not record the decision. Try again."),
+  })
+
+  const rows = overrides ?? []
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Pricing overrides</h1>
+        <p className="text-muted-foreground">
+          Approve or reject price-deviation requests above the threshold.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="state">State</Label>
+        <Select
+          value={state}
+          onValueChange={(v) => setState(v as OverrideState)}
+        >
+          <SelectTrigger id="state" className="w-full sm:w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isLoading ? (
+        <p className="text-muted-foreground py-6 text-center text-sm">
+          Loading…
+        </p>
+      ) : isError ? (
+        <p className="text-muted-foreground py-6 text-center text-sm">
+          Could not load overrides.
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="text-muted-foreground py-6 text-center text-sm">
+          No {state} requests.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Product</TableHead>
+              <TableHead className="text-right">Default</TableHead>
+              <TableHead className="text-right">Requested</TableHead>
+              <TableHead className="text-right">Deviation</TableHead>
+              <TableHead>Reason</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((o) => {
+              // One decision at a time: disable every row's actions while any
+              // decide is in flight (a single shared mutation isn't re-entrant).
+              const deciding = decideMutation.isPending
+              return (
+                <TableRow key={o.id}>
+                  <TableCell className="num font-medium">
+                    {productLabels.get(o.product_id) ?? o.product_id}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(o.default_price_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(o.requested_price_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatDeviationPct(o.deviation_pct)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground max-w-xs truncate">
+                    {o.reason}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isPending(o.state) ? (
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={deciding}
+                          onClick={() =>
+                            decideMutation.mutate({
+                              overrideId: o.id,
+                              decision: "APPROVED",
+                            })
+                          }
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={deciding}
+                          onClick={() =>
+                            decideMutation.mutate({
+                              overrideId: o.id,
+                              decision: "REJECTED",
+                            })
+                          }
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    ) : (
+                      <Badge variant="secondary">{o.state}</Badge>
+                    )}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  )
+}

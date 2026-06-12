@@ -70,17 +70,80 @@ async function seedSellableUnit(): Promise<SeededUnit> {
 }
 
 /**
- * Drive the keyboard-wedge scan field: focus, type fast (<50ms inter-key gaps so
- * the wedge buffer doesn't reset), then commit with Enter.
+ * Drive the keyboard-wedge scan field. The wedge buffer resets on inter-key
+ * gaps >50ms, and Playwright's per-key typing (one CDP roundtrip per key)
+ * can stall past that under suite load — so dispatch the whole keydown burst
+ * in one in-page evaluate, like a real wedge's ~1ms keystroke stream.
  */
 async function scanBarcode(
   page: import("@playwright/test").Page,
   code: string,
 ) {
-  const scan = page.getByRole("textbox", { name: "Scan barcode" })
-  await scan.click()
-  await scan.pressSequentially(code, { delay: 5 })
-  await page.keyboard.press("Enter")
+  await expect(
+    page.getByRole("textbox", { name: "Scan barcode" }),
+  ).toBeVisible()
+  await page.evaluate((c) => {
+    const el = document.querySelector('input[aria-label="Scan barcode"]')
+    if (!el) throw new Error("scan input not found")
+    for (const key of [...c, "Enter"]) {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
+    }
+  }, code)
+}
+
+/**
+ * Deterministic reload point for the offline test: poll IndexedDB (idb-keyval's
+ * `keyval-store`/`keyval`, where the async-storage persister writes under
+ * REACT_QUERY_OFFLINE_CACHE) until a paused mutation has been flushed. The
+ * persister throttles writes, so reloading before this would drop the queue.
+ */
+async function waitForPersistedPausedMutation(
+  page: import("@playwright/test").Page,
+) {
+  // expect.poll + page.evaluate, NOT page.waitForFunction: waitForFunction
+  // treats the pending Promise an async predicate returns as truthy, which
+  // would pass immediately — before the persister's throttled flush lands.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const raw: unknown = await new Promise((resolve, reject) => {
+            const open = indexedDB.open("keyval-store")
+            open.onerror = () => reject(open.error)
+            open.onsuccess = () => {
+              const db = open.result
+              if (!db.objectStoreNames.contains("keyval")) {
+                db.close()
+                resolve(undefined)
+                return
+              }
+              const req = db
+                .transaction("keyval", "readonly")
+                .objectStore("keyval")
+                .get("REACT_QUERY_OFFLINE_CACHE")
+              req.onsuccess = () => {
+                db.close()
+                resolve(req.result)
+              }
+              req.onerror = () => {
+                db.close()
+                reject(req.error)
+              }
+            }
+          })
+          if (typeof raw !== "string") return false
+          const persisted = JSON.parse(raw) as {
+            clientState?: {
+              mutations?: Array<{ state?: { isPaused?: boolean } }>
+            }
+          }
+          return (persisted.clientState?.mutations ?? []).some(
+            (m) => m.state?.isPaused,
+          )
+        }),
+      { timeout: 10_000, intervals: [250, 500, 1_000] },
+    )
+    .toBe(true)
 }
 
 test.describe("Sale screen", () => {
@@ -135,54 +198,61 @@ test.describe("Sale screen", () => {
       .toBe("SOLD")
   })
 
-  // Finalized under Part 5.2: the offline → reload → reconnect → replay path
-  // depends on TanStack Query mutation persistence rehydrating across a full
-  // page reload and replaying exactly once on reconnect. Making that
-  // deterministic in E2E needs a controlled service-worker / persist-cache
-  // harness (waiting on the persister to flush before reload, and on rehydration
-  // + resumePausedMutations after reconnect) that doesn't exist in this
-  // environment. Authored here under the 5.2 banner; run when that harness lands.
-  test.fixme(
-    "sale offline → reload → reconnect → replays exactly once (idempotent)",
-    async ({ page, context }) => {
-      const { barcode, customerName } = await seedSellableUnit()
+  // The 5.2 headline path. Two constraints shape the harness:
+  // 1. The dev server runs without a service worker (VitePWA devOptions are
+  //    off), so a network-level offline (context.setOffline) would make the
+  //    post-queue reload unable to load the app shell. Instead the page goes
+  //    offline *synthetically* via a window "offline" event — TanStack's
+  //    onlineManager and the OfflineIndicator both subscribe to exactly that
+  //    event, so the mutation pauses the same way it does on a dead network.
+  // 2. The async-storage persister throttles IndexedDB writes, so the reload
+  //    waits until the paused mutation is observed in IndexedDB.
+  // The fresh load is online again (= reconnect), rehydrates the persisted
+  // client, and resumePausedMutations replays the queued sale with its
+  // original idempotency key.
+  test("sale offline → reload → reconnect → replays exactly once (idempotent)", async ({
+    page,
+  }) => {
+    const { barcode, customerName } = await seedSellableUnit()
 
-      // Load online so products/customers cache and the persister is ready.
-      await page.goto("/sale")
-      await page.getByRole("combobox", { name: "Customer" }).click()
-      await page
-        .getByRole("option", { name: customerName, exact: true })
-        .click()
-      await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(
-        customerName,
+    // Load online so products/customers cache and the persister is ready.
+    await page.goto("/sale")
+    await page.getByRole("combobox", { name: "Customer" }).click()
+    await page.getByRole("option", { name: customerName, exact: true }).click()
+    await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(
+      customerName,
+    )
+    await scanBarcode(page, barcode)
+    await expect(
+      page.getByRole("cell", { name: barcode, exact: true }),
+    ).toBeVisible()
+
+    // Go offline and complete the sale — the mutation queues (pauses).
+    await page.evaluate(() => window.dispatchEvent(new Event("offline")))
+    await page.getByRole("button", { name: "Complete sale" }).click()
+
+    // OfflineIndicator renders an aria-live region with a queued-change count.
+    await expect(page.getByText(/Offline — 1 change queued/i)).toBeVisible()
+
+    // Reload only once the queued mutation has been persisted, then let the
+    // fresh (online) load rehydrate and replay it.
+    await waitForPersistedPausedMutation(page)
+    await page.reload()
+
+    // The queue survived the reload: the replayed sale marks the unit SOLD.
+    await expect
+      .poll(
+        async () => {
+          const res = await SearchService.searchSerial({ barcode })
+          return res.current_state
+        },
+        { timeout: 15_000, intervals: [500, 1_000] },
       )
-      await scanBarcode(page, barcode)
-      await expect(
-        page.getByRole("cell", { name: barcode, exact: true }),
-      ).toBeVisible()
+      .toBe("SOLD")
 
-      // Go offline and complete the sale — the mutation should queue (pause).
-      await context.setOffline(true)
-      await page.getByRole("button", { name: "Complete sale" }).click()
-
-      // OfflineIndicator renders an aria-live region with a queued-change count.
-      await expect(page.getByText(/Offline — 1 change queued/i)).toBeVisible()
-
-      // Reload, then reconnect — the persisted mutation should rehydrate and
-      // replay exactly once.
-      await page.reload()
-      await context.setOffline(false)
-
-      // Exactly-once: the unit ends SOLD (single decrement, no double sale).
-      await expect
-        .poll(
-          async () => {
-            const res = await SearchService.searchSerial({ barcode })
-            return res.current_state
-          },
-          { timeout: 15_000, intervals: [500, 1_000] },
-        )
-        .toBe("SOLD")
-    },
-  )
+    // No dup on replay: the unit's append-only ledger carries exactly one
+    // SOLD movement (the idempotency key dedupes any second delivery).
+    const res = await SearchService.searchSerial({ barcode })
+    expect(res.movements.filter((m) => m.event_type === "SOLD")).toHaveLength(1)
+  })
 })

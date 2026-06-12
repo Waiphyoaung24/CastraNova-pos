@@ -1,9 +1,11 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 
 from app import crud
-from app.api.deps import AdminUser, SessionDep, get_admin, get_current_user
+from app.api.deps import AdminUser, CurrentUser, SessionDep, get_admin
+from app.core.limiter import SYNC_INGEST_RATE_LIMIT, limiter
 from app.models import (
     SyncReviewItemCreate,
     SyncReviewItemPublic,
@@ -18,16 +20,20 @@ router = APIRouter(prefix="/sync-review", tags=["sync-review"])
 @router.post(
     "",
     response_model=SyncReviewItemStaffPublic,
-    dependencies=[Depends(get_current_user)],
 )
+@limiter.limit(SYNC_INGEST_RATE_LIMIT)
 def ingest_sync_review_item(
     *,
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
     session: SessionDep,
+    current_user: CurrentUser,
     data: SyncReviewItemCreate,
 ) -> SyncReviewItemStaffPublic:
     """Report a STALE/CONFLICT offline mutation for review (FR-021). Any
     authenticated device may ingest; idempotent on idempotency_key."""
-    item = crud.create_sync_review_item(session=session, data=data)
+    item = crud.create_sync_review_item(
+        session=session, data=data, submitted_by_user_id=current_user.id
+    )
     return SyncReviewItemStaffPublic.model_validate(item)
 
 
@@ -40,9 +46,13 @@ def list_sync_review_items(
     *,
     session: SessionDep,
     state: SyncReviewState | None = None,
+    skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[SyncReviewItemPublic]:
     """Admin review queue, optionally filtered by state (FR-021)."""
-    items = crud.list_sync_review_items(session=session, state=state)
+    items = crud.list_sync_review_items(
+        session=session, state=state, skip=skip, limit=limit
+    )
     return [SyncReviewItemPublic.model_validate(i) for i in items]
 
 

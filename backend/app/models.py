@@ -9,9 +9,11 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    ForeignKey,
     Index,
     Numeric,
     UniqueConstraint,
+    Uuid,
     func,
     text,
 )
@@ -138,7 +140,7 @@ class UserBase(SQLModel):
     email: EmailStr = Field(unique=True, index=True, max_length=255)
     is_active: bool = True
     is_superuser: bool = False
-    role: UserRole = Field(default=UserRole.BKK_ADMIN)
+    role: UserRole = Field(default=UserRole.YGN_STAFF)
     full_name: str | None = Field(default=None, max_length=255)
 
 
@@ -221,7 +223,10 @@ class SystemSetting(SQLModel, table=True):
     key: str = Field(unique=True, index=True, max_length=64)
     value: Any = Field(sa_column=Column(JSONB, nullable=False))
     updated_by_user_id: uuid.UUID | None = Field(
-        default=None, foreign_key="user.id"
+        default=None,
+        sa_column=Column(
+            Uuid, ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+        ),
     )
     updated_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -368,6 +373,11 @@ class ProductBase(SQLModel):
 
 
 class Product(ProductBase, table=True):
+    __table_args__ = (
+        CheckConstraint("retail_price_thb >= 0", name="ck_product_retail_price_nonneg"),
+        CheckConstraint("repair_price_thb >= 0", name="ck_product_repair_price_nonneg"),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -522,11 +532,12 @@ class UnitMovementBase(SQLModel):
         default=None, foreign_key="location.id"
     )
     to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
-    # FK targets (service_ticket/stock_adjustment) are introduced
-    # in later migrations; those columns stay bare-nullable and their FK
-    # constraints are wired when each table lands (M013, M014).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
-    service_ticket_id: uuid.UUID | None = Field(default=None)
+    # No ondelete: serviceticket rows are never deleted (no delete endpoint;
+    # append-only domain).
+    service_ticket_id: uuid.UUID | None = Field(
+        default=None, foreign_key="serviceticket.id"
+    )
     project_pull_id: uuid.UUID | None = Field(
         default=None, foreign_key="projectpull.id"
     )
@@ -552,6 +563,12 @@ class UnitMovement(UnitMovementBase, table=True):
             "project_pull_id",
             unique=False,
             postgresql_where=text("project_pull_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_service_ticket_id",
+            "service_ticket_id",
+            unique=False,
+            postgresql_where=text("service_ticket_id IS NOT NULL"),
         ),
     )
 
@@ -683,11 +700,12 @@ class PartMovementBase(SQLModel):
         default=None, foreign_key="location.id"
     )
     to_location_id: uuid.UUID | None = Field(default=None, foreign_key="location.id")
-    # FK targets (service_ticket/stock_adjustment) land in later
-    # migrations; these stay bare-nullable until their tables exist (mirrors
-    # unit_movement). sale_id's FK target already exists (M010).
     sale_id: uuid.UUID | None = Field(default=None, foreign_key="sale.id")
-    service_ticket_id: uuid.UUID | None = Field(default=None)
+    # No ondelete: serviceticket rows are never deleted (no delete endpoint;
+    # append-only domain).
+    service_ticket_id: uuid.UUID | None = Field(
+        default=None, foreign_key="serviceticket.id"
+    )
     project_pull_id: uuid.UUID | None = Field(
         default=None, foreign_key="projectpull.id"
     )
@@ -987,6 +1005,12 @@ class SyncReviewItem(SQLModel, table=True):
             "idempotency_key", name="uq_syncreviewitem_idempotency_key"
         ),
         Index("ix_syncreviewitem_state_created", "state", "created_at"),
+        Index(
+            "ix_syncreviewitem_submitted_by_user_id",
+            "submitted_by_user_id",
+            unique=False,
+            postgresql_where=text("submitted_by_user_id IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1003,6 +1027,19 @@ class SyncReviewItem(SQLModel, table=True):
     )
     resolved_by_user_id: uuid.UUID | None = Field(
         default=None, foreign_key="user.id", index=True
+    )
+    # ON DELETE SET NULL: keep the audit row when the submitter is deleted.
+    submitted_by_user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid,
+            ForeignKey(
+                "user.id",
+                ondelete="SET NULL",
+                name="fk_syncreviewitem_submitted_by_user_id",
+            ),
+            nullable=True,
+        ),
     )
     resolved_at: datetime | None = Field(
         default=None,
@@ -1039,6 +1076,7 @@ class SyncReviewItemPublic(SQLModel):
     reason: SyncReviewReason
     state: SyncReviewState
     created_at: datetime
+    submitted_by_user_id: uuid.UUID | None
     resolved_by_user_id: uuid.UUID | None
     resolved_at: datetime | None
     resolution_note: str | None
@@ -1084,6 +1122,7 @@ class SaleLine(SQLModel, table=True):
             "line_kind != 'UNIT' OR unit_id IS NOT NULL",
             name="ck_saleline_unit_requires_unit_id",
         ),
+        CheckConstraint("quantity > 0", name="ck_saleline_quantity_positive"),
         # An override applies to at most one line (nullable unique → many NULLs OK).
         UniqueConstraint(
             "pricing_override_request_id",
