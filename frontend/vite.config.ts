@@ -33,9 +33,9 @@ export default defineConfig({
         start_url: "/",
         icons: [
           {
-            src: "/assets/images/castranova-logo.jpg",
+            src: "/assets/images/castranova-logo.png",
             sizes: "512x512",
-            type: "image/jpeg",
+            type: "image/png",
             purpose: "any",
           },
         ],
