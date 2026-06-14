@@ -1,7 +1,10 @@
 import { Link } from "@tanstack/react-router"
 
 import { cn } from "@/lib/utils"
-import logo from "/assets/images/castranova-logo.jpg"
+// Square brand mark (used for the collapsed icon + favicon).
+import logoMark from "/assets/images/castranova-logo.jpg"
+// Padding-trimmed wordmark (~2.5:1) so the brand reads at a compact sidebar height.
+import logoWordmark from "/assets/images/castranova-logo-trimmed.png"
 
 interface LogoProps {
   variant?: "full" | "icon" | "responsive"
@@ -22,33 +25,35 @@ export function Logo({
     variant === "responsive" ? (
       <>
         <img
-          src={logo}
+          src={logoWordmark}
           alt="CASTRA NOVA"
           className={cn(
             BLEND,
-            "h-10 w-auto group-data-[collapsible=icon]:hidden",
+            "h-12 w-auto group-data-[collapsible=icon]:hidden",
             className,
           )}
         />
         <img
-          src={logo}
+          src={logoMark}
           alt="CASTRA NOVA"
           className={cn(
             BLEND,
-            "size-7 hidden group-data-[collapsible=icon]:block",
+            "size-8 hidden group-data-[collapsible=icon]:block",
             className,
           )}
         />
       </>
+    ) : variant === "full" ? (
+      <img
+        src={logoWordmark}
+        alt="CASTRA NOVA"
+        className={cn(BLEND, "h-14 w-auto", className)}
+      />
     ) : (
       <img
-        src={logo}
+        src={logoMark}
         alt="CASTRA NOVA"
-        className={cn(
-          BLEND,
-          variant === "full" ? "h-12 w-auto" : "size-7",
-          className,
-        )}
+        className={cn(BLEND, "size-8", className)}
       />
     )
 
