@@ -1,4 +1,5 @@
-import { Minus, Plus, Trash2 } from "lucide-react"
+import { Minus, Plus, ScanLine, Trash2 } from "lucide-react"
+import { EmptyState } from "@/components/EmptyState"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -47,9 +48,11 @@ export function TicketPartsList({
   if (lines.length === 0) {
     return (
       <div className="space-y-2">
-        <p className="text-muted-foreground py-8 text-center text-sm">
-          Scan a part to add it to the ticket.
-        </p>
+        <EmptyState
+          icon={ScanLine}
+          title="No parts yet"
+          hint="Scan a part to add it to the ticket."
+        />
         {ticketResult ? (
           <p className="text-center text-sm font-medium" aria-live="polite">
             {`Ticket closed — ${ticketResult.partsCount} part(s), ${formatThb(

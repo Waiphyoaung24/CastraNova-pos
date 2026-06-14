@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Printer, Trash2 } from "lucide-react"
+import { Boxes, Printer, Trash2 } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 
 import {
@@ -13,6 +13,7 @@ import {
   SuppliersService,
   type UnitPublic,
 } from "@/client"
+import { EmptyState } from "@/components/EmptyState"
 import { ScanInput } from "@/components/ScanInput"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -321,9 +322,11 @@ function SerializedTab() {
       <div className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Pieces ({pieces.length})</h2>
         {pieces.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            No pieces added yet. Scan or type a serial above.
-          </p>
+          <EmptyState
+            icon={Boxes}
+            title="No pieces added yet"
+            hint="Scan or type a serial above, then add it."
+          />
         ) : (
           <Table>
             <TableHeader>

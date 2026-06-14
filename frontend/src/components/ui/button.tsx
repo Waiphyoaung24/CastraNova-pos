@@ -9,7 +9,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default:
+          "bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100",
+        // Gold checkout CTA. Disabled renders as a neutral muted surface (not
+        // faded gold, which muddies to low contrast on the dark background) so
+        // the button visibly "lights up" only once its action is available.
+        cta: "bg-cta text-cta-foreground hover:bg-cta/90 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
         outline:

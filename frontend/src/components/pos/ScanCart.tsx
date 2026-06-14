@@ -1,4 +1,5 @@
-import { Minus, Plus, Trash2 } from "lucide-react"
+import { Minus, Plus, ScanLine, Trash2 } from "lucide-react"
+import { EmptyState } from "@/components/EmptyState"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -60,9 +61,11 @@ export function ScanCart({
 
   if (lines.length === 0) {
     return (
-      <p className="text-muted-foreground py-8 text-center text-sm">
-        Scan an item to start a sale.
-      </p>
+      <EmptyState
+        icon={ScanLine}
+        title="No items yet"
+        hint="Scan an item to start a sale."
+      />
     )
   }
 

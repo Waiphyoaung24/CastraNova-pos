@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { ScanLine } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
@@ -13,6 +14,7 @@ import {
 import { CameraScanFallback } from "@/components/CameraScanFallback"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
 import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -94,18 +96,19 @@ function CheckoutPanel({
         </Select>
       </div>
 
-      <button
+      <Button
         type="button"
+        variant="cta"
         onClick={onCheckout}
         disabled={!canCheckout}
-        className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
+        className="h-11 w-full text-sm font-semibold"
       >
         {isPaused
           ? "Queued (offline)…"
           : isPending
             ? "Completing…"
             : "Complete sale"}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -213,7 +216,13 @@ function Sale() {
           <div className="space-y-2">
             {/* ScanInput carries its own aria-label="Scan barcode"; this is a
                 visible caption, not a form-control label. */}
-            <p className="text-sm font-medium">Scan item</p>
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <ScanLine
+                className="text-muted-foreground size-4"
+                aria-hidden="true"
+              />
+              Scan item
+            </p>
             <ScanInput ref={scanRef} onScan={resolve} />
             <CameraScanFallback onScan={resolve} />
             {/* Two statically-typed live regions: a dynamic aria-live value is
@@ -265,7 +274,7 @@ function Sale() {
       {/* Mobile/tablet: checkout pinned to a sticky footer. Rendered as a second
           CheckoutPanel instance (not a shared node) so its useId stays unique;
           only one slot is visible per breakpoint. */}
-      <div className="bg-background sticky bottom-0 border-t py-4 md:hidden">
+      <div className="bg-background/90 supports-[backdrop-filter]:bg-background/75 sticky bottom-0 z-10 border-t py-4 backdrop-blur md:hidden">
         <CheckoutPanel
           customers={customers ?? []}
           customerId={customerId}

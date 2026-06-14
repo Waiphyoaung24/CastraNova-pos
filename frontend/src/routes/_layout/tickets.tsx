@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { ScanLine } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
@@ -15,6 +16,7 @@ import {
   type TicketResultSummary,
 } from "@/components/pos/TicketPartsList"
 import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -248,14 +250,15 @@ function Tickets() {
   }, [canClose, parts, customerId, issue, notes, resolution, mutation])
 
   const closeButton = (
-    <button
+    <Button
       type="button"
+      variant="cta"
       onClick={handleClose}
       disabled={!canClose}
-      className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
+      className="h-11 w-full text-sm font-semibold"
     >
       {mutation.isPending ? "Closing…" : "Close ticket"}
-    </button>
+    </Button>
   )
 
   return (
@@ -292,7 +295,13 @@ function Tickets() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm font-medium">Scan part</p>
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <ScanLine
+                className="text-muted-foreground size-4"
+                aria-hidden="true"
+              />
+              Scan part
+            </p>
             <ScanInput ref={scanRef} onScan={resolve} />
             <CameraScanFallback onScan={resolve} />
             <p
@@ -348,7 +357,7 @@ function Tickets() {
       </div>
 
       {/* Mobile/tablet: customer + close pinned to a sticky footer. */}
-      <div className="bg-background sticky bottom-0 space-y-3 border-t py-4 md:hidden">
+      <div className="bg-background/90 supports-[backdrop-filter]:bg-background/75 sticky bottom-0 z-10 space-y-3 border-t py-4 backdrop-blur md:hidden">
         <CustomerPicker
           customers={customers ?? []}
           value={customerId}

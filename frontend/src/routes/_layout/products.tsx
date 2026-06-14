@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useId, useState } from "react"
+import { Package } from "lucide-react"
+import { type ReactNode, useId, useState } from "react"
 
 import {
   type ProductCreate,
@@ -8,6 +9,7 @@ import {
   ProductsService,
   type TrackingMode,
 } from "@/client"
+import { EmptyState } from "@/components/EmptyState"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -122,6 +124,7 @@ function Products() {
           <CardTitle>New product</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
+          <SectionLabel>Identity</SectionLabel>
           <Field id={skuId} label="SKU" value={sku} onChange={setSku} />
           <Field
             id={modelId}
@@ -136,6 +139,8 @@ function Products() {
             value={category}
             onChange={setCategory}
           />
+
+          <SectionLabel>Classification</SectionLabel>
           <div className="space-y-2">
             <Label htmlFor={trackingId}>Tracking</Label>
             <Select
@@ -160,13 +165,17 @@ function Products() {
             value={minStock}
             onChange={setMinStock}
             type="number"
+            numeric
           />
+
+          <SectionLabel>Pricing</SectionLabel>
           <Field
             id={retailId}
             label="Retail price (THB)"
             value={retailPrice}
             onChange={setRetailPrice}
             type="number"
+            numeric
           />
           <Field
             id={repairId}
@@ -174,6 +183,7 @@ function Products() {
             value={repairPrice}
             onChange={setRepairPrice}
             type="number"
+            numeric
           />
           <div className="sm:col-span-2">
             <Button
@@ -190,9 +200,11 @@ function Products() {
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Catalog</h2>
         {(products ?? []).length === 0 ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            No products yet.
-          </p>
+          <EmptyState
+            icon={Package}
+            title="No products yet"
+            hint="Create your first product with the form above."
+          />
         ) : (
           <Table>
             <TableHeader>
@@ -242,18 +254,31 @@ function Products() {
   )
 }
 
+/** Full-width group heading inside the form grid — splits a long field list
+ * into scannable sections (Identity / Classification / Pricing). */
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <h3 className="text-muted-foreground col-span-full text-xs font-semibold tracking-wide uppercase not-first:mt-2">
+      {children}
+    </h3>
+  )
+}
+
 function Field({
   id,
   label,
   value,
   onChange,
   type = "text",
+  numeric = false,
 }: {
   id: string
   label: string
   value: string
   onChange: (v: string) => void
   type?: string
+  /** Tabular monospace + decimal keypad for prices/quantities. */
+  numeric?: boolean
 }) {
   return (
     <div className="space-y-2">
@@ -263,6 +288,8 @@ function Field({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        className={numeric ? "num" : undefined}
+        {...(numeric ? { inputMode: "decimal" as const } : {})}
         {...(type === "number" ? { min: 0 } : {})}
       />
     </div>
