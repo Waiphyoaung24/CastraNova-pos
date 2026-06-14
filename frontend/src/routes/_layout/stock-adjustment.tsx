@@ -125,6 +125,7 @@ function StockAdjustment() {
                 <Input
                   id={deltaId}
                   inputMode="numeric"
+                  className="num"
                   value={draft.qtyDelta}
                   onChange={(e) => set({ qtyDelta: e.target.value })}
                   placeholder="e.g. -3 (write-off) or 5 (found)"
@@ -140,6 +141,7 @@ function StockAdjustment() {
                   <Input
                     id={costId}
                     inputMode="decimal"
+                    className="num"
                     value={draft.purchaseCost}
                     onChange={(e) => set({ purchaseCost: e.target.value })}
                     placeholder="Cost basis for the new batch"
