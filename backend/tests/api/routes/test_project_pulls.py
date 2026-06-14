@@ -28,6 +28,7 @@ from app.models import (
     UnitMovement,
     UnitState,
 )
+from tests.utils.utils import assert_no_financial_keys
 
 PREFIX = settings.API_V1_STR
 
@@ -238,6 +239,26 @@ def test_staff_can_read_pull(
     )
     assert r.status_code == 200, r.text
     assert r.json()["id"] == pull["id"]
+
+
+def test_staff_pull_carries_display_labels(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+) -> None:
+    # Staff can't list projects (admin-only), so the pull payload must carry the
+    # project/customer display labels itself. No financial keys may leak.
+    pull = _create(client, superuser_token_headers, pull_ctx)
+    r = client.get(
+        f"{PREFIX}/project-pulls?state=PENDING", headers=staff_token_headers
+    )
+    assert r.status_code == 200, r.text
+    row = next(p for p in r.json() if p["id"] == pull["id"])
+    assert row["project_name"] == "Site A"
+    assert row["project_code"].startswith("PRJ-")
+    assert row["customer_name"] == "Proj Cust"
+    assert_no_financial_keys(row)
 
 
 def test_fulfill_all_marks_fulfilled(

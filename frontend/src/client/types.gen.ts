@@ -381,7 +381,10 @@ export type ProjectPullLinePublic = {
 export type ProjectPullPublic = {
     id: string;
     project_id: string;
+    project_name: string;
+    project_code: string;
     customer_id: string;
+    customer_name: string;
     state: ProjectPullState;
     admin_notes: (string | null);
     created_by_user_id: string;

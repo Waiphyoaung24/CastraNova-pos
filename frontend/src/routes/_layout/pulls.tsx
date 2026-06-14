@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
-  CustomersService,
   ProductsService,
   type ProjectPullCreate,
   type ProjectPullFulfill,
@@ -68,15 +67,14 @@ function Pulls() {
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   })
+  // Admin-only: the full projects list feeds the create-pull picker. Staff never
+  // open create mode and GET /projects/ is admin-gated, so gating the query keeps
+  // staff from triggering a 403. Display labels come from the pull rows below.
   const { data: projects } = useQuery({
     queryKey: ["projects"],
     queryFn: () => ProjectsService.readProjects(),
     staleTime: 5 * 60 * 1000,
-  })
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
-    staleTime: 5 * 60 * 1000,
+    enabled: isAdmin,
   })
   const { data: products } = useQuery({
     queryKey: ["products"],
@@ -84,13 +82,21 @@ function Pulls() {
     staleTime: 5 * 60 * 1000,
   })
 
+  // Built from the pull rows (each carries its project/customer labels) so staff,
+  // who can't list projects, still render names instead of raw UUIDs.
   const projectLabels = useMemo(
-    () => new Map((projects ?? []).map((p) => [p.id, `${p.name} (${p.code})`])),
-    [projects],
+    () =>
+      new Map(
+        (pulls ?? []).map((p) => [
+          p.project_id,
+          `${p.project_name} (${p.project_code})`,
+        ]),
+      ),
+    [pulls],
   )
   const customerLabels = useMemo(
-    () => new Map((customers ?? []).map((c) => [c.id, c.name])),
-    [customers],
+    () => new Map((pulls ?? []).map((p) => [p.customer_id, p.customer_name])),
+    [pulls],
   )
   const productNames = useMemo(
     () => new Map((products ?? []).map((p) => [p.id, p.model_name])),

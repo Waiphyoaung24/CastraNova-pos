@@ -1928,10 +1928,22 @@ export const ProjectPullPublicSchema = {
             format: 'uuid',
             title: 'Project Id'
         },
+        project_name: {
+            type: 'string',
+            title: 'Project Name'
+        },
+        project_code: {
+            type: 'string',
+            title: 'Project Code'
+        },
         customer_id: {
             type: 'string',
             format: 'uuid',
             title: 'Customer Id'
+        },
+        customer_name: {
+            type: 'string',
+            title: 'Customer Name'
         },
         state: {
             '$ref': '#/components/schemas/ProjectPullState'
@@ -2014,7 +2026,7 @@ export const ProjectPullPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'project_id', 'customer_id', 'state', 'admin_notes', 'created_by_user_id', 'created_at', 'fulfilled_at', 'fulfilled_by_user_id', 'cancelled_at', 'cancelled_by_user_id', 'lines'],
+    required: ['id', 'project_id', 'project_name', 'project_code', 'customer_id', 'customer_name', 'state', 'admin_notes', 'created_by_user_id', 'created_at', 'fulfilled_at', 'fulfilled_by_user_id', 'cancelled_at', 'cancelled_by_user_id', 'lines'],
     title: 'ProjectPullPublic'
 } as const;
 

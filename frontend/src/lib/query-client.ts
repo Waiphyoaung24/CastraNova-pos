@@ -10,7 +10,10 @@ import {
 } from "@/client"
 
 const handleApiError = (error: Error) => {
-  if (error instanceof ApiError && [401, 403].includes(error.status)) {
+  // Only 401 (unauthenticated — bad/expired token) ends the session. A 403 means
+  // the user is authenticated but lacks the role for that resource (e.g. staff
+  // hitting an admin-only endpoint); logging them out on 403 is wrong.
+  if (error instanceof ApiError && error.status === 401) {
     localStorage.removeItem("access_token")
     window.location.href = "/login"
   }

@@ -20,10 +20,15 @@ router = APIRouter(prefix="/project-pulls", tags=["project-pulls"])
 
 def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
     lines = crud.list_project_pull_lines(session=session, pull_id=pull.id)
+    project = crud.get_project(session=session, project_id=pull.project_id)
+    customer = crud.get_customer(session=session, customer_id=pull.customer_id)
     return ProjectPullPublic(
         id=pull.id,
         project_id=pull.project_id,
+        project_name=project.name if project else "",
+        project_code=project.code if project else "",
         customer_id=pull.customer_id,
+        customer_name=customer.name if customer else "",
         state=pull.state,
         admin_notes=pull.admin_notes,
         created_by_user_id=pull.created_by_user_id,

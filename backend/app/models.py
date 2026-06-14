@@ -1399,7 +1399,12 @@ class ProjectPullLinePublic(SQLModel):
 class ProjectPullPublic(SQLModel):
     id: uuid.UUID
     project_id: uuid.UUID
+    # Display labels resolved at read time so staff (who can't list the
+    # admin-only projects endpoint) can render the queue without an extra call.
+    project_name: str
+    project_code: str
     customer_id: uuid.UUID
+    customer_name: str
     state: ProjectPullState
     admin_notes: str | None
     created_by_user_id: uuid.UUID
