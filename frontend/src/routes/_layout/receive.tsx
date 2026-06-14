@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Boxes, Printer, Trash2 } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 
 import {
   ProductsService,
@@ -47,6 +47,7 @@ import {
   removePiece,
 } from "@/lib/receive-form"
 import { requireAuth } from "@/lib/route-guards"
+import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/_layout/receive")({
   component: Receive,
@@ -78,6 +79,27 @@ function Receive() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+/** Full-width uppercase group heading that splits a form into scannable
+ * sections (Delivery / Quantity & cost / Optional details). */
+function SectionLabel({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <h3
+      className={cn(
+        "text-muted-foreground text-xs font-semibold tracking-wide uppercase",
+        className,
+      )}
+    >
+      {children}
+    </h3>
   )
 }
 
@@ -182,6 +204,7 @@ function SerializedTab() {
       <output className="sr-only">{announce}</output>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        <SectionLabel className="col-span-full">Delivery</SectionLabel>
         <div className="flex flex-col gap-2">
           <Label htmlFor="receive-product">
             Product
@@ -465,6 +488,7 @@ function QuantityTab() {
       <output className="sr-only">{announce}</output>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        <SectionLabel className="col-span-full">Delivery</SectionLabel>
         <div className="flex flex-col gap-2">
           <Label htmlFor={`${fieldId}-product`}>
             Product
@@ -527,6 +551,9 @@ function QuantityTab() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        <SectionLabel className="col-span-full">
+          Quantity &amp; cost
+        </SectionLabel>
         <div className="flex flex-col gap-2">
           <Label htmlFor={`${fieldId}-qty`}>
             Received qty
@@ -570,6 +597,7 @@ function QuantityTab() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
+        <SectionLabel className="col-span-full">Optional details</SectionLabel>
         <div className="flex flex-col gap-2">
           <Label htmlFor={`${fieldId}-batch-ref`}>
             Supplier batch ref (optional)
@@ -597,19 +625,18 @@ function QuantityTab() {
             autoComplete="off"
           />
         </div>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <Label htmlFor={`${fieldId}-note`}>Note (optional)</Label>
-        <Input
-          id={`${fieldId}-note`}
-          className="h-11"
-          disabled={mutation.isPending}
-          value={draft.note}
-          onChange={(e) => patch("note", e.target.value)}
-          placeholder="Optional note"
-          autoComplete="off"
-        />
+        <div className="flex flex-col gap-2 sm:col-span-2">
+          <Label htmlFor={`${fieldId}-note`}>Note (optional)</Label>
+          <Input
+            id={`${fieldId}-note`}
+            className="h-11"
+            disabled={mutation.isPending}
+            value={draft.note}
+            onChange={(e) => patch("note", e.target.value)}
+            placeholder="Optional note"
+            autoComplete="off"
+          />
+        </div>
       </div>
 
       <div>
