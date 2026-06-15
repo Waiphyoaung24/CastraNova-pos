@@ -28,6 +28,8 @@ from app.models import (
     Customer,
     CustomerCreate,
     CustomerUpdate,
+    ExchangeRatesPublic,
+    ExchangeRatesUpdate,
     HoldingPeriodReport,
     HoldingPeriodRow,
     LineState,
@@ -187,6 +189,8 @@ OVERRIDE_THRESHOLD_KEY = "override_deviation_threshold_pct"
 DEFAULT_OVERRIDE_THRESHOLD_PCT = 5.0
 HOLDING_THRESHOLD_KEY = "holding_period_threshold_days"
 DEFAULT_HOLDING_THRESHOLD_DAYS = 90
+EXCHANGE_RATES_KEY = "exchange_rates_thb"
+DEFAULT_EXCHANGE_RATES: dict[str, str] = {"USD_THB": "0", "MMK_THB": "0"}
 
 
 def get_setting(*, session: Session, key: str, default: Any = None) -> Any:
@@ -220,11 +224,39 @@ def set_setting(
     return row
 
 
+def get_exchange_rates(*, session: Session) -> ExchangeRatesPublic:
+    row = session.exec(
+        select(SystemSetting).where(SystemSetting.key == EXCHANGE_RATES_KEY)
+    ).first()
+    raw = row.value if row else DEFAULT_EXCHANGE_RATES
+    return ExchangeRatesPublic(
+        usd_thb=Decimal(str(raw.get("USD_THB", "0"))),
+        mmk_thb=Decimal(str(raw.get("MMK_THB", "0"))),
+        updated_at=row.updated_at if row else None,
+    )
+
+
+def set_exchange_rates(
+    *,
+    session: Session,
+    rates: ExchangeRatesUpdate,
+    updated_by_user_id: uuid.UUID | None = None,
+) -> ExchangeRatesPublic:
+    set_setting(
+        session=session,
+        key=EXCHANGE_RATES_KEY,
+        value={"USD_THB": str(rates.usd_thb), "MMK_THB": str(rates.mmk_thb)},
+        updated_by_user_id=updated_by_user_id,
+    )
+    return get_exchange_rates(session=session)
+
+
 def seed_system_settings(*, session: Session) -> None:
     """Idempotently seed the default configurable thresholds."""
     defaults: list[tuple[str, Any]] = [
         (OVERRIDE_THRESHOLD_KEY, DEFAULT_OVERRIDE_THRESHOLD_PCT),
         (HOLDING_THRESHOLD_KEY, DEFAULT_HOLDING_THRESHOLD_DAYS),
+        (EXCHANGE_RATES_KEY, DEFAULT_EXCHANGE_RATES),
     ]
     for key, value in defaults:
         if not session.exec(

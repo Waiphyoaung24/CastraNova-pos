@@ -443,6 +443,23 @@ class BulkMinStockUpdate(SQLModel):
         return self
 
 
+# --- Exchange rates (import-time FX config; SystemSetting-backed) -------------
+
+
+class ExchangeRatesUpdate(SQLModel):
+    # THB per 1 unit of the source currency. ge=0 rejects negatives and NaN;
+    # le bounds to a sane ceiling. Persisted as decimal strings in the jsonb
+    # setting (Decimal is not JSON-serializable) to preserve precision.
+    usd_thb: Decimal = Field(ge=0, le=1_000_000)
+    mmk_thb: Decimal = Field(ge=0, le=1_000_000)
+
+
+class ExchangeRatesPublic(SQLModel):
+    usd_thb: Decimal
+    mmk_thb: Decimal
+    updated_at: datetime | None = None
+
+
 # --- Price change (append-only history; FR-002) -------------------------------
 
 
