@@ -52,6 +52,8 @@ services:
   backend:
     image: '${DOCKER_IMAGE_BACKEND}:${TAG:-latest}'
     restart: always
+    ports:
+      - "8099:8000"
     networks:
       - dokploy-network
       - default
@@ -94,6 +96,8 @@ services:
   frontend:
     image: '${DOCKER_IMAGE_FRONTEND}:${TAG:-latest}'
     restart: always
+    ports:
+      - "87:80"
     networks:
       - dokploy-network
     build:
