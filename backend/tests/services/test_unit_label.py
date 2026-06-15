@@ -13,9 +13,21 @@ label PDF with the in-app camera fallback) — a 19-char ECC-M QR is decodable b
 spec, and pixel-level decode would require a heavy raster backend the repo omits.
 """
 
+import inspect
+
 from app.services.barcode import _unit_qr_drawing, render_unit_label
 
 _BARCODE = "CN-A1B2C3D4E5F6A7B8"
+
+
+def test_render_unit_label_signature_is_stable() -> None:
+    """Pin the public contract the route depends on (mirrors test_receipt_pdf.py).
+
+    The receipts route calls render_unit_label(castranova_barcode=..., caption=...);
+    a rename here would silently break that call site, so lock the parameter set.
+    """
+    sig = inspect.signature(render_unit_label)
+    assert set(sig.parameters.keys()) == {"castranova_barcode", "caption"}
 
 
 def test_unit_qr_drawing_encodes_exact_value() -> None:

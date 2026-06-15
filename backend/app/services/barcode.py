@@ -28,6 +28,9 @@ def _unit_qr_drawing(value: str, size: float = _QR_SIZE) -> Drawing:
     Drawing transform, so callers can place it at any (x, y) on a canvas.
     """
     widget = QrCodeWidget(value, barLevel="M")
+    # getBounds() returns (0, 0, w, h) for QrCodeWidget today, so the translation
+    # terms below collapse to zero; they are kept defensively so the scale-to-fit
+    # stays correct if a future ReportLab returns a non-zero origin.
     x0, y0, x1, y1 = widget.getBounds()
     w = x1 - x0
     h = y1 - y0
