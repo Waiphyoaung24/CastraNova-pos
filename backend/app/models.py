@@ -1565,6 +1565,14 @@ class BatchDrillRow(SQLModel):
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 
+class UnitDrillRow(SQLModel):
+    castranova_barcode: str
+    supplier_serial: str
+    current_state: UnitState
+    received_at: datetime
+    # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
+
+
 # --- Customer dashboard (FR-020; role-tiered, spec §6.5 / S7) ------------------
 
 

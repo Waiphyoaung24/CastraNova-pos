@@ -83,6 +83,7 @@ from app.models import (
     SystemSetting,
     TrackingMode,
     Unit,
+    UnitDrillRow,
     UnitMovement,
     UnitState,
     User,
@@ -3021,6 +3022,29 @@ def stock_on_hand_batches(
             received_at=b.received_at,
         )
         for b in batches
+    ]
+
+
+def stock_on_hand_units(
+    *, session: Session, product_id: uuid.UUID
+) -> list[UnitDrillRow]:
+    """In-stock serialized units for a product, oldest first (received order)."""
+    units = session.exec(
+        select(Unit)
+        .where(
+            col(Unit.product_id) == product_id,
+            col(Unit.current_state) == UnitState.IN_STOCK,
+        )
+        .order_by(col(Unit.received_at), col(Unit.id))
+    ).all()
+    return [
+        UnitDrillRow(
+            castranova_barcode=u.castranova_barcode,
+            supplier_serial=u.supplier_serial,
+            current_state=u.current_state,
+            received_at=u.received_at,
+        )
+        for u in units
     ]
 
 

@@ -139,7 +139,7 @@ function StockOnHand() {
               const isQuantity = r.tracking_mode === "QUANTITY"
               const isOpen = expandedId === r.product_id
               return (
-                <BatchRow
+                <StockRow
                   key={r.product_id}
                   productId={r.product_id}
                   sku={r.sku}
@@ -160,7 +160,7 @@ function StockOnHand() {
   )
 }
 
-interface BatchRowProps {
+interface StockRowProps {
   productId: string
   sku: string
   modelName: string
@@ -172,7 +172,7 @@ interface BatchRowProps {
   onToggle: () => void
 }
 
-function BatchRow({
+function StockRow({
   productId,
   sku,
   modelName,
@@ -182,30 +182,35 @@ function BatchRow({
   isQuantity,
   isOpen,
   onToggle,
-}: BatchRowProps) {
-  const { data: batches, isPending } = useQuery({
+}: StockRowProps) {
+  // QUANTITY rows drill into FIFO batches; SERIALIZED rows drill into in-stock
+  // units (each with its CastraNova barcode). Both fetch lazily on expand.
+  const { data: batches, isPending: batchesPending } = useQuery({
     queryKey: ["stock-batches", productId],
     queryFn: () => DashboardsService.getStockOnHandBatches({ productId }),
     enabled: isQuantity && isOpen,
+  })
+  const { data: units, isPending: unitsPending } = useQuery({
+    queryKey: ["stock-units", productId],
+    queryFn: () => DashboardsService.getStockOnHandUnits({ productId }),
+    enabled: !isQuantity && isOpen,
   })
 
   return (
     <>
       <TableRow>
         <TableCell>
-          {isQuantity ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              aria-label={isOpen ? `Collapse ${sku}` : `Expand ${sku}`}
-              aria-expanded={isOpen}
-              onClick={onToggle}
-            >
-              {isOpen ? <ChevronDown /> : <ChevronRight />}
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            aria-label={isOpen ? `Collapse ${sku}` : `Expand ${sku}`}
+            aria-expanded={isOpen}
+            onClick={onToggle}
+          >
+            {isOpen ? <ChevronDown /> : <ChevronRight />}
+          </Button>
         </TableCell>
         <TableCell className="num font-medium">{sku}</TableCell>
         <TableCell>{modelName}</TableCell>
@@ -217,33 +222,68 @@ function BatchRow({
         </TableCell>
         <TableCell className="num text-right">{quantityOnHand}</TableCell>
       </TableRow>
-      {isQuantity && isOpen ? (
+      {isOpen ? (
         <TableRow>
           <TableCell colSpan={6} className="bg-muted/30">
-            {isPending ? (
+            {isQuantity ? (
+              batchesPending ? (
+                <p className="text-muted-foreground py-2 text-sm">Loading…</p>
+              ) : (batches ?? []).length === 0 ? (
+                <p className="text-muted-foreground py-2 text-sm">
+                  No open batches.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Batch</TableHead>
+                      <TableHead className="text-right">Remaining</TableHead>
+                      <TableHead>Received</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(batches ?? []).map((b) => (
+                      <TableRow key={b.batch_no}>
+                        <TableCell className="num">{b.batch_no}</TableCell>
+                        <TableCell className="num text-right">
+                          {b.remaining_qty}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {new Date(b.received_at).toLocaleDateString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )
+            ) : unitsPending ? (
               <p className="text-muted-foreground py-2 text-sm">Loading…</p>
-            ) : (batches ?? []).length === 0 ? (
+            ) : (units ?? []).length === 0 ? (
               <p className="text-muted-foreground py-2 text-sm">
-                No open batches.
+                No units in stock.
               </p>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Batch</TableHead>
-                    <TableHead className="text-right">Remaining</TableHead>
+                    <TableHead>CastraNova barcode</TableHead>
+                    <TableHead>Supplier serial</TableHead>
+                    <TableHead>State</TableHead>
                     <TableHead>Received</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(batches ?? []).map((b) => (
-                    <TableRow key={b.batch_no}>
-                      <TableCell className="num">{b.batch_no}</TableCell>
-                      <TableCell className="num text-right">
-                        {b.remaining_qty}
+                  {(units ?? []).map((u) => (
+                    <TableRow key={u.castranova_barcode}>
+                      <TableCell className="num font-medium">
+                        {u.castranova_barcode}
+                      </TableCell>
+                      <TableCell className="num">{u.supplier_serial}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{u.current_state}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {new Date(b.received_at).toLocaleDateString()}
+                        {new Date(u.received_at).toLocaleDateString()}
                       </TableCell>
                     </TableRow>
                   ))}

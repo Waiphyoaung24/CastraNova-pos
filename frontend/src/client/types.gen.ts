@@ -708,6 +708,13 @@ export type TransactionSummaryPublic = {
     occurred_at: string;
 };
 
+export type UnitDrillRow = {
+    castranova_barcode: string;
+    supplier_serial: string;
+    current_state: UnitState;
+    received_at: string;
+};
+
 export type UnitPublic = {
     product_id: string;
     supplier_id: string;
@@ -845,6 +852,12 @@ export type DashboardsGetStockOnHandBatchesData = {
 };
 
 export type DashboardsGetStockOnHandBatchesResponse = (Array<BatchDrillRow>);
+
+export type DashboardsGetStockOnHandUnitsData = {
+    productId: string;
+};
+
+export type DashboardsGetStockOnHandUnitsResponse = (Array<UnitDrillRow>);
 
 export type LoginLoginAccessTokenData = {
     formData: Body_login_login_access_token;

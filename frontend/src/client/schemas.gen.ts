@@ -3654,6 +3654,30 @@ export const TransactionSummaryPublicSchema = {
     title: 'TransactionSummaryPublic'
 } as const;
 
+export const UnitDrillRowSchema = {
+    properties: {
+        castranova_barcode: {
+            type: 'string',
+            title: 'Castranova Barcode'
+        },
+        supplier_serial: {
+            type: 'string',
+            title: 'Supplier Serial'
+        },
+        current_state: {
+            '$ref': '#/components/schemas/UnitState'
+        },
+        received_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Received At'
+        }
+    },
+    type: 'object',
+    required: ['castranova_barcode', 'supplier_serial', 'current_state', 'received_at'],
+    title: 'UnitDrillRow'
+} as const;
+
 export const UnitPublicSchema = {
     properties: {
         product_id: {
