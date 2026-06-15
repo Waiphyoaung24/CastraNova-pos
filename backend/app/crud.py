@@ -244,13 +244,17 @@ def set_exchange_rates(
     rates: ExchangeRatesUpdate,
     updated_by_user_id: uuid.UUID | None = None,
 ) -> ExchangeRatesPublic:
-    set_setting(
+    row = set_setting(
         session=session,
         key=EXCHANGE_RATES_KEY,
         value={"USD_THB": str(rates.usd_thb), "MMK_THB": str(rates.mmk_thb)},
         updated_by_user_id=updated_by_user_id,
     )
-    return get_exchange_rates(session=session)
+    return ExchangeRatesPublic(
+        usd_thb=rates.usd_thb,
+        mmk_thb=rates.mmk_thb,
+        updated_at=row.updated_at,
+    )
 
 
 def seed_system_settings(*, session: Session) -> None:

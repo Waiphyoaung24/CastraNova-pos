@@ -82,3 +82,14 @@ def test_negative_rate_rejected(
         json={"usd_thb": "-1", "mmk_thb": "0"},
     )
     assert r.status_code == 422
+
+
+def test_rate_above_max_rejected(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    r = client.put(
+        URL,
+        headers=superuser_token_headers,
+        json={"usd_thb": "1000001", "mmk_thb": "0"},
+    )
+    assert r.status_code == 422
