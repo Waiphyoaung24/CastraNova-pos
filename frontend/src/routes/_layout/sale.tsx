@@ -12,6 +12,7 @@ import {
   type SaleStaffPublic,
 } from "@/client"
 import { CameraScanFallback } from "@/components/CameraScanFallback"
+import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
 import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
 import { Button } from "@/components/ui/button"
@@ -94,6 +95,7 @@ function CheckoutPanel({
             ))}
           </SelectContent>
         </Select>
+        <CustomerCreateDialog onCreated={(c) => onCustomerChange(c.id)} />
       </div>
 
       <Button

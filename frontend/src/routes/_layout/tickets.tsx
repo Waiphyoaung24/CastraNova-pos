@@ -11,6 +11,7 @@ import {
   ServiceTicketsService,
 } from "@/client"
 import { CameraScanFallback } from "@/components/CameraScanFallback"
+import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import {
   TicketPartsList,
   type TicketResultSummary,
@@ -76,18 +77,21 @@ function CustomerPicker({
   ariaLabel,
 }: CustomerPickerProps) {
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={triggerId} aria-label={ariaLabel} className="w-full">
-        <SelectValue placeholder="Select a customer" />
-      </SelectTrigger>
-      <SelectContent>
-        {customers.map((c) => (
-          <SelectItem key={c.id} value={c.id}>
-            {c.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className="space-y-2">
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger id={triggerId} aria-label={ariaLabel} className="w-full">
+          <SelectValue placeholder="Select a customer" />
+        </SelectTrigger>
+        <SelectContent>
+          {customers.map((c) => (
+            <SelectItem key={c.id} value={c.id}>
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <CustomerCreateDialog onCreated={(c) => onChange(c.id)} />
+    </div>
   )
 }
 

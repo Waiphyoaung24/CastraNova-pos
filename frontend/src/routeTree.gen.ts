@@ -31,6 +31,7 @@ import { Route as LayoutOverrideExceptionsRouteImport } from './routes/_layout/o
 import { Route as LayoutNotificationsRouteImport } from './routes/_layout/notifications'
 import { Route as LayoutLowStockRouteImport } from './routes/_layout/low-stock'
 import { Route as LayoutHoldingPeriodRouteImport } from './routes/_layout/holding-period'
+import { Route as LayoutCustomersRouteImport } from './routes/_layout/customers'
 import { Route as LayoutChannelMarginRouteImport } from './routes/_layout/channel-margin'
 import { Route as LayoutAuditRouteImport } from './routes/_layout/audit'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
@@ -147,6 +148,11 @@ const LayoutHoldingPeriodRoute = LayoutHoldingPeriodRouteImport.update({
   path: '/holding-period',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutCustomersRoute = LayoutCustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutChannelMarginRoute = LayoutChannelMarginRouteImport.update({
   id: '/channel-margin',
   path: '/channel-margin',
@@ -182,6 +188,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof LayoutAdminRoute
   '/audit': typeof LayoutAuditRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
+  '/customers': typeof LayoutCustomersRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
   '/low-stock': typeof LayoutLowStockRoute
   '/notifications': typeof LayoutNotificationsRoute
@@ -209,6 +216,7 @@ export interface FileRoutesByTo {
   '/admin': typeof LayoutAdminRoute
   '/audit': typeof LayoutAuditRoute
   '/channel-margin': typeof LayoutChannelMarginRoute
+  '/customers': typeof LayoutCustomersRoute
   '/holding-period': typeof LayoutHoldingPeriodRoute
   '/low-stock': typeof LayoutLowStockRoute
   '/notifications': typeof LayoutNotificationsRoute
@@ -239,6 +247,7 @@ export interface FileRoutesById {
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/audit': typeof LayoutAuditRoute
   '/_layout/channel-margin': typeof LayoutChannelMarginRoute
+  '/_layout/customers': typeof LayoutCustomersRoute
   '/_layout/holding-period': typeof LayoutHoldingPeriodRoute
   '/_layout/low-stock': typeof LayoutLowStockRoute
   '/_layout/notifications': typeof LayoutNotificationsRoute
@@ -270,6 +279,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/audit'
     | '/channel-margin'
+    | '/customers'
     | '/holding-period'
     | '/low-stock'
     | '/notifications'
@@ -297,6 +307,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/audit'
     | '/channel-margin'
+    | '/customers'
     | '/holding-period'
     | '/low-stock'
     | '/notifications'
@@ -326,6 +337,7 @@ export interface FileRouteTypes {
     | '/_layout/admin'
     | '/_layout/audit'
     | '/_layout/channel-margin'
+    | '/_layout/customers'
     | '/_layout/holding-period'
     | '/_layout/low-stock'
     | '/_layout/notifications'
@@ -511,6 +523,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutHoldingPeriodRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/customers': {
+      id: '/_layout/customers'
+      path: '/customers'
+      fullPath: '/customers'
+      preLoaderRoute: typeof LayoutCustomersRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/channel-margin': {
       id: '/_layout/channel-margin'
       path: '/channel-margin'
@@ -553,6 +572,7 @@ interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
   LayoutAuditRoute: typeof LayoutAuditRoute
   LayoutChannelMarginRoute: typeof LayoutChannelMarginRoute
+  LayoutCustomersRoute: typeof LayoutCustomersRoute
   LayoutHoldingPeriodRoute: typeof LayoutHoldingPeriodRoute
   LayoutLowStockRoute: typeof LayoutLowStockRoute
   LayoutNotificationsRoute: typeof LayoutNotificationsRoute
@@ -579,6 +599,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
   LayoutAuditRoute: LayoutAuditRoute,
   LayoutChannelMarginRoute: LayoutChannelMarginRoute,
+  LayoutCustomersRoute: LayoutCustomersRoute,
   LayoutHoldingPeriodRoute: LayoutHoldingPeriodRoute,
   LayoutLowStockRoute: LayoutLowStockRoute,
   LayoutNotificationsRoute: LayoutNotificationsRoute,

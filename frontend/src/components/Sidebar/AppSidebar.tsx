@@ -6,6 +6,7 @@ import {
   Boxes,
   ClipboardList,
   Clock,
+  Contact,
   FileWarning,
   FolderKanban,
   Home,
@@ -87,6 +88,7 @@ const adminItems: Entry[] = [
     items: [
       { icon: Package, title: "Products", path: "/products" },
       { icon: Truck, title: "Suppliers", path: "/suppliers" },
+      { icon: Contact, title: "Customers", path: "/customers" },
       { icon: FolderKanban, title: "Projects", path: "/projects" },
     ],
   },
@@ -108,7 +110,11 @@ const adminItems: Entry[] = [
       { icon: PieChart, title: "Channel margin", path: "/channel-margin" },
       { icon: Clock, title: "Holding period", path: "/holding-period" },
       // Monthly pricing-override exceptions audit (FR-010 §8).
-      { icon: FileWarning, title: "Overrides report", path: "/override-exceptions" },
+      {
+        icon: FileWarning,
+        title: "Overrides report",
+        path: "/override-exceptions",
+      },
     ],
   },
   // Append-only audit ledger viewer + offline sync-review queue — admin-only.
