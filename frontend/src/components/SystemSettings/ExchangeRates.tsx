@@ -99,7 +99,9 @@ const ExchangeRates = () => {
                     {...field}
                   />
                 </FormControl>
-                <FormDescription>e.g. 1 USD = 36.50 THB</FormDescription>
+                <FormDescription>
+                  THB per 1 USD — e.g. 1 USD = 33 THB
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -121,7 +123,9 @@ const ExchangeRates = () => {
                     {...field}
                   />
                 </FormControl>
-                <FormDescription>e.g. 1 MMK = 0.0135 THB</FormDescription>
+                <FormDescription>
+                  THB per 1 MMK — if 1 THB = 132.5 MMK, enter 0.0075
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
