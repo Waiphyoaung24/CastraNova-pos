@@ -348,6 +348,36 @@ def test_batch_drilldown_lists_active_batches(
     assert remaining == [8, 12]
 
 
+def test_unit_drilldown_exposes_id_usable_for_label(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    """The serialized-unit drill-down must carry each unit's id so the Stock
+    screen can reprint the QR label (FR-005 lost-label reprint). The id must
+    resolve to a real unit the label endpoint accepts — proving the whole
+    Stock → reprint chain, not just the field's presence."""
+    product_id = _seed_serialized_units(
+        client, staff_token_headers, db, 2, admin_headers=superuser_token_headers
+    )
+    r = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand/{product_id}/units",
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    rows = r.json()
+    assert len(rows) == 2
+    for row in rows:
+        unit_id = uuid.UUID(row["id"])  # well-formed UUID
+        label = client.get(
+            f"{settings.API_V1_STR}/receipts/serialized/{unit_id}/label.pdf",
+            headers=staff_token_headers,
+        )
+        assert label.status_code == 200, label.text
+        assert label.content[:4] == b"%PDF"
+
+
 def test_stock_on_hand_is_single_pass_not_n_plus_one(
     client: TestClient,
     superuser_token_headers: dict[str, str],

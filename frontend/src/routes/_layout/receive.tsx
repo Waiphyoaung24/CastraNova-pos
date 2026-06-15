@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Boxes, Printer, Trash2 } from "lucide-react"
-import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { Boxes, Trash2 } from "lucide-react"
+import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
   ProductsService,
@@ -14,6 +14,7 @@ import {
   type UnitPublic,
 } from "@/client"
 import { EmptyState } from "@/components/EmptyState"
+import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { ScanInput } from "@/components/ScanInput"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -678,69 +679,5 @@ function ReceivedUnits({ units }: { units: UnitPublic[] }) {
         </TableBody>
       </Table>
     </div>
-  )
-}
-
-function PrintLabelButton({
-  unitId,
-  serial,
-}: {
-  unitId: string
-  serial: string
-}) {
-  const { showErrorToast } = useCustomToast()
-  const objectUrlRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
-    }
-  }, [])
-
-  async function handlePrint() {
-    // Sanctioned bare-fetch exception: the label is a binary PDF the generated
-    // SDK types as `unknown`, so it can't reliably yield a usable blob. This is
-    // the only authed binary download on the screen.
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      showErrorToast("Session expired. Please log in again.")
-      return
-    }
-    try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/v1/receipts/serialized/${unitId}/label.pdf`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      )
-      if (!res.ok) {
-        showErrorToast("Could not load label PDF.")
-        return
-      }
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
-      const url = URL.createObjectURL(await res.blob())
-      objectUrlRef.current = url
-      const win = window.open(url, "_blank", "noopener,noreferrer")
-      if (!win) {
-        showErrorToast("Pop-up blocked. Allow pop-ups and try again.")
-        URL.revokeObjectURL(url)
-        objectUrlRef.current = null
-        return
-      }
-    } catch {
-      showErrorToast("Could not load label PDF.")
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="h-11"
-      aria-label={`Print label for serial ${serial}`}
-      onClick={handlePrint}
-    >
-      <Printer className="size-4" />
-      Print label
-    </Button>
   )
 }

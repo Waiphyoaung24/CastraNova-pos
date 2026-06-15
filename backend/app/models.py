@@ -1566,6 +1566,7 @@ class BatchDrillRow(SQLModel):
 
 
 class UnitDrillRow(SQLModel):
+    id: uuid.UUID  # unit identity — lets the Stock screen reprint the QR label
     castranova_barcode: str
     supplier_serial: str
     current_state: UnitState

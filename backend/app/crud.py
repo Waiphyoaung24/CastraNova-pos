@@ -3039,6 +3039,7 @@ def stock_on_hand_units(
     ).all()
     return [
         UnitDrillRow(
+            id=u.id,
             castranova_barcode=u.castranova_barcode,
             supplier_serial=u.supplier_serial,
             current_state=u.current_state,

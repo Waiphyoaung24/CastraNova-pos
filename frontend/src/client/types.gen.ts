@@ -709,6 +709,7 @@ export type TransactionSummaryPublic = {
 };
 
 export type UnitDrillRow = {
+    id: string;
     castranova_barcode: string;
     supplier_serial: string;
     current_state: UnitState;

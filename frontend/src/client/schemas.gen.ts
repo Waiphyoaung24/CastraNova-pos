@@ -3656,6 +3656,11 @@ export const TransactionSummaryPublicSchema = {
 
 export const UnitDrillRowSchema = {
     properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
         castranova_barcode: {
             type: 'string',
             title: 'Castranova Barcode'
@@ -3674,7 +3679,7 @@ export const UnitDrillRowSchema = {
         }
     },
     type: 'object',
-    required: ['castranova_barcode', 'supplier_serial', 'current_state', 'received_at'],
+    required: ['id', 'castranova_barcode', 'supplier_serial', 'current_state', 'received_at'],
     title: 'UnitDrillRow'
 } as const;
 
