@@ -34,12 +34,13 @@ export const Route = createFileRoute("/_layout/settings")({
 
 function UserSettings() {
   const { user: currentUser } = useAuth()
-  const isAdmin = currentUser?.is_superuser || currentUser?.role === "BKK_ADMIN"
-  const finalTabs = isAdmin ? [...tabsConfig, ...adminTabs] : tabsConfig
 
   if (!currentUser) {
     return null
   }
+
+  const isAdmin = currentUser.is_superuser || currentUser.role === "BKK_ADMIN"
+  const finalTabs = isAdmin ? [...tabsConfig, ...adminTabs] : tabsConfig
 
   return (
     <div className="flex flex-col gap-6">

@@ -37,7 +37,7 @@ const ExchangeRates = () => {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
 
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ["exchange-rates"],
     queryFn: () => SettingsService.getExchangeRates(),
   })
@@ -72,6 +72,11 @@ const ExchangeRates = () => {
         THB per 1 unit of the source currency. Used to convert imported supplier
         prices (USD / MMK) into THB.
       </p>
+      {isError && (
+        <p className="text-sm text-destructive pb-2">
+          Could not load the current rates. Refresh to retry before saving.
+        </p>
+      )}
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}
@@ -124,6 +129,7 @@ const ExchangeRates = () => {
           <LoadingButton
             type="submit"
             loading={mutation.isPending}
+            disabled={!data}
             className="self-start"
           >
             Save Rates
