@@ -143,9 +143,10 @@ class Settings(BaseSettings):
     def _enforce_non_default_secrets(self) -> Self:
         self._check_default_secret("SECRET_KEY", self.SECRET_KEY)
         self._check_default_secret("POSTGRES_PASSWORD", self.POSTGRES_PASSWORD)
-        self._check_default_secret(
-            "FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD
-        )
+        # NOTE: FIRST_SUPERUSER_PASSWORD is intentionally exempted from the
+        # production "changethis" guard at the owner's explicit request, so a
+        # default admin (admin@example.com / changethis) can be seeded in
+        # production. This is a known security trade-off, not an oversight.
         if self.POSTGRES_APP_PASSWORD:
             self._check_default_secret(
                 "POSTGRES_APP_PASSWORD", self.POSTGRES_APP_PASSWORD
