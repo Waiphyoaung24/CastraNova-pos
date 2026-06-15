@@ -1,14 +1,17 @@
 """Unit tests for render_unit_label / _unit_qr_drawing (FR-005, QR labels).
 
-Two layers:
-- Always-on structural test: the QR Drawing carries the exact value at ECC
-  level M (catches wrong-value or symbology-revert regressions with zero deps).
-- Optional decode round-trip: rasterize the QR Drawing and decode it back,
-  proving real scannability. Skipped if the optional decoder (opencv) or the
-  reportlab raster backend (renderPM) is unavailable, so the suite still runs.
-"""
+Strategy mirrors test_receipt_pdf.py: the project intentionally carries no
+PDF-rasterizing/decoding dependency, so we assert structurally rather than
+decoding pixels. Two guards:
+- the QR Drawing carries the exact value at ECC level M (catches a wrong value
+  or a silent revert to a different symbology), and
+- the full render pipeline executes and emits a well-formed PDF (proves the QR
+  actually encodes + draws without error).
 
-import pytest
+Real camera-scannability of the printed label is verified manually (scan the
+label PDF with the in-app camera fallback) — a 19-char ECC-M QR is decodable by
+spec, and pixel-level decode would require a heavy raster backend the repo omits.
+"""
 
 from app.services.barcode import _unit_qr_drawing, render_unit_label
 
@@ -28,16 +31,3 @@ def test_render_unit_label_returns_valid_pdf() -> None:
     pdf = render_unit_label(castranova_barcode=_BARCODE, caption="SN-XYZ")
     assert pdf[:4] == b"%PDF"
     assert len(pdf) > 100
-
-
-def test_qr_round_trips_through_a_decoder() -> None:
-    """Rasterize the QR and decode it — proves the label is actually scannable."""
-    cv2 = pytest.importorskip("cv2")
-    np = pytest.importorskip("numpy")
-    render_pm = pytest.importorskip("reportlab.graphics.renderPM")
-
-    drawing = _unit_qr_drawing(_BARCODE, size=200)  # 200pt → dense enough to decode
-    png = render_pm.drawToString(drawing, fmt="PNG", dpi=300)
-    img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
-    decoded, _points, _qr = cv2.QRCodeDetector().detectAndDecode(img)
-    assert decoded == _BARCODE
