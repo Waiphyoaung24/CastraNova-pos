@@ -4,23 +4,19 @@ import { useRegisterSW } from "virtual:pwa-register/react"
  * registerType is 'autoUpdate', so this is a courtesy prompt for in-session updates. */
 export function ReloadPrompt() {
   const {
-    offlineReady: [offlineReady, setOfflineReady],
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW()
 
   const close = () => {
-    setOfflineReady(false)
     setNeedRefresh(false)
   }
 
-  if (!offlineReady && !needRefresh) return null
+  if (!needRefresh) return null
 
   return (
     <div className="fixed right-4 bottom-4 z-50 rounded-md border bg-background p-4 shadow-lg">
-      <div className="mb-2 text-sm">
-        {offlineReady ? "App ready to work offline." : "New version available."}
-      </div>
+      <div className="mb-2 text-sm">New version available.</div>
       <div className="flex gap-2">
         {needRefresh && (
           <button
