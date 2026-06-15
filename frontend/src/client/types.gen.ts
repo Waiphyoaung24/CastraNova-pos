@@ -109,6 +109,17 @@ export type CustomerUpdate = {
     notes?: (string | null);
 };
 
+export type ExchangeRatesPublic = {
+    usd_thb: string;
+    mmk_thb: string;
+    updated_at?: (string | null);
+};
+
+export type ExchangeRatesUpdate = {
+    usd_thb: (number | string);
+    mmk_thb: (number | string);
+};
+
 export type HoldingPeriodReport = {
     threshold_days: number;
     generated_at: string;
@@ -1139,6 +1150,14 @@ export type ServiceTicketsCloseServiceTicketData = {
 };
 
 export type ServiceTicketsCloseServiceTicketResponse = (ServiceTicketPublic);
+
+export type SettingsGetExchangeRatesResponse = (ExchangeRatesPublic);
+
+export type SettingsUpdateExchangeRatesData = {
+    requestBody: ExchangeRatesUpdate;
+};
+
+export type SettingsUpdateExchangeRatesResponse = (ExchangeRatesPublic);
 
 export type StockAdjustmentsCreateStockAdjustmentData = {
     requestBody: StockAdjustmentCreate;

@@ -20,6 +20,7 @@ from app.api.routes import (
     stock_adjustments,
     suppliers,
     sync_review,
+    system_settings,
     users,
     utils,
 )
@@ -46,6 +47,7 @@ api_router.include_router(stock_adjustments.router)
 api_router.include_router(search.router)
 api_router.include_router(dashboards.router)
 api_router.include_router(sync_review.router)
+api_router.include_router(system_settings.router)
 
 
 if settings.ENVIRONMENT == "local":
