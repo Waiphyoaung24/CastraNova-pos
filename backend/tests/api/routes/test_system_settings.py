@@ -48,8 +48,29 @@ def test_staff_cannot_write(
     assert r.status_code == 403
 
 
+def test_bkk_admin_can_read(
+    client: TestClient, bkk_admin_token_headers: dict[str, str]
+) -> None:
+    assert client.get(URL, headers=bkk_admin_token_headers).status_code == 200
+
+
+def test_bkk_admin_can_write(
+    client: TestClient, bkk_admin_token_headers: dict[str, str]
+) -> None:
+    r = client.put(
+        URL,
+        headers=bkk_admin_token_headers,
+        json={"usd_thb": "35", "mmk_thb": "0.013"},
+    )
+    assert r.status_code == 200, r.text
+
+
 def test_unauthenticated_rejected(client: TestClient) -> None:
     assert client.get(URL).status_code in (401, 403)
+    assert (
+        client.put(URL, json={"usd_thb": "1", "mmk_thb": "1"}).status_code
+        in (401, 403)
+    )
 
 
 def test_negative_rate_rejected(

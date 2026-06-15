@@ -229,6 +229,8 @@ def get_exchange_rates(*, session: Session) -> ExchangeRatesPublic:
         select(SystemSetting).where(SystemSetting.key == EXCHANGE_RATES_KEY)
     ).first()
     raw = row.value if row else DEFAULT_EXCHANGE_RATES
+    # value is always {"USD_THB","MMK_THB"} decimal strings — only ever written
+    # by set_exchange_rates (validated ge=0) or the seed default; safe to parse.
     return ExchangeRatesPublic(
         usd_thb=Decimal(str(raw.get("USD_THB", "0"))),
         mmk_thb=Decimal(str(raw.get("MMK_THB", "0"))),

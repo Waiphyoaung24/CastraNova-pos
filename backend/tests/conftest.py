@@ -88,3 +88,13 @@ def staff_token_headers(client: TestClient, db: Session) -> dict[str, str]:
         db=db,
         role=UserRole.YGN_STAFF,
     )
+
+
+@pytest.fixture(scope="module")
+def bkk_admin_token_headers(client: TestClient, db: Session) -> dict[str, str]:
+    return authentication_token_from_email_with_role(
+        client=client,
+        email="bkkadmin@example.com",
+        db=db,
+        role=UserRole.BKK_ADMIN,
+    )
