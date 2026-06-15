@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { DashboardsService, SuppliersService } from "@/client"
+import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -270,6 +271,7 @@ function StockRow({
                     <TableHead>Supplier serial</TableHead>
                     <TableHead>State</TableHead>
                     <TableHead>Received</TableHead>
+                    <TableHead className="w-0" aria-label="Actions" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -284,6 +286,12 @@ function StockRow({
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(u.received_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <PrintLabelButton
+                          unitId={u.id}
+                          serial={u.supplier_serial}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

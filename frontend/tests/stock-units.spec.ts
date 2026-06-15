@@ -60,5 +60,11 @@ test.describe("Stock — serialized unit drill-down", () => {
     await expect(
       page.getByRole("cell", { name: barcode, exact: true }),
     ).toBeVisible()
+
+    // Each in-stock unit row carries a reprint action (lost-label reprint):
+    // the button is labelled by supplier serial so it survives re-ordering.
+    await expect(
+      page.getByRole("button", { name: `Print label for serial SN-${r}` }),
+    ).toBeVisible()
   })
 })
