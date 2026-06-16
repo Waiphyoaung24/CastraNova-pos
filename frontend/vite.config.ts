@@ -5,6 +5,11 @@ import react from "@vitejs/plugin-react-swc"
 import { defineConfig } from "vite"
 import { VitePWA } from "vite-plugin-pwa"
 
+// Enable the PWA service worker only for real deployments (VITE_ENABLE_PWA=true).
+// In local dev the SW is self-destroying so it unregisters itself and clears its
+// precache, otherwise the nginx static build keeps serving stale UI from cache.
+const enablePWA = process.env.VITE_ENABLE_PWA === "true"
+
 // https://vitejs.dev/config/
 export default defineConfig({
   resolve: {
@@ -21,6 +26,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
+      selfDestroying: !enablePWA,
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,jpg,svg,woff2}"],
       },

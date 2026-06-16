@@ -107,6 +107,7 @@ services:
       args:
         - VITE_API_URL=http://localhost:8000
         - NODE_ENV=development
+        - VITE_ENABLE_PWA=false
 
   playwright:
     build:
