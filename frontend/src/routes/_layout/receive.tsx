@@ -48,12 +48,12 @@ import {
   type QuantityDraft,
   removePiece,
 } from "@/lib/receive-form"
-import { requireAuth } from "@/lib/route-guards"
+import { requireAdmin } from "@/lib/route-guards"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/_layout/receive")({
   component: Receive,
-  beforeLoad: () => requireAuth(),
+  beforeLoad: () => requireAdmin(),
   head: () => ({
     meta: [{ title: "Receive - CastraNova POS" }],
   }),
