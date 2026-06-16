@@ -946,6 +946,13 @@ export type ProductsCreateProductData = {
 
 export type ProductsCreateProductResponse = (ProductPublic);
 
+export type ProductsReadSkuLabelData = {
+    productId: string;
+    qty?: number;
+};
+
+export type ProductsReadSkuLabelResponse = (unknown);
+
 export type ProductsUpdateProductData = {
     productId: string;
     requestBody: ProductUpdate;
@@ -1038,6 +1045,7 @@ export type ReceiptsReceiveQuantityData = {
 export type ReceiptsReceiveQuantityResponse = (PartBatchPublic);
 
 export type ReceiptsReadUnitLabelData = {
+    qty?: number;
     unitId: string;
 };
 
