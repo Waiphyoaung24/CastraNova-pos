@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app import crud
 from app.api.deps import AdminUser, SessionDep, get_admin, get_current_user
@@ -11,7 +11,9 @@ from app.models import (
     ProductCreate,
     ProductPublic,
     ProductUpdate,
+    TrackingMode,
 )
+from app.services.barcode import render_label_sheet
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -25,6 +27,34 @@ def read_products(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[ProductPublic]:
     return crud.list_products(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+
+
+# Shared-team access (mirrors the serialized unit-label endpoint): any
+# authenticated staff/admin may print SKU labels. The QR encodes the raw
+# product.sku, which resolves via GET /search/sku/{sku}. No financials exposed.
+@router.get("/{product_id}/label.pdf", dependencies=[Depends(get_current_user)])
+def read_sku_label(
+    *,
+    session: SessionDep,
+    product_id: uuid.UUID,
+    qty: Annotated[int, Query(ge=1, le=1000)] = 1,
+) -> Response:
+    """Print N identical SKU/bin QR labels for a QUANTITY product."""
+    product = crud.get_product(session=session, product_id=product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.tracking_mode == TrackingMode.SERIALIZED:
+        raise HTTPException(
+            status_code=400,
+            detail="SKU labels are only for quantity-tracked products",
+        )
+    pdf = render_label_sheet(
+        qr_value=product.sku,
+        line1=product.sku,
+        line2=product.model_name,
+        qty=qty,
+    )
+    return Response(content=pdf, media_type="application/pdf")
 
 
 @router.post("/", response_model=ProductPublic, dependencies=[Depends(get_admin)])

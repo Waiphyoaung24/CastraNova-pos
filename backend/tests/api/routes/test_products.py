@@ -1,3 +1,4 @@
+import re
 import uuid
 
 from fastapi.testclient import TestClient
@@ -120,3 +121,110 @@ def test_price_history_unknown_product_404(
         headers=superuser_token_headers,
     )
     assert r.status_code == 404
+
+
+def _page_count(pdf: bytes) -> int:
+    return len(re.findall(rb"/Type\s*/Page(?!s)", pdf))
+
+
+def _create_quantity_product(
+    client: TestClient, headers: dict[str, str]
+) -> dict[str, object]:
+    sku = f"QTY-{uuid.uuid4().hex[:8]}"
+    r = client.post(
+        f"{PREFIX}/products/",
+        headers=headers,
+        json=_product_body(sku, tracking_mode="QUANTITY"),
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_sku_label_pdf_for_quantity_product(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    p = _create_quantity_product(client, superuser_token_headers)
+    r = client.get(
+        f"{PREFIX}/products/{p['id']}/label.pdf?qty=4",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:4] == b"%PDF"
+    assert _page_count(r.content) == 4
+
+
+def test_sku_label_defaults_to_one_page(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    p = _create_quantity_product(client, superuser_token_headers)
+    r = client.get(
+        f"{PREFIX}/products/{p['id']}/label.pdf", headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+    assert _page_count(r.content) == 1
+
+
+def test_sku_label_404_for_missing_product(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    r = client.get(
+        f"{PREFIX}/products/{uuid.uuid4()}/label.pdf",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 404
+
+
+def test_sku_label_400_for_serialized_product(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    sku = f"SER-{uuid.uuid4().hex[:8]}"
+    p = client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(sku, tracking_mode="SERIALIZED"),
+    ).json()
+    r = client.get(
+        f"{PREFIX}/products/{p['id']}/label.pdf", headers=superuser_token_headers
+    )
+    assert r.status_code == 400
+
+
+def test_sku_label_qty_out_of_range_422(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    p = _create_quantity_product(client, superuser_token_headers)
+    assert (
+        client.get(
+            f"{PREFIX}/products/{p['id']}/label.pdf?qty=0",
+            headers=superuser_token_headers,
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"{PREFIX}/products/{p['id']}/label.pdf?qty=1001",
+            headers=superuser_token_headers,
+        ).status_code
+        == 422
+    )
+
+
+def test_sku_label_requires_auth(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    p = _create_quantity_product(client, superuser_token_headers)
+    r = client.get(f"{PREFIX}/products/{p['id']}/label.pdf")
+    assert r.status_code == 401
+
+
+def test_staff_can_fetch_sku_label(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+) -> None:
+    p = _create_quantity_product(client, superuser_token_headers)
+    r = client.get(
+        f"{PREFIX}/products/{p['id']}/label.pdf", headers=staff_token_headers
+    )
+    assert r.status_code == 200
