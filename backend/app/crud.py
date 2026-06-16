@@ -1257,6 +1257,145 @@ def holding_period_report(
 # --- Search (FR-015, Flow F) --------------------------------------------------
 
 
+def _build_serial_movements(
+    *, session: Session, movements: list[UnitMovement]
+) -> list[SerialMovementPublic]:
+    """Resolve a unit's movements to display labels (locations, actor, linked
+    sale/ticket/pull). No cost — serialized search is cost-free for both roles."""
+    if not movements:
+        return []
+
+    loc_ids: set[uuid.UUID] = set()
+    actor_ids: set[uuid.UUID] = set()
+    sale_ids: set[uuid.UUID] = set()
+    ticket_ids: set[uuid.UUID] = set()
+    pull_ids: set[uuid.UUID] = set()
+    for m in movements:
+        if m.from_location_id is not None:
+            loc_ids.add(m.from_location_id)
+        if m.to_location_id is not None:
+            loc_ids.add(m.to_location_id)
+        actor_ids.add(m.actor_user_id)
+        if m.sale_id is not None:
+            sale_ids.add(m.sale_id)
+        if m.service_ticket_id is not None:
+            ticket_ids.add(m.service_ticket_id)
+        if m.project_pull_id is not None:
+            pull_ids.add(m.project_pull_id)
+
+    locations = {
+        loc.id: loc.name
+        for loc in (
+            session.exec(select(Location).where(col(Location.id).in_(loc_ids))).all()
+            if loc_ids
+            else []
+        )
+    }
+    actors = {
+        u.id: u.full_name
+        for u in (
+            session.exec(select(User).where(col(User.id).in_(actor_ids))).all()
+            if actor_ids
+            else []
+        )
+    }
+    sales = {
+        s.id: s
+        for s in (
+            session.exec(select(Sale).where(col(Sale.id).in_(sale_ids))).all()
+            if sale_ids
+            else []
+        )
+    }
+    tickets = {
+        t.id: t
+        for t in (
+            session.exec(
+                select(ServiceTicket).where(col(ServiceTicket.id).in_(ticket_ids))
+            ).all()
+            if ticket_ids
+            else []
+        )
+    }
+    pulls = {
+        p.id: p
+        for p in (
+            session.exec(select(ProjectPull).where(col(ProjectPull.id).in_(pull_ids))).all()
+            if pull_ids
+            else []
+        )
+    }
+    cust_ids: set[uuid.UUID] = set()
+    proj_ids: set[uuid.UUID] = set()
+    for s in sales.values():
+        cust_ids.add(s.customer_id)
+    for t in tickets.values():
+        cust_ids.add(t.customer_id)
+    for p in pulls.values():
+        cust_ids.add(p.customer_id)
+        proj_ids.add(p.project_id)
+    customers = {
+        c.id: c.name
+        for c in (
+            session.exec(select(Customer).where(col(Customer.id).in_(cust_ids))).all()
+            if cust_ids
+            else []
+        )
+    }
+    projects = {
+        pr.id: pr
+        for pr in (
+            session.exec(select(Project).where(col(Project.id).in_(proj_ids))).all()
+            if proj_ids
+            else []
+        )
+    }
+
+    out: list[SerialMovementPublic] = []
+    for m in movements:
+        kind: str | None = None
+        label: str | None = None
+        if m.sale_id is not None:
+            kind = "SALE"
+            sale = sales.get(m.sale_id)
+            label = customers.get(sale.customer_id) if sale else None
+        elif m.service_ticket_id is not None:
+            kind = "SERVICE_TICKET"
+            ticket = tickets.get(m.service_ticket_id)
+            label = customers.get(ticket.customer_id) if ticket else None
+        elif m.project_pull_id is not None:
+            kind = "PROJECT_PULL"
+            pull = pulls.get(m.project_pull_id)
+            proj = projects.get(pull.project_id) if pull else None
+            label = f"Project {proj.code} — {proj.name}" if proj else None
+        elif m.stock_adjustment_id is not None:
+            kind = "STOCK_ADJUSTMENT"
+        out.append(
+            SerialMovementPublic(
+                event_type=m.event_type,
+                from_location_id=m.from_location_id,
+                to_location_id=m.to_location_id,
+                occurred_at=m.occurred_at,
+                actor_user_id=m.actor_user_id,
+                sale_id=m.sale_id,
+                service_ticket_id=m.service_ticket_id,
+                project_pull_id=m.project_pull_id,
+                stock_adjustment_id=m.stock_adjustment_id,
+                notes=m.notes,
+                from_location_name=(
+                    locations.get(m.from_location_id) if m.from_location_id else None
+                ),
+                to_location_name=(
+                    locations.get(m.to_location_id) if m.to_location_id else None
+                ),
+                actor_name=actors.get(m.actor_user_id),
+                reference_kind=kind,
+                reference_label=label,
+            )
+        )
+    return out
+
+
 def search_serial(
     *, session: Session, barcode: str
 ) -> SerialSearchResult:
@@ -1280,7 +1419,7 @@ def search_serial(
         sku=product.sku,
         supplier_serial=unit.supplier_serial,
         current_state=unit.current_state,
-        movements=[SerialMovementPublic.model_validate(m) for m in movements],
+        movements=_build_serial_movements(session=session, movements=list(movements)),
     )
 
 
@@ -1408,18 +1547,18 @@ def _build_consumption_events(
             m, sales, tickets, pulls, adjustments, customers, projects
         )
         actor = actors.get(m.actor_user_id)
-        common = dict(
-            event_type=m.event_type,
-            occurred_at=m.occurred_at,
-            quantity=m.quantity,
-            reference_kind=kind,
-            reference_id=ref_id,
-            customer_name=cust_name,
-            project_name=proj_name,
-            project_code=proj_code,
-            actor_name=(actor.full_name if actor else None),
-            notes=notes,
-        )
+        common: dict[str, Any] = {
+            "event_type": m.event_type,
+            "occurred_at": m.occurred_at,
+            "quantity": m.quantity,
+            "reference_kind": kind,
+            "reference_id": ref_id,
+            "customer_name": cust_name,
+            "project_name": proj_name,
+            "project_code": proj_code,
+            "actor_name": (actor.full_name if actor else None),
+            "notes": notes,
+        }
         if is_admin:
             draws = draws_by_movement.get(m.id, [])
             events.append(
