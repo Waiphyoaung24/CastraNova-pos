@@ -4,6 +4,7 @@ import { Boxes, Trash2 } from "lucide-react"
 import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
+  type ProductPublic,
   ProductsService,
   type ReceiptsReceiveQuantityResponse,
   ReceiptsService,
@@ -416,6 +417,8 @@ function QuantityTab() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const [draft, setDraft] = useState<QuantityDraft>(EMPTY_QUANTITY_DRAFT)
+  const [receivedBatch, setReceivedBatch] =
+    useState<ReceiptsReceiveQuantityResponse | null>(null)
   const [announce, setAnnounce] = useState("")
 
   const fieldId = useId()
@@ -454,6 +457,7 @@ function QuantityTab() {
     mutationFn: (body) =>
       ReceiptsService.receiveQuantity({ requestBody: body }),
     onSuccess: (batch) => {
+      setReceivedBatch(batch)
       setDraft(EMPTY_QUANTITY_DRAFT)
       announceMessage(
         `Received ${batch.received_qty} unit(s) into batch ${batch.batch_no}.`,
@@ -650,6 +654,15 @@ function QuantityTab() {
           {mutation.isPending ? "Receiving…" : "Receive"}
         </Button>
       </div>
+      {receivedBatch ? (
+        // key by batch id so a second receive remounts the block, re-seeding
+        // the qty input's mount-only defaultQty to the new batch's quantity.
+        <ReceivedBatchLabels
+          key={receivedBatch.id}
+          batch={receivedBatch}
+          products={quantityProducts}
+        />
+      ) : null}
     </form>
   )
 }
@@ -672,12 +685,43 @@ function ReceivedUnits({ units }: { units: UnitPublic[] }) {
               <TableCell className="num">{u.castranova_barcode}</TableCell>
               <TableCell className="num">{u.supplier_serial}</TableCell>
               <TableCell className="text-right">
-                <PrintLabelButton unitId={u.id} serial={u.supplier_serial} />
+                <PrintLabelButton
+                  target={{
+                    kind: "unit",
+                    unitId: u.id,
+                    serial: u.supplier_serial,
+                  }}
+                />
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+    </div>
+  )
+}
+
+function ReceivedBatchLabels({
+  batch,
+  products,
+}: {
+  batch: ReceiptsReceiveQuantityResponse
+  products: ProductPublic[]
+}) {
+  const product = products.find((p) => p.id === batch.product_id)
+  if (!product) return null
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="text-lg font-semibold">Print SKU labels</h2>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-muted-foreground text-sm">
+          {product.sku} — batch {batch.batch_no}
+        </span>
+        <PrintLabelButton
+          target={{ kind: "sku", productId: product.id, sku: product.sku }}
+          defaultQty={Math.min(batch.received_qty, 1000)}
+        />
+      </div>
     </div>
   )
 }

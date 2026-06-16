@@ -133,6 +133,7 @@ function StockOnHand() {
               <TableHead>Category</TableHead>
               <TableHead>Mode</TableHead>
               <TableHead className="text-right">On hand</TableHead>
+              <TableHead className="w-0" aria-label="Labels" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -222,10 +223,15 @@ function StockRow({
           <Badge variant="secondary">{trackingMode}</Badge>
         </TableCell>
         <TableCell className="num text-right">{quantityOnHand}</TableCell>
+        <TableCell className="text-right">
+          {isQuantity ? (
+            <PrintLabelButton target={{ kind: "sku", productId, sku }} />
+          ) : null}
+        </TableCell>
       </TableRow>
       {isOpen ? (
         <TableRow>
-          <TableCell colSpan={6} className="bg-muted/30">
+          <TableCell colSpan={7} className="bg-muted/30">
             {isQuantity ? (
               batchesPending ? (
                 <p className="text-muted-foreground py-2 text-sm">Loading…</p>
@@ -289,8 +295,11 @@ function StockRow({
                       </TableCell>
                       <TableCell className="text-right">
                         <PrintLabelButton
-                          unitId={u.id}
-                          serial={u.supplier_serial}
+                          target={{
+                            kind: "unit",
+                            unitId: u.id,
+                            serial: u.supplier_serial,
+                          }}
                         />
                       </TableCell>
                     </TableRow>

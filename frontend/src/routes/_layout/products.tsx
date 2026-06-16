@@ -10,6 +10,7 @@ import {
   type TrackingMode,
 } from "@/client"
 import { EmptyState } from "@/components/EmptyState"
+import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -217,6 +218,7 @@ function Products() {
                 <TableHead className="text-right">Retail</TableHead>
                 <TableHead className="text-right">Repair</TableHead>
                 <TableHead className="text-right">History</TableHead>
+                <TableHead className="text-right">Labels</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -243,6 +245,13 @@ function Products() {
                   </TableCell>
                   <TableCell className="text-right">
                     <PriceHistoryDialog productId={p.id} sku={p.sku} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {(p.tracking_mode ?? "QUANTITY") === "QUANTITY" ? (
+                      <PrintLabelButton
+                        target={{ kind: "sku", productId: p.id, sku: p.sku }}
+                      />
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
