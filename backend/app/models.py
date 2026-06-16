@@ -1712,6 +1712,13 @@ class SerialMovementPublic(SQLModel):
     project_pull_id: uuid.UUID | None
     stock_adjustment_id: uuid.UUID | None
     notes: str | None
+    # FR-015 enrichment (resolved at read time; no cost — serial search is
+    # cost-free for both roles).
+    from_location_name: str | None = None
+    to_location_name: str | None = None
+    actor_name: str | None = None
+    reference_kind: str | None = None  # SALE | SERVICE_TICKET | PROJECT_PULL | STOCK_ADJUSTMENT
+    reference_label: str | None = None
 
 
 class SerialSearchResult(SQLModel):
@@ -1738,6 +1745,54 @@ class SkuSearchResult(SQLModel):
     tracking_mode: TrackingMode
     total_on_hand: int
     batches: list[SkuBatchPublic]  # QUANTITY only; empty for SERIALIZED
+    consumption: list["SkuConsumptionEventPublic"] = []  # QUANTITY only
+
+
+# --- SKU consumption history (FR-015) -----------------------------------------
+
+
+class SkuConsumptionEventPublic(SQLModel):
+    """One consuming part_movement, STAFF view — attribution only, NO cost.
+    Any NEW cost/margin field MUST go on the Admin subclass only; staff must
+    never see cost data (mirrors SaleStaffPublic)."""
+
+    event_type: MovementType  # SOLD | MAINTENANCE_OUT | PROJECT_OUT | ADJUSTED_OUT
+    occurred_at: datetime
+    quantity: int
+    reference_kind: str  # SALE | SERVICE_TICKET | PROJECT_PULL | STOCK_ADJUSTMENT
+    reference_id: uuid.UUID
+    customer_name: str | None = None
+    project_name: str | None = None
+    project_code: str | None = None
+    actor_name: str | None = None
+    notes: str | None = None
+
+
+class SkuConsumptionDrawAdminPublic(SQLModel):
+    """One FIFO batch draw inside a consumption event — ADMIN only (cost)."""
+
+    batch_no: str
+    quantity: int
+    unit_cost_thb: Decimal
+    total_cost_thb: Decimal
+
+
+class SkuConsumptionEventAdminPublic(SkuConsumptionEventPublic):
+    total_cost_thb: Decimal
+    draws: list[SkuConsumptionDrawAdminPublic]
+
+
+class SkuBatchAdminPublic(SkuBatchPublic):
+    purchase_cost_thb: Decimal  # PRD FR-015 batch attribution; admin only
+
+
+class SkuSearchAdminResult(SQLModel):
+    sku: str
+    product_id: uuid.UUID
+    tracking_mode: TrackingMode
+    total_on_hand: int
+    batches: list[SkuBatchAdminPublic]
+    consumption: list[SkuConsumptionEventAdminPublic]
 
 
 # Generic message
