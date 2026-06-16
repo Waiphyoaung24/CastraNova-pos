@@ -201,7 +201,7 @@ test.describe("Receive screen (admin)", () => {
       .toBe(qty)
   })
 
-  test("staff can receive over the receipts API", async () => {
+  test("staff cannot receive over the receipts API", async () => {
     const { email, password } = await seedStaffUser()
     const staffToken = await tokenFor(email, password)
 
@@ -210,46 +210,54 @@ test.describe("Receive screen (admin)", () => {
     const supplier = await seedSupplier()
 
     await withToken(staffToken, async () => {
-      const ser = await ReceiptsService.receiveSerialized({
-        requestBody: {
-          product_id: serProduct.id,
-          supplier_id: supplier.id,
-          idempotency_key: crypto.randomUUID(),
-          pieces: [
-            { supplier_serial: `SN-${suffix()}`, purchase_cost_thb: "100.00" },
-          ],
-        },
-      })
-      expect(ser.units.length).toBe(1)
+      // Receiving is admin-only at every layer (restricted 2026-06-17); the
+      // backend returns 403 to staff on both receipt endpoints.
+      await expect(
+        ReceiptsService.receiveSerialized({
+          requestBody: {
+            product_id: serProduct.id,
+            supplier_id: supplier.id,
+            idempotency_key: crypto.randomUUID(),
+            pieces: [
+              {
+                supplier_serial: `SN-${suffix()}`,
+                purchase_cost_thb: "100.00",
+              },
+            ],
+          },
+        }),
+      ).rejects.toMatchObject({ status: 403 })
 
-      const batch = await ReceiptsService.receiveQuantity({
-        requestBody: {
-          product_id: qtyProduct.id,
-          supplier_id: supplier.id,
-          received_qty: 5,
-          purchase_cost_thb: "10.00",
-          idempotency_key: crypto.randomUUID(),
-        },
-      })
-      expect(batch.received_qty).toBe(5)
+      await expect(
+        ReceiptsService.receiveQuantity({
+          requestBody: {
+            product_id: qtyProduct.id,
+            supplier_id: supplier.id,
+            received_qty: 5,
+            purchase_cost_thb: "10.00",
+            idempotency_key: crypto.randomUUID(),
+          },
+        }),
+      ).rejects.toMatchObject({ status: 403 })
     })
   })
 })
 
 test.describe("Receive screen access control (staff browser)", () => {
   // Fresh browser context, NOT the superuser storageState — log in as a staff
-  // user in the UI so the requireAuth guard is exercised by a real staff
-  // session (staff are now allowed into Receive, not redirected).
+  // user in the UI so the requireAdmin guard is exercised by a real staff
+  // session (receiving is admin-only intake, restricted 2026-06-17 — staff are
+  // redirected away from Receive, not allowed in).
   test.use({ storageState: { cookies: [], origins: [] } })
 
-  test("staff can reach /receive", async ({ page }) => {
+  test("staff are redirected away from /receive", async ({ page }) => {
     const { email, password } = await seedStaffUser()
     await logInUser(page, email, password)
     await page.goto("/receive")
-    // Staff can now reach Receive (YGN warehouse intake).
+    // requireAdmin() bounces non-admins back to "/".
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/")
     await expect(
       page.getByRole("heading", { name: "Receive stock" }),
-    ).toBeVisible()
-    expect(new URL(page.url()).pathname).toBe("/receive")
+    ).toBeHidden()
   })
 })
