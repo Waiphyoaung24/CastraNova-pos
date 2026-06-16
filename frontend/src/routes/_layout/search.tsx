@@ -25,6 +25,21 @@ export const Route = createFileRoute("/_layout/search")({
   }),
 })
 
+function consumptionLabel(eventType: string): string {
+  switch (eventType) {
+    case "SOLD":
+      return "Sale"
+    case "MAINTENANCE_OUT":
+      return "Service"
+    case "PROJECT_OUT":
+      return "Project"
+    case "ADJUSTED_OUT":
+      return "Adjustment"
+    default:
+      return eventType
+  }
+}
+
 function Search() {
   return (
     <div className="flex flex-col gap-6">
@@ -106,6 +121,9 @@ function SerialSearch() {
                   <TableRow>
                     <TableHead>Event</TableHead>
                     <TableHead>When</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>By</TableHead>
+                    <TableHead>Reference</TableHead>
                     <TableHead>Notes</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -117,6 +135,17 @@ function SerialSearch() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(m.occurred_at).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {m.from_location_name && m.to_location_name
+                          ? `${m.from_location_name} → ${m.to_location_name}`
+                          : (m.to_location_name ?? m.from_location_name ?? "—")}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {m.actor_name ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {m.reference_label ?? m.reference_kind ?? "—"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {m.notes ?? "—"}
@@ -221,6 +250,73 @@ function SkuSearch() {
               )}
             </div>
           ) : null}
+          {data.tracking_mode === "QUANTITY"
+            ? (() => {
+                const consumption = data.consumption ?? []
+                return (
+                  <div>
+                    <h3 className="mb-2 text-sm font-medium">Consumption</h3>
+                    {consumption.length === 0 ? (
+                      <p className="text-muted-foreground text-sm">
+                        No consumption yet.
+                      </p>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>When</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead className="text-right">Qty</TableHead>
+                            <TableHead>Customer / Project</TableHead>
+                            <TableHead>By</TableHead>
+                            {"total_cost_thb" in consumption[0] ? (
+                              <TableHead className="text-right">
+                                COGS (฿)
+                              </TableHead>
+                            ) : null}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {consumption.map((c) => (
+                            <TableRow
+                              key={`${c.reference_id}-${c.occurred_at}`}
+                            >
+                              <TableCell className="text-muted-foreground">
+                                {new Date(c.occurred_at).toLocaleString()}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">
+                                  {consumptionLabel(c.event_type)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="num text-right">
+                                {c.quantity}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {c.project_name
+                                  ? `${c.project_code ?? ""} ${c.project_name}`.trim()
+                                  : (c.customer_name ?? "—")}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {c.actor_name ?? "—"}
+                              </TableCell>
+                              {"total_cost_thb" in c ? (
+                                <TableCell className="num text-right">
+                                  {
+                                    (c as { total_cost_thb: string })
+                                      .total_cost_thb
+                                  }
+                                </TableCell>
+                              ) : null}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+                )
+              })()
+            : null}
         </div>
       )}
     </div>
