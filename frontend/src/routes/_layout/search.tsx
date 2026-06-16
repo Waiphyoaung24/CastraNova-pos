@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, Fragment, useState } from "react"
 
 import { SearchService } from "@/client"
 import { Badge } from "@/components/ui/badge"
@@ -278,37 +278,93 @@ function SkuSearch() {
                         </TableHeader>
                         <TableBody>
                           {consumption.map((c) => (
-                            <TableRow
+                            <Fragment
                               key={`${c.reference_id}-${c.occurred_at}`}
                             >
-                              <TableCell className="text-muted-foreground">
-                                {new Date(c.occurred_at).toLocaleString()}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline">
-                                  {consumptionLabel(c.event_type)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="num text-right">
-                                {c.quantity}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {c.project_name
-                                  ? `${c.project_code ?? ""} ${c.project_name}`.trim()
-                                  : (c.customer_name ?? "—")}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {c.actor_name ?? "—"}
-                              </TableCell>
-                              {"total_cost_thb" in c ? (
-                                <TableCell className="num text-right">
-                                  {
-                                    (c as { total_cost_thb: string })
-                                      .total_cost_thb
-                                  }
+                              <TableRow>
+                                <TableCell className="text-muted-foreground">
+                                  {new Date(c.occurred_at).toLocaleString()}
                                 </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">
+                                    {consumptionLabel(c.event_type)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="num text-right">
+                                  {c.quantity}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {c.project_name
+                                    ? `${c.project_code ?? ""} ${c.project_name}`.trim()
+                                    : (c.customer_name ?? "—")}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {c.actor_name ?? "—"}
+                                </TableCell>
+                                {"total_cost_thb" in c ? (
+                                  <TableCell className="num text-right">
+                                    {
+                                      (c as { total_cost_thb: string })
+                                        .total_cost_thb
+                                    }
+                                  </TableCell>
+                                ) : null}
+                              </TableRow>
+                              {"draws" in c ? (
+                                <TableRow className="hover:bg-transparent">
+                                  <TableCell colSpan={6} className="py-2">
+                                    <details className="text-sm">
+                                      <summary className="cursor-pointer text-muted-foreground">
+                                        FIFO draws
+                                      </summary>
+                                      <Table className="mt-2">
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead>Batch</TableHead>
+                                            <TableHead className="text-right">
+                                              Qty
+                                            </TableHead>
+                                            <TableHead className="text-right">
+                                              Unit cost (฿)
+                                            </TableHead>
+                                            <TableHead className="text-right">
+                                              Line total (฿)
+                                            </TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {(
+                                            c as {
+                                              draws: Array<{
+                                                batch_no: string
+                                                quantity: number
+                                                unit_cost_thb: string
+                                                total_cost_thb: string
+                                              }>
+                                            }
+                                          ).draws.map((d) => (
+                                            <TableRow key={d.batch_no}>
+                                              <TableCell className="num">
+                                                {d.batch_no}
+                                              </TableCell>
+                                              <TableCell className="num text-right">
+                                                {d.quantity}
+                                              </TableCell>
+                                              <TableCell className="num text-right">
+                                                {d.unit_cost_thb}
+                                              </TableCell>
+                                              <TableCell className="num text-right">
+                                                {d.total_cost_thb}
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </details>
+                                  </TableCell>
+                                </TableRow>
                               ) : null}
-                            </TableRow>
+                            </Fragment>
                           ))}
                         </TableBody>
                       </Table>
