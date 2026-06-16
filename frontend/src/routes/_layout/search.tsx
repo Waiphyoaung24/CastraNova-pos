@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Fragment, useState } from "react"
 
-import { SearchService } from "@/client"
+import { SearchService, type SkuConsumptionEventAdminPublic } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -277,9 +277,9 @@ function SkuSearch() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {consumption.map((c) => (
+                          {consumption.map((c, i) => (
                             <Fragment
-                              key={`${c.reference_id}-${c.occurred_at}`}
+                              key={`${c.reference_id}-${c.occurred_at}-${i}`}
                             >
                               <TableRow>
                                 <TableCell className="text-muted-foreground">
@@ -304,7 +304,7 @@ function SkuSearch() {
                                 {"total_cost_thb" in c ? (
                                   <TableCell className="num text-right">
                                     {
-                                      (c as { total_cost_thb: string })
+                                      (c as SkuConsumptionEventAdminPublic)
                                         .total_cost_thb
                                     }
                                   </TableCell>
@@ -313,6 +313,7 @@ function SkuSearch() {
                               {"draws" in c ? (
                                 <TableRow className="hover:bg-transparent">
                                   <TableCell colSpan={6} className="py-2">
+                                    {/* admin column count */}
                                     <details className="text-sm">
                                       <summary className="cursor-pointer text-muted-foreground">
                                         FIFO draws
@@ -334,14 +335,7 @@ function SkuSearch() {
                                         </TableHeader>
                                         <TableBody>
                                           {(
-                                            c as {
-                                              draws: Array<{
-                                                batch_no: string
-                                                quantity: number
-                                                unit_cost_thb: string
-                                                total_cost_thb: string
-                                              }>
-                                            }
+                                            c as SkuConsumptionEventAdminPublic
                                           ).draws.map((d) => (
                                             <TableRow key={d.batch_no}>
                                               <TableCell className="num">
