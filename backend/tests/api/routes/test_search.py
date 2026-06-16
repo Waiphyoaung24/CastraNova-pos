@@ -133,3 +133,56 @@ def test_sku_search_batch_attribution(
     # Batches oldest-first; no cost field leaked.
     assert [b["received_qty"] for b in body["batches"]] == [3, 4]
     assert all("cost" not in k for b in body["batches"] for k in b)
+
+
+def test_sku_search_staff_consumption_attribution(
+    client: TestClient, staff_token_headers: dict[str, str], db: Session
+) -> None:
+    _seed(db)
+    uid = _user_id(db)
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"CONS-{uuid.uuid4().hex[:8]}",
+            model_name="Part",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="100.00",
+            repair_price_thb="20.00",
+        ),
+    )
+    supplier = crud.create_supplier(
+        session=db, supplier_in=SupplierCreate(name=f"Sup-{uuid.uuid4().hex[:6]}")
+    )
+    crud.receive_quantity(
+        session=db,
+        product_id=product.id,
+        supplier_id=supplier.id,
+        received_qty=10,
+        purchase_cost_thb=Decimal("10.00"),
+        idempotency_key=uuid.uuid4(),
+        received_by_user_id=uid,
+    )
+    customer = crud.create_customer(
+        session=db, customer_in=CustomerCreate(name="Acme Buyer")
+    )
+    crud.create_sale(
+        session=db,
+        customer_id=customer.id,
+        lines=[SaleLineInput(line_kind=SaleLineKind.PART, sku=product.sku, quantity=4)],
+        idempotency_key=uuid.uuid4(),
+        created_by_user_id=uid,
+    )
+
+    r = client.get(f"{PREFIX}/search/sku/{product.sku}", headers=staff_token_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total_on_hand"] == 6
+    assert len(body["consumption"]) == 1
+    ev = body["consumption"][0]
+    assert ev["event_type"] == "SOLD"
+    assert ev["reference_kind"] == "SALE"
+    assert ev["quantity"] == 4
+    assert ev["customer_name"] == "Acme Buyer"
+    # Staff: NO cost anywhere.
+    assert "total_cost_thb" not in ev
+    assert "draws" not in ev

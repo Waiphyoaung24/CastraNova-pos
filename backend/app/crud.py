@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Callable
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 from fastapi import HTTPException
 from sqlalchemy import ColumnElement, case, func
@@ -68,7 +68,12 @@ from app.models import (
     SerialSearchResult,
     ServiceTicket,
     ServiceTicketPart,
+    SkuBatchAdminPublic,
     SkuBatchPublic,
+    SkuConsumptionDrawAdminPublic,
+    SkuConsumptionEventAdminPublic,
+    SkuConsumptionEventPublic,
+    SkuSearchAdminResult,
     SkuSearchResult,
     StockAdjustment,
     StockAdjustmentCreate,
@@ -1279,14 +1284,171 @@ def search_serial(
     )
 
 
-def search_sku(*, session: Session, sku: str) -> SkuSearchResult:
-    """Batch attribution + quantity-on-hand for one SKU (FR-015). QUANTITY lists
-    its part_batch rows (oldest-first) with remaining_qty; SERIALIZED reports the
-    in-stock unit count. No cost fields (search is both-roles)."""
+_CONSUMING_EVENTS = (
+    MovementType.SOLD,
+    MovementType.MAINTENANCE_OUT,
+    MovementType.PROJECT_OUT,
+    MovementType.ADJUSTED_OUT,
+)
+_CONSUMPTION_LIMIT = 200  # bounded most-recent page (spec §7)
+
+
+def _resolve_counterparty(
+    m: PartMovement,
+    sales: dict[uuid.UUID, Sale],
+    tickets: dict[uuid.UUID, ServiceTicket],
+    pulls: dict[uuid.UUID, ProjectPull],
+    adjustments: dict[uuid.UUID, StockAdjustment],
+    customers: dict[uuid.UUID, Customer],
+    projects: dict[uuid.UUID, Project],
+) -> tuple[str, uuid.UUID, str | None, str | None, str | None, str | None]:
+    """Branch on the single non-null parent FK -> (reference_kind, reference_id,
+    customer_name, project_name, project_code, notes)."""
+    if m.sale_id is not None:
+        s = sales.get(m.sale_id)
+        cust = customers.get(s.customer_id) if s else None
+        return "SALE", m.sale_id, (cust.name if cust else None), None, None, m.notes
+    if m.service_ticket_id is not None:
+        t = tickets.get(m.service_ticket_id)
+        cust = customers.get(t.customer_id) if t else None
+        return ("SERVICE_TICKET", m.service_ticket_id,
+                (cust.name if cust else None), None, None, m.notes)
+    if m.project_pull_id is not None:
+        p = pulls.get(m.project_pull_id)
+        cust = customers.get(p.customer_id) if p else None
+        proj = projects.get(p.project_id) if p else None
+        return ("PROJECT_PULL", m.project_pull_id, (cust.name if cust else None),
+                (proj.name if proj else None), (proj.code if proj else None), m.notes)
+    if m.stock_adjustment_id is not None:
+        a = adjustments.get(m.stock_adjustment_id)
+        return ("STOCK_ADJUSTMENT", m.stock_adjustment_id, None, None, None,
+                (a.reason if a else m.notes))
+    # Consuming events always carry a parent FK; defensive fallback only.
+    return "UNKNOWN", m.id, None, None, None, m.notes
+
+
+def _build_consumption_events(
+    *, session: Session, movements: list[PartMovement], is_admin: bool
+) -> list[SkuConsumptionEventPublic]:
+    """Resolve consuming part_movements to attribution events (bulk, no N+1).
+    Cost (draws + total_cost_thb) is populated only when is_admin."""
+    if not movements:
+        return []
+
+    sale_ids: set[uuid.UUID] = set()
+    ticket_ids: set[uuid.UUID] = set()
+    pull_ids: set[uuid.UUID] = set()
+    adj_ids: set[uuid.UUID] = set()
+    actor_ids: set[uuid.UUID] = set()
+    for m in movements:
+        actor_ids.add(m.actor_user_id)
+        if m.sale_id is not None:
+            sale_ids.add(m.sale_id)
+        elif m.service_ticket_id is not None:
+            ticket_ids.add(m.service_ticket_id)
+        elif m.project_pull_id is not None:
+            pull_ids.add(m.project_pull_id)
+        elif m.stock_adjustment_id is not None:
+            adj_ids.add(m.stock_adjustment_id)
+
+    def _by_id(model: Any, ids: set[uuid.UUID]) -> dict[uuid.UUID, Any]:
+        if not ids:
+            return {}
+        rows = session.exec(select(model).where(col(model.id).in_(ids))).all()
+        return {r.id: r for r in rows}
+
+    sales = _by_id(Sale, sale_ids)
+    tickets = _by_id(ServiceTicket, ticket_ids)
+    pulls = _by_id(ProjectPull, pull_ids)
+    adjustments = _by_id(StockAdjustment, adj_ids)
+    actors = _by_id(User, actor_ids)
+
+    customer_ids: set[uuid.UUID] = set()
+    project_ids: set[uuid.UUID] = set()
+    for s in sales.values():
+        customer_ids.add(s.customer_id)
+    for t in tickets.values():
+        customer_ids.add(t.customer_id)
+    for p in pulls.values():
+        customer_ids.add(p.customer_id)
+        project_ids.add(p.project_id)
+    customers = _by_id(Customer, customer_ids)
+    projects = _by_id(Project, project_ids)
+
+    draws_by_movement: dict[uuid.UUID, list[SkuConsumptionDrawAdminPublic]] = {}
+    if is_admin:
+        movement_ids = [m.id for m in movements]
+        cost_lines = session.exec(
+            select(CostLine).where(col(CostLine.part_movement_id).in_(movement_ids))
+        ).all()
+        batch_ids = {cl.part_batch_id for cl in cost_lines}
+        batch_no = {
+            b.id: b.batch_no
+            for b in (
+                session.exec(
+                    select(PartBatch).where(col(PartBatch.id).in_(batch_ids))
+                ).all()
+                if batch_ids
+                else []
+            )
+        }
+        for cl in cost_lines:
+            draws_by_movement.setdefault(cl.part_movement_id, []).append(
+                SkuConsumptionDrawAdminPublic(
+                    batch_no=batch_no.get(cl.part_batch_id, "—"),
+                    quantity=cl.quantity,
+                    unit_cost_thb=cl.unit_cost_thb,
+                    total_cost_thb=cl.total_cost_thb,
+                )
+            )
+
+    events: list[SkuConsumptionEventPublic] = []
+    for m in movements:
+        kind, ref_id, cust_name, proj_name, proj_code, notes = _resolve_counterparty(
+            m, sales, tickets, pulls, adjustments, customers, projects
+        )
+        actor = actors.get(m.actor_user_id)
+        common = dict(
+            event_type=m.event_type,
+            occurred_at=m.occurred_at,
+            quantity=m.quantity,
+            reference_kind=kind,
+            reference_id=ref_id,
+            customer_name=cust_name,
+            project_name=proj_name,
+            project_code=proj_code,
+            actor_name=(actor.full_name if actor else None),
+            notes=notes,
+        )
+        if is_admin:
+            draws = draws_by_movement.get(m.id, [])
+            events.append(
+                SkuConsumptionEventAdminPublic(
+                    **common,
+                    total_cost_thb=sum(
+                        (d.total_cost_thb for d in draws), Decimal("0")
+                    ),
+                    draws=draws,
+                )
+            )
+        else:
+            events.append(SkuConsumptionEventPublic(**common))
+    return events
+
+
+def search_sku(
+    *, session: Session, sku: str, is_admin: bool
+) -> SkuSearchResult | SkuSearchAdminResult:
+    """Batch attribution + QOH + consumption history for one SKU (FR-015).
+    QUANTITY lists part_batch rows (oldest-first) and consuming part_movements
+    (newest-first, bounded). SERIALIZED reports in-stock unit count, no
+    consumption. Cost (batch purchase_cost, per-draw + total COGS) is returned
+    only when is_admin — staff get attribution without money (spec §4, §6.5)."""
     product = session.exec(select(Product).where(Product.sku == sku)).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    movements: list[PartMovement] = []
     if product.tracking_mode == TrackingMode.QUANTITY:
         batches = session.exec(
             select(PartBatch)
@@ -1294,7 +1456,20 @@ def search_sku(*, session: Session, sku: str) -> SkuSearchResult:
             .order_by(col(PartBatch.received_at), col(PartBatch.id))
         ).all()
         total = sum(b.remaining_qty for b in batches)
-        batch_pub = [SkuBatchPublic.model_validate(b) for b in batches]
+        movements = list(
+            session.exec(
+                select(PartMovement)
+                .where(
+                    PartMovement.product_id == product.id,
+                    col(PartMovement.event_type).in_(_CONSUMING_EVENTS),
+                )
+                .order_by(
+                    col(PartMovement.occurred_at).desc(),
+                    col(PartMovement.id).desc(),
+                )
+                .limit(_CONSUMPTION_LIMIT)
+            ).all()
+        )
     else:
         total = len(
             session.exec(
@@ -1304,14 +1479,28 @@ def search_sku(*, session: Session, sku: str) -> SkuSearchResult:
                 )
             ).all()
         )
-        batch_pub = []
+        batches = []
 
+    events = _build_consumption_events(
+        session=session, movements=movements, is_admin=is_admin
+    )
+
+    if is_admin:
+        return SkuSearchAdminResult(
+            sku=product.sku,
+            product_id=product.id,
+            tracking_mode=product.tracking_mode,
+            total_on_hand=total,
+            batches=[SkuBatchAdminPublic.model_validate(b) for b in batches],
+            consumption=cast(list[SkuConsumptionEventAdminPublic], events),
+        )
     return SkuSearchResult(
         sku=product.sku,
         product_id=product.id,
         tracking_mode=product.tracking_mode,
         total_on_hand=total,
-        batches=batch_pub,
+        batches=[SkuBatchPublic.model_validate(b) for b in batches],
+        consumption=events,
     )
 
 
