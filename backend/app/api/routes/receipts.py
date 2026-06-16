@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_current_user
+from app.api.deps import AdminUser, SessionDep, get_current_user
 from app.models import (
     PartBatchPublic,
     ReceiveQuantityRequest,
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/receipts", tags=["receipts"])
 def receive_serialized(
     *,
     session: SessionDep,
-    current_user: CurrentUser,
+    admin: AdminUser,
     payload: ReceiveSerializedRequest,
 ) -> ReceiveSerializedResponse:
     units = crud.receive_serialized(
@@ -29,7 +29,7 @@ def receive_serialized(
         supplier_id=payload.supplier_id,
         pieces=payload.pieces,
         idempotency_key=payload.idempotency_key,
-        received_by_user_id=current_user.id,
+        received_by_user_id=admin.id,
     )
     return ReceiveSerializedResponse(units=units)
 
@@ -38,7 +38,7 @@ def receive_serialized(
 def receive_quantity(
     *,
     session: SessionDep,
-    current_user: CurrentUser,
+    admin: AdminUser,
     payload: ReceiveQuantityRequest,
 ) -> PartBatchPublic:
     batch = crud.receive_quantity(
@@ -48,7 +48,7 @@ def receive_quantity(
         received_qty=payload.received_qty,
         purchase_cost_thb=payload.purchase_cost_thb,
         idempotency_key=payload.idempotency_key,
-        received_by_user_id=current_user.id,
+        received_by_user_id=admin.id,
         supplier_batch_ref=payload.supplier_batch_ref,
         expected_qty=payload.expected_qty,
         note=payload.note,

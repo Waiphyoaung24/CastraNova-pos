@@ -154,29 +154,33 @@ def test_label_pdf_returned_for_unit(
     assert r.content[:4] == b"%PDF"
 
 
-def test_staff_can_receive_serialized(
+def test_staff_cannot_receive_serialized(
     client: TestClient,
     staff_token_headers: dict[str, str],
     seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
+    """Receiving is admin-only (reverses FR-005/006 D3); staff are forbidden."""
     product_id, supplier_id = seed_product_supplier
     resp = client.post(
         f"{PREFIX}/receipts/serialized",
         headers=staff_token_headers,
         json=_body(product_id, supplier_id),
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 403, resp.text
 
 
 def test_staff_can_fetch_unit_label(
     client: TestClient,
     staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
     seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
     product_id, supplier_id = seed_product_supplier
+    # Receiving is admin-only now, so seed the unit as an admin; the label
+    # endpoint itself stays shared-team, which is what this test asserts.
     recv = client.post(
         f"{PREFIX}/receipts/serialized",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         json=_body(product_id, supplier_id),
     )
     assert recv.status_code == 200, recv.text
