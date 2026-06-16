@@ -11,3 +11,7 @@ compose.local.yml
 
 # Visual brainstorming companion (superpowers)
 .superpowers/
+
+# Local tooling artifacts
+.playwright-mcp/
+preview/
