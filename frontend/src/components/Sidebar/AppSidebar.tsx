@@ -58,10 +58,6 @@ const baseItems: Entry[] = [
       { icon: Warehouse, title: "Stock", path: "/stock" },
       // Low-stock reorder list: both roles read, admin edits thresholds (FR-016).
       { icon: AlertTriangle, title: "Low stock", path: "/low-stock" },
-      // Receive: staff + admin (YGN warehouse intake, FR-005/006). Staff enter the
-      // supplier purchase cost off the delivery invoice; sales COGS/margin stay
-      // redacted. Backend authorizes both roles.
-      { icon: PackagePlus, title: "Receive", path: "/receive" },
     ],
   },
   {
@@ -96,6 +92,9 @@ const adminItems: Entry[] = [
     icon: Settings2,
     title: "Operations",
     items: [
+      // Receive: admin-only warehouse intake (FR-005/006; restricted from staff
+      // 2026-06-17). Backend get_admin is the real gate.
+      { icon: PackagePlus, title: "Receive", path: "/receive" },
       { icon: SlidersHorizontal, title: "Adjust", path: "/stock-adjustment" },
       // Pricing-override approval queue — admin decides PENDING deviations (FR-010).
       { icon: BadgePercent, title: "Overrides", path: "/pricing-overrides" },

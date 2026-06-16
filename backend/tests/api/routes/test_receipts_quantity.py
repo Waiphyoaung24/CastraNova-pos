@@ -219,18 +219,19 @@ def test_receive_quantity_records_discrepancy_note(
     assert "2 units missing from carton" in movement.notes
 
 
-def test_staff_can_receive_quantity(
+def test_staff_cannot_receive_quantity(
     client: TestClient,
     staff_token_headers: dict[str, str],
     seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
+    """Receiving is admin-only (reverses FR-005/006 D3); staff are forbidden."""
     product_id, supplier_id, _sku = seed_quantity_product
     resp = client.post(
         f"{PREFIX}/receipts/quantity",
         headers=staff_token_headers,
         json=_body(product_id, supplier_id),
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 403, resp.text
 
 
 def test_unauthenticated_cannot_receive_quantity(client: TestClient) -> None:
