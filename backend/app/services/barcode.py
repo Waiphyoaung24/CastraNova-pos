@@ -1,9 +1,10 @@
-"""QR label rendering for serialized units (FR-005).
+"""QR label rendering for serialized units (FR-005) and SKU/bin labels.
 
-Produces a small self-contained PDF label per piece so warehouse staff can
-print/reprint on receive (the reprint-by-serial path covers a lost label,
-S-lost-label). The label encodes the unit's castranova_barcode value as a QR
-symbol; the same value is also printed human-readable for the manual fallback.
+Produces small self-contained PDF labels so warehouse staff can print/reprint
+on receive. A serialized label encodes a unit's castranova_barcode; a SKU label
+encodes a product's sku. Both share one 60x30mm QR + two-line layout and can
+emit N identical pages (one label per page) for the roll thermal printer. The
+encoded value is also printed human-readable for the manual fallback.
 """
 
 import io
@@ -43,15 +44,39 @@ def _unit_qr_drawing(value: str, size: float = _QR_SIZE) -> Drawing:
     return drawing
 
 
-def render_unit_label(*, castranova_barcode: str, caption: str) -> bytes:
-    """Return a one-page PDF (bytes) with a QR symbol + human-readable text."""
+def _draw_label_page(
+    pdf: canvas.Canvas, *, qr_value: str, line1: str, line2: str
+) -> None:
+    """Draw one 60x30mm label page (QR + two text lines) and end the page."""
+    renderPDF.draw(_unit_qr_drawing(qr_value), pdf, 3 * mm, 5 * mm)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawString(26 * mm, 16 * mm, line1)
+    pdf.setFont("Helvetica", 6)
+    pdf.drawString(26 * mm, 9 * mm, line2[:48])
+    pdf.showPage()
+
+
+def render_label_sheet(
+    *, qr_value: str, line1: str, line2: str, qty: int = 1
+) -> bytes:
+    """Return a `qty`-page PDF (bytes); every page is an identical QR label."""
     buf = io.BytesIO()
     pdf = canvas.Canvas(buf, pagesize=(_LABEL_W, _LABEL_H))
-    renderPDF.draw(_unit_qr_drawing(castranova_barcode), pdf, 3 * mm, 5 * mm)
-    pdf.setFont("Helvetica-Bold", 8)
-    pdf.drawString(26 * mm, 16 * mm, castranova_barcode)
-    pdf.setFont("Helvetica", 6)
-    pdf.drawString(26 * mm, 9 * mm, caption[:48])
-    pdf.showPage()
+    for _ in range(qty):
+        _draw_label_page(pdf, qr_value=qr_value, line1=line1, line2=line2)
     pdf.save()
     return buf.getvalue()
+
+
+def render_unit_label(*, castranova_barcode: str, caption: str) -> bytes:
+    """One-page serialized-unit QR label PDF (bytes).
+
+    Thin wrapper over render_label_sheet, kept for the receipts route's existing
+    call site and test_unit_label.py's pinned signature.
+    """
+    return render_label_sheet(
+        qr_value=castranova_barcode,
+        line1=castranova_barcode,
+        line2=caption,
+        qty=1,
+    )
