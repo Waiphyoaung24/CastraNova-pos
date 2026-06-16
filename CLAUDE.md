@@ -57,7 +57,7 @@ For multi-step tasks, state a brief plan with verification per step.
 | 3. Test-first | `test-driven-development` | Inside every build task | `ecc:e2e-testing` skill + `ecc:e2e-runner` agent (Playwright) alongside pytest |
 | 4. Debug | `systematic-debugging` | Any failing/flaky test or wrong stock total | `ecc:silent-failure-hunter`, `ecc:performance-optimizer` |
 | 5. Review | `requesting-code-review` (orchestrator) | Before opening a PR | dispatches `ecc:fastapi-reviewer`, `ecc:python-reviewer`, `ecc:react-reviewer`, `ecc:typescript-reviewer`, `ecc:database-reviewer`, `ecc:security-reviewer` |
-| 6. Ship | `create-pr` (+ `git-pushing`) | After review passes | Clean, scoped PRs — one feature/task group per PR; never push to `master` directly. |
+| 6. Ship | `create-pr` (+ `git-pushing`) | After review passes | Clean, scoped PRs — one feature/task group per PR, into `dev`. Release by merging `dev` → `production`; never push to `master` directly. |
 
 **The loop:** `writing-plans` (once) → for each task: `subagent-driven-development` → `test-driven-development` → `systematic-debugging` (only if a test resists) → `requesting-code-review` → `create-pr`.
 
@@ -73,7 +73,7 @@ CastraNova-POS is an **inventory tracking & management system**. Forked from `fa
 
 ## Project Status (as of 2026-06-12)
 
-- **Default working branch: `dev`.** Flow is feature branch → PR → `dev`. `master` is the upstream `full-stack-fastapi-template` base — never target or push it.
+- **Branch model (3 branches).** `dev` is the development trunk — flow is feature branch → PR → `dev`. `production` is the release/deploy branch (created 2026-06-17 from `dev`); promote by merging `dev` → `production`. `master` is the upstream `full-stack-fastapi-template` base — never target or push it (no `dev`/`production` → `master` PRs).
 - **Core POS implementation** (plan Parts 0–2) is built; Parts 3–5 remain a roadmap to expand on demand.
 - **Pre-deploy hardening shipped** (merged to `dev` 2026-06-12 via PRs #6/#7/#8; per-PR branches deleted): bounded/ordered catalog endpoints; security (idempotency replay→actor binding, rate limits, least-privilege `castranova_app` DB role); E2E per-run DB reset + admin de-flake.
 - **CodeRabbit whole-repo remediation done:** migration `m027` (saleline `quantity > 0`, product `retail/repair_price_thb >= 0` CHECKs, `systemsetting.updated_by_user_id` FK `ON DELETE SET NULL`) + `tickets.tsx` idempotency-key reuse on retry. Design/plan under `docs/superpowers/`.
