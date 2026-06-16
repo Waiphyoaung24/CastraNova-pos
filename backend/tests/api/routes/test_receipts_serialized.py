@@ -1,3 +1,4 @@
+import re
 import uuid
 from collections.abc import Iterator
 
@@ -197,3 +198,35 @@ def test_unauthenticated_cannot_fetch_unit_label(client: TestClient) -> None:
     unit_id = uuid.uuid4()
     resp = client.get(f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf")
     assert resp.status_code == 401
+
+
+def _page_count(pdf: bytes) -> int:
+    return len(re.findall(rb"/Type\s*/Page(?!s)", pdf))
+
+
+def test_unit_label_qty_emits_multiple_pages(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    product_id, supplier_id = seed_product_supplier
+    rec = client.post(
+        f"{PREFIX}/receipts/serialized",
+        headers=superuser_token_headers,
+        json=_body(product_id, supplier_id),
+    )
+    unit_id = rec.json()["units"][0]["id"]
+
+    r3 = client.get(
+        f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf?qty=3",
+        headers=superuser_token_headers,
+    )
+    assert r3.status_code == 200
+    assert _page_count(r3.content) == 3
+
+    r1 = client.get(
+        f"{PREFIX}/receipts/serialized/{unit_id}/label.pdf",
+        headers=superuser_token_headers,
+    )
+    assert r1.status_code == 200
+    assert _page_count(r1.content) == 1

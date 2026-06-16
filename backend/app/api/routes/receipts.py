@@ -1,6 +1,7 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_user
@@ -10,7 +11,7 @@ from app.models import (
     ReceiveSerializedRequest,
     ReceiveSerializedResponse,
 )
-from app.services.barcode import render_unit_label
+from app.services.barcode import render_label_sheet
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 
@@ -64,12 +65,19 @@ def receive_quantity(
     "/serialized/{unit_id}/label.pdf",
     dependencies=[Depends(get_current_user)],
 )
-def read_unit_label(*, session: SessionDep, unit_id: uuid.UUID) -> Response:
+def read_unit_label(
+    *,
+    session: SessionDep,
+    unit_id: uuid.UUID,
+    qty: Annotated[int, Query(ge=1, le=1000)] = 1,
+) -> Response:
     unit = crud.get_unit(session=session, unit_id=unit_id)
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
-    pdf = render_unit_label(
-        castranova_barcode=unit.castranova_barcode,
-        caption=f"{unit.supplier_serial}",
+    pdf = render_label_sheet(
+        qr_value=unit.castranova_barcode,
+        line1=unit.castranova_barcode,
+        line2=unit.supplier_serial,
+        qty=qty,
     )
     return Response(content=pdf, media_type="application/pdf")
