@@ -1518,7 +1518,10 @@ def _build_consumption_events(
     if is_admin:
         movement_ids = [m.id for m in movements]
         cost_lines = session.exec(
-            select(CostLine).where(col(CostLine.part_movement_id).in_(movement_ids))
+            select(CostLine)
+            .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
+            .where(col(CostLine.part_movement_id).in_(movement_ids))
+            .order_by(col(PartBatch.received_at), col(PartBatch.id))
         ).all()
         batch_ids = {cl.part_batch_id for cl in cost_lines}
         batch_no = {

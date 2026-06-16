@@ -296,6 +296,9 @@ def test_sku_search_admin_sees_fifo_cost_breakdown(
     assert ev["quantity"] == 7
     assert len(ev["draws"]) == 2  # FIFO spanned two batches
     assert sum(d["quantity"] for d in ev["draws"]) == 7
+    # Draws are ordered oldest-batch-first (FIFO): the cheaper 10.00 batch drawn first.
+    assert ev["draws"][0]["unit_cost_thb"] == "10.00"
+    assert ev["draws"][0]["quantity"] == 5
     # 5*10 + 2*12 = 74
     assert Decimal(ev["total_cost_thb"]) == Decimal("74.00")
     assert "purchase_cost_thb" in ra.json()["batches"][0]
