@@ -1128,11 +1128,11 @@ export class SearchService {
     
     /**
      * Search Sku
-     * Batch attribution + quantity-on-hand for a SKU (FR-015). Available to both
-     * roles; carries no cost fields.
+     * Batch attribution + QOH + consumption history for a SKU (FR-015). Admins
+     * see FIFO cost; staff see attribution without cost (spec §6.5).
      * @param data The data for the request.
      * @param data.sku
-     * @returns SkuSearchResult Successful Response
+     * @returns unknown Successful Response
      * @throws ApiError
      */
     public static searchSku(data: SearchSearchSkuData): CancelablePromise<SearchSearchSkuResponse> {

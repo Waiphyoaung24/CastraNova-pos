@@ -2831,6 +2831,61 @@ export const SerialMovementPublicSchema = {
                 }
             ],
             title: 'Notes'
+        },
+        from_location_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'From Location Name'
+        },
+        to_location_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'To Location Name'
+        },
+        actor_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Name'
+        },
+        reference_kind: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reference Kind'
+        },
+        reference_label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reference Label'
         }
     },
     type: 'object',
@@ -3054,6 +3109,40 @@ export const ServiceTicketPublicSchema = {
     title: 'ServiceTicketPublic'
 } as const;
 
+export const SkuBatchAdminPublicSchema = {
+    properties: {
+        batch_no: {
+            type: 'string',
+            title: 'Batch No'
+        },
+        received_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Received At'
+        },
+        received_qty: {
+            type: 'integer',
+            title: 'Received Qty'
+        },
+        remaining_qty: {
+            type: 'integer',
+            title: 'Remaining Qty'
+        },
+        is_adjustment: {
+            type: 'boolean',
+            title: 'Is Adjustment'
+        },
+        purchase_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Purchase Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['batch_no', 'received_at', 'received_qty', 'remaining_qty', 'is_adjustment', 'purchase_cost_thb'],
+    title: 'SkuBatchAdminPublic'
+} as const;
+
 export const SkuBatchPublicSchema = {
     properties: {
         batch_no: {
@@ -3083,6 +3172,254 @@ export const SkuBatchPublicSchema = {
     title: 'SkuBatchPublic'
 } as const;
 
+export const SkuConsumptionDrawAdminPublicSchema = {
+    properties: {
+        batch_no: {
+            type: 'string',
+            title: 'Batch No'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Cost Thb'
+        },
+        total_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['batch_no', 'quantity', 'unit_cost_thb', 'total_cost_thb'],
+    title: 'SkuConsumptionDrawAdminPublic',
+    description: 'One FIFO batch draw inside a consumption event — ADMIN only (cost).'
+} as const;
+
+export const SkuConsumptionEventAdminPublicSchema = {
+    properties: {
+        event_type: {
+            '$ref': '#/components/schemas/MovementType'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        reference_kind: {
+            type: 'string',
+            title: 'Reference Kind'
+        },
+        reference_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Reference Id'
+        },
+        customer_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Customer Name'
+        },
+        project_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Name'
+        },
+        project_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Code'
+        },
+        actor_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Name'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        total_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cost Thb'
+        },
+        draws: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionDrawAdminPublic'
+            },
+            type: 'array',
+            title: 'Draws'
+        }
+    },
+    type: 'object',
+    required: ['event_type', 'occurred_at', 'quantity', 'reference_kind', 'reference_id', 'total_cost_thb', 'draws'],
+    title: 'SkuConsumptionEventAdminPublic'
+} as const;
+
+export const SkuConsumptionEventPublicSchema = {
+    properties: {
+        event_type: {
+            '$ref': '#/components/schemas/MovementType'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        reference_kind: {
+            type: 'string',
+            title: 'Reference Kind'
+        },
+        reference_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Reference Id'
+        },
+        customer_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Customer Name'
+        },
+        project_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Name'
+        },
+        project_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Code'
+        },
+        actor_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Name'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    required: ['event_type', 'occurred_at', 'quantity', 'reference_kind', 'reference_id'],
+    title: 'SkuConsumptionEventPublic',
+    description: `One consuming part_movement, STAFF view — attribution only, NO cost.
+Any NEW cost/margin field MUST go on the Admin subclass only; staff must
+never see cost data (mirrors SaleStaffPublic).`
+} as const;
+
+export const SkuSearchAdminResultSchema = {
+    properties: {
+        sku: {
+            type: 'string',
+            title: 'Sku'
+        },
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode'
+        },
+        total_on_hand: {
+            type: 'integer',
+            title: 'Total On Hand'
+        },
+        batches: {
+            items: {
+                '$ref': '#/components/schemas/SkuBatchAdminPublic'
+            },
+            type: 'array',
+            title: 'Batches'
+        },
+        consumption: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionEventAdminPublic'
+            },
+            type: 'array',
+            title: 'Consumption'
+        }
+    },
+    type: 'object',
+    required: ['sku', 'product_id', 'tracking_mode', 'total_on_hand', 'batches', 'consumption'],
+    title: 'SkuSearchAdminResult'
+} as const;
+
 export const SkuSearchResultSchema = {
     properties: {
         sku: {
@@ -3107,6 +3444,14 @@ export const SkuSearchResultSchema = {
             },
             type: 'array',
             title: 'Batches'
+        },
+        consumption: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionEventPublic'
+            },
+            type: 'array',
+            title: 'Consumption',
+            default: []
         }
     },
     type: 'object',
