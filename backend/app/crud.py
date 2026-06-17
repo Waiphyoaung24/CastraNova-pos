@@ -1568,7 +1568,7 @@ def _build_consumption_events(
                 SkuConsumptionEventAdminPublic(
                     **common,
                     total_cost_thb=sum(
-                        (d.total_cost_thb for d in draws), Decimal("0")
+                        (d.total_cost_thb for d in draws), Decimal("0.00")
                     ),
                     draws=draws,
                 )
@@ -1598,6 +1598,12 @@ def search_sku(
             .order_by(col(PartBatch.received_at), col(PartBatch.id))
         ).all()
         total = sum(b.remaining_qty for b in batches)
+        # Uses ix_part_movement_product_occurred (product_id, occurred_at DESC)
+        # for the equality + ordering; event_type is NOT in that index, so it is
+        # applied as an in-heap filter (the scan is bounded in practice by this
+        # product's movement-history depth). If deep non-consuming histories ever
+        # show up in pg_stat_statements, add a partial index
+        # (product_id, occurred_at DESC) WHERE event_type IN (consuming...).
         movements = list(
             session.exec(
                 select(PartMovement)
