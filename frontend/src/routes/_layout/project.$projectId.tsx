@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
 import { ProjectsService } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -59,30 +60,31 @@ function ProjectDetail() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        {isAdmin && (
+      <PageHeader
+        backLink={
+          isAdmin && (
+            <Link
+              to="/projects"
+              className="text-muted-foreground text-sm hover:underline"
+            >
+              ← Projects
+            </Link>
+          )
+        }
+        title={project.code}
+        titleClassName="num"
+        badge={<Badge variant="secondary">{project.status ?? "ACTIVE"}</Badge>}
+        description={project.name}
+        footer={
           <Link
-            to="/projects"
-            className="text-muted-foreground text-sm hover:underline"
+            to="/customer/$customerId"
+            params={{ customerId: project.customer_id }}
+            className="text-sm hover:underline"
           >
-            ← Projects
+            View customer
           </Link>
-        )}
-        <div className="mt-2 flex items-center gap-3">
-          <h1 className="num text-2xl font-bold tracking-tight">
-            {project.code}
-          </h1>
-          <Badge variant="secondary">{project.status ?? "ACTIVE"}</Badge>
-        </div>
-        <p className="text-muted-foreground">{project.name}</p>
-        <Link
-          to="/customer/$customerId"
-          params={{ customerId: project.customer_id }}
-          className="text-sm hover:underline"
-        >
-          View customer
-        </Link>
-      </div>
+        }
+      />
 
       {isAdmin && (
         <Card>
