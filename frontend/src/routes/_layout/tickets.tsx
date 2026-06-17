@@ -11,6 +11,7 @@ import {
   ServiceTicketsService,
 } from "@/client"
 import { CameraScanFallback } from "@/components/CameraScanFallback"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import {
   TicketPartsList,
@@ -267,12 +268,10 @@ function Tickets() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Service ticket</h1>
-        <p className="text-muted-foreground">
-          Open a ticket, scan repair parts, then close it.
-        </p>
-      </div>
+      <PageHeader
+        title="Service ticket"
+        description="Open a ticket, scan repair parts, then close it."
+      />
 
       <div className="grid gap-6 md:grid-cols-[1fr_20rem]">
         {/* Left pane: issue + scan + parts */}

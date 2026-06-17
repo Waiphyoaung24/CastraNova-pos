@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useId, useState } from "react"
 
 import { AuditService, type MovementType } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -62,12 +63,10 @@ function Audit() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Audit ledger</h1>
-        <p className="text-muted-foreground">
-          Append-only stock-movement history. Read-only.
-        </p>
-      </div>
+      <PageHeader
+        title="Audit ledger"
+        description="Append-only stock-movement history. Read-only."
+      />
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1.5">

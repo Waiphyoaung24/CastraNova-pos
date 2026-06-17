@@ -14,9 +14,10 @@ import {
   SuppliersService,
   type UnitPublic,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { EmptyState } from "@/components/EmptyState"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
-import { ScanInput } from "@/components/ScanInput"
+import { ScanField } from "@/components/ScanField"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -62,12 +63,10 @@ export const Route = createFileRoute("/_layout/receive")({
 function Receive() {
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Receive stock</h1>
-        <p className="text-muted-foreground">
-          Record incoming units from a supplier delivery.
-        </p>
-      </div>
+      <PageHeader
+        title="Receive stock"
+        description="Record incoming units from a supplier delivery."
+      />
       <Tabs defaultValue="serialized">
         <TabsList>
           <TabsTrigger value="serialized">Serialized</TabsTrigger>
@@ -267,20 +266,17 @@ function SerializedTab() {
           <CardTitle>Add piece</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            {/* Plain visual label: ScanInput renders a bare input whose own
-                aria-label covers screen readers, so no htmlFor association. */}
-            <p className="text-sm font-medium">Scan serial</p>
-            {/* Scanning fills the serial field below; the operator confirms the
-                cost and presses Add. (No useScanLookup — units don't exist yet.) */}
-            <ScanInput
-              placeholder="Scan serial…"
-              onScan={(code) => {
-                setSerial(code)
-                serialInputRef.current?.focus()
-              }}
-            />
-          </div>
+          {/* Scanning fills the serial field below; the operator confirms the
+              cost and presses Add. (No useScanLookup — units don't exist yet.) */}
+          <ScanField
+            label="Scan serial"
+            placeholder="Scan serial…"
+            clearOnScan
+            onScan={(code) => {
+              setSerial(code)
+              serialInputRef.current?.focus()
+            }}
+          />
 
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
             <div className="flex flex-col gap-2">

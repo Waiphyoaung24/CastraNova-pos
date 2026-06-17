@@ -8,6 +8,7 @@ import {
   PricingOverridesService,
   ProductsService,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -99,12 +100,10 @@ function PricingOverrides() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Pricing overrides</h1>
-        <p className="text-muted-foreground">
-          Approve or reject price-deviation requests above the threshold.
-        </p>
-      </div>
+      <PageHeader
+        title="Pricing overrides"
+        description="Approve or reject price-deviation requests above the threshold."
+      />
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="state">State</Label>

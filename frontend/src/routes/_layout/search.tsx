@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { type FormEvent, Fragment, useState } from "react"
+import { Barcode, Boxes } from "lucide-react"
+import { Fragment, useState } from "react"
 
 import { SearchService, type SkuConsumptionEventAdminPublic } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
+import { ScanField } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Table,
   TableBody,
@@ -43,17 +45,15 @@ function consumptionLabel(eventType: string): string {
 function Search() {
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Search</h1>
-        <p className="text-muted-foreground">
-          Look up a serialized unit's history or a SKU's batches.
-        </p>
-      </div>
+      <PageHeader
+        title="Search"
+        description="Look up an item two ways: by the barcode of a single unit, or by a product's SKU code. Pick a mode below."
+      />
 
       <Tabs defaultValue="serial">
         <TabsList>
-          <TabsTrigger value="serial">Serial</TabsTrigger>
-          <TabsTrigger value="sku">SKU</TabsTrigger>
+          <TabsTrigger value="serial">By unit (barcode)</TabsTrigger>
+          <TabsTrigger value="sku">By product (SKU)</TabsTrigger>
         </TabsList>
         <TabsContent value="serial" className="pt-4">
           <SerialSearch />
@@ -77,24 +77,30 @@ function SerialSearch() {
     retry: false,
   })
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault()
-    setTerm(input.trim())
-  }
-
   return (
     <div className="space-y-4">
-      <form onSubmit={onSubmit} className="flex gap-2">
-        <Input
-          placeholder="Scan or type a CastraNova barcode…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          className="w-full sm:w-80"
-        />
-        <Button type="submit" disabled={input.trim() === ""}>
-          Search
-        </Button>
-      </form>
+      <Alert>
+        <Barcode />
+        <AlertTitle>Track one physical unit</AlertTitle>
+        <AlertDescription>
+          Use this when you have an item in hand. Returns where the unit is
+          right now and its full timeline — when it was received, moved, sold,
+          or sent for service.
+        </AlertDescription>
+      </Alert>
+
+      <ScanField
+        label="CastraNova barcode"
+        placeholder="Scan or type a CastraNova barcode…"
+        value={input}
+        onValueChange={setInput}
+        onScan={setTerm}
+        submitLabel="Search"
+      />
+      <p className="text-muted-foreground text-sm">
+        The barcode label we printed and stuck on the unit at receiving — not
+        the supplier's serial number.
+      </p>
 
       {term === "" ? null : isPending ? (
         <p className="text-muted-foreground text-sm">Searching…</p>
@@ -173,24 +179,30 @@ function SkuSearch() {
     retry: false,
   })
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault()
-    setTerm(input.trim())
-  }
-
   return (
     <div className="space-y-4">
-      <form onSubmit={onSubmit} className="flex gap-2">
-        <Input
-          placeholder="Scan or type a SKU…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          className="w-full sm:w-80"
-        />
-        <Button type="submit" disabled={input.trim() === ""}>
-          Search
-        </Button>
-      </form>
+      <Alert>
+        <Boxes />
+        <AlertTitle>Check stock for a product line</AlertTitle>
+        <AlertDescription>
+          Use this to see all units of one product. Returns total quantity on
+          hand, the open batches (oldest stock is used first), and a history of
+          where the stock has gone.
+        </AlertDescription>
+      </Alert>
+
+      <ScanField
+        label="SKU"
+        placeholder="Scan or type a SKU…"
+        value={input}
+        onValueChange={setInput}
+        onScan={setTerm}
+        submitLabel="Search"
+      />
+      <p className="text-muted-foreground text-sm">
+        The product code shared by every unit of this item — the same SKU shown
+        on the Products list.
+      </p>
 
       {term === "" ? null : isPending ? (
         <p className="text-muted-foreground text-sm">Searching…</p>

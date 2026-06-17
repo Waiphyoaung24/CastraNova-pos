@@ -8,6 +8,7 @@ import {
   type ProjectPublic,
   ProjectsService,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -85,12 +86,10 @@ function Projects() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Projects</h1>
-        <p className="text-muted-foreground">
-          Create and review project records used by pulls.
-        </p>
-      </div>
+      <PageHeader
+        title="Projects"
+        description="Create and review project records used by pulls."
+      />
 
       <Card>
         <CardHeader>

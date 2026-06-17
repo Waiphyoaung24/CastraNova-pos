@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ScanLine } from "lucide-react"
+import { ShoppingCart } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
@@ -11,10 +11,11 @@ import {
   type SalePublic,
   type SaleStaffPublic,
 } from "@/client"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -122,7 +123,7 @@ function Sale() {
   const [lines, setLines] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState<string>("")
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
-  const scanRef = useRef<ScanInputHandle>(null)
+  const scanRef = useRef<ScanFieldHandle>(null)
 
   const { data: products } = useQuery({
     queryKey: ["products"],
@@ -205,48 +206,57 @@ function Sale() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Sale</h1>
-        <p className="text-muted-foreground">
-          Scan items to build a sale, then check out.
-        </p>
-      </div>
+      <PageHeader
+        title="Sale"
+        description="Scan items to build a sale, then check out."
+      />
 
       <div className="grid gap-6 md:grid-cols-[1fr_20rem]">
         {/* Left pane: scan bar + cart lines */}
         <div className="space-y-4">
-          <div className="space-y-2">
-            {/* ScanInput carries its own aria-label="Scan barcode"; this is a
-                visible caption, not a form-control label. */}
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <ScanLine
-                className="text-muted-foreground size-4"
-                aria-hidden="true"
-              />
-              Scan item
-            </p>
-            <ScanInput ref={scanRef} onScan={resolve} />
-            <CameraScanFallback onScan={resolve} />
-            {/* Two statically-typed live regions: a dynamic aria-live value is
-                unreliable across screen readers, so each politeness level gets
-                its own always-present region. */}
-            <p
-              aria-live="assertive"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isError
-                ? "Scan lookup failed. Try again."
-                : notFound
-                  ? "No item found for that code."
-                  : ""}
-            </p>
-            <p
-              aria-live="polite"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isSearching ? "Searching…" : ""}
-            </p>
-          </div>
+          <Alert>
+            <ShoppingCart />
+            <AlertTitle>Build a counter sale</AlertTitle>
+            <AlertDescription>
+              Scan each item as you go — it's added to the cart and priced
+              automatically. Choose a customer, then complete the sale to record
+              it and draw the stock down.
+            </AlertDescription>
+          </Alert>
+
+          <ScanField
+            ref={scanRef}
+            label="Scan item"
+            clearOnScan
+            onScan={resolve}
+            status={
+              // Two statically-typed live regions: a dynamic aria-live value is
+              // unreliable across screen readers, so each politeness level gets
+              // its own always-present region.
+              <>
+                <p
+                  aria-live="assertive"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isError
+                    ? "Scan lookup failed. Try again."
+                    : notFound
+                      ? "No item found for that code."
+                      : ""}
+                </p>
+                <p
+                  aria-live="polite"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isSearching ? "Searching…" : ""}
+                </p>
+              </>
+            }
+          />
+          <p className="text-muted-foreground text-sm">
+            Scan the CastraNova barcode on a unit, or a product SKU for
+            quantity-tracked items.
+          </p>
 
           <ScanCart
             lines={lines}

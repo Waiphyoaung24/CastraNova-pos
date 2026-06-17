@@ -4,6 +4,7 @@ import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -53,13 +54,15 @@ function HoldingPeriod() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Holding period</h1>
-        <p className="text-muted-foreground">
-          Days in stock per unit / batch
-          {data ? `, flagged over ${data.threshold_days} days` : ""}.
-        </p>
-      </div>
+      <PageHeader
+        title="Holding period"
+        description={
+          <>
+            Days in stock per unit / batch
+            {data ? `, flagged over ${data.threshold_days} days` : ""}.
+          </>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">

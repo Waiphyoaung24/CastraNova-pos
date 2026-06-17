@@ -7,6 +7,7 @@ import {
   CustomersService,
   type CustomerType,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -233,13 +234,10 @@ function Customers() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Customers</h1>
-        <p className="text-muted-foreground">
-          Create and review customer records used by sales, tickets, and
-          projects.
-        </p>
-      </div>
+      <PageHeader
+        title="Customers"
+        description="Create and review customer records used by sales, tickets, and projects."
+      />
 
       <Card>
         <CardHeader>

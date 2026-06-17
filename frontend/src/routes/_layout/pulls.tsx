@@ -11,6 +11,7 @@ import {
   ProjectPullsService,
   ProjectsService,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { PullCreatePanel } from "@/components/pos/PullCreatePanel"
 import { PullFulfillPanel } from "@/components/pos/PullFulfillPanel"
 import { PullQueue, type PullStateFilter } from "@/components/pos/PullQueue"
@@ -237,12 +238,10 @@ function Pulls() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Project pulls</h1>
-        <p className="text-muted-foreground">
-          Fulfill pending pulls at the warehouse.
-        </p>
-      </div>
+      <PageHeader
+        title="Project pulls"
+        description="Fulfill pending pulls at the warehouse."
+      />
 
       {mode === "create" ? (
         <PullCreatePanel

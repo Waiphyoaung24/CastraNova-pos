@@ -9,8 +9,9 @@ import {
   ProductsService,
   type TrackingMode,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { EmptyState } from "@/components/EmptyState"
-import { PrintLabelButton } from "@/components/PrintLabelButton"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -113,12 +114,20 @@ function Products() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Products</h1>
-        <p className="text-muted-foreground">
-          Manage the catalog and review per-product price history.
-        </p>
-      </div>
+      <PageHeader
+        title="Products"
+        description="Manage the catalog and review per-product price history."
+      />
+
+      <Alert>
+        <Package />
+        <AlertTitle>Set up a product line</AlertTitle>
+        <AlertDescription>
+          A product is the catalog entry every unit is sold and repaired against
+          — its SKU, model, pricing, and how its stock is counted. Create one
+          here, then review or revise its prices from the catalog below.
+        </AlertDescription>
+      </Alert>
 
       <Card>
         <CardHeader>
@@ -159,6 +168,10 @@ function Products() {
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-muted-foreground text-sm">
+              Quantity counts stock as a number; Serialized tracks each unit by
+              its own barcode.
+            </p>
           </div>
           <Field
             id={minStockId}
@@ -191,6 +204,7 @@ function Products() {
               type="button"
               disabled={!canCreate}
               onClick={() => createMutation.mutate(buildProductPayload(draft))}
+              className="w-full sm:w-auto"
             >
               {createMutation.isPending ? "Creating…" : "Create product"}
             </Button>
@@ -218,7 +232,6 @@ function Products() {
                 <TableHead className="text-right">Retail</TableHead>
                 <TableHead className="text-right">Repair</TableHead>
                 <TableHead className="text-right">History</TableHead>
-                <TableHead className="text-right">Labels</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -245,13 +258,6 @@ function Products() {
                   </TableCell>
                   <TableCell className="text-right">
                     <PriceHistoryDialog productId={p.id} sku={p.sku} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {(p.tracking_mode ?? "QUANTITY") === "QUANTITY" ? (
-                      <PrintLabelButton
-                        target={{ kind: "sku", productId: p.id, sku: p.sku }}
-                      />
-                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}

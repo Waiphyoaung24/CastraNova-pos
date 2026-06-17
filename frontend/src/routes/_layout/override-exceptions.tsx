@@ -4,6 +4,7 @@ import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -62,14 +63,10 @@ function OverrideExceptions() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Override exceptions
-        </h1>
-        <p className="text-muted-foreground">
-          Monthly pricing-override requests and their approval outcomes.
-        </p>
-      </div>
+      <PageHeader
+        title="Override exceptions"
+        description="Monthly pricing-override requests and their approval outcomes."
+      />
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1.5">

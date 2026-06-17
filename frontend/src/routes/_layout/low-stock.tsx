@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { type BulkMinStockUpdate, LowStockService } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -66,12 +67,10 @@ function LowStock() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Low stock</h1>
-        <p className="text-muted-foreground">
-          Products below their reorder threshold.
-        </p>
-      </div>
+      <PageHeader
+        title="Low stock"
+        description="Products below their reorder threshold."
+      />
 
       {isAdmin && (
         <div>

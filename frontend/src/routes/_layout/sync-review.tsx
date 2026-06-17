@@ -7,6 +7,7 @@ import {
   SyncReviewService,
   type SyncReviewState,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -81,12 +82,10 @@ function SyncReview() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Sync review</h1>
-        <p className="text-muted-foreground">
-          Offline mutations that need a manual keep/discard decision.
-        </p>
-      </div>
+      <PageHeader
+        title="Sync review"
+        description="Offline mutations that need a manual keep/discard decision."
+      />
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="state">State</Label>

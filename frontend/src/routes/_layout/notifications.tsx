@@ -5,6 +5,7 @@ import {
   type NotificationPreferenceUpdate,
   NotificationsService,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -58,12 +59,10 @@ function Notifications() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
-        <p className="text-muted-foreground">
-          Choose which events notify you over LINE / Viber.
-        </p>
-      </div>
+      <PageHeader
+        title="Notifications"
+        description="Choose which events notify you over LINE / Viber."
+      />
 
       {isPending ? (
         <p className="text-muted-foreground py-6 text-center text-sm">

@@ -7,6 +7,7 @@ import {
   type SupplierPublic,
   SuppliersService,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -68,12 +69,10 @@ function Suppliers() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Suppliers</h1>
-        <p className="text-muted-foreground">
-          Create and review supplier records used when receiving stock.
-        </p>
-      </div>
+      <PageHeader
+        title="Suppliers"
+        description="Create and review supplier records used when receiving stock."
+      />
 
       <Card>
         <CardHeader>

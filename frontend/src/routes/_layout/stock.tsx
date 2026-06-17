@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { DashboardsService, SuppliersService } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -69,12 +70,10 @@ function StockOnHand() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Stock on hand</h1>
-        <p className="text-muted-foreground">
-          Current quantity on hand across the catalog.
-        </p>
-      </div>
+      <PageHeader
+        title="Stock on hand"
+        description="Current quantity on hand across the catalog."
+      />
 
       <div className="flex flex-wrap gap-3">
         <Input

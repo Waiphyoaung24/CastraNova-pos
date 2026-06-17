@@ -4,6 +4,7 @@ import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -60,12 +61,10 @@ function ChannelMargin() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Channel margin</h1>
-        <p className="text-muted-foreground">
-          Monthly revenue, COGS and margin by channel.
-        </p>
-      </div>
+      <PageHeader
+        title="Channel margin"
+        description="Monthly revenue, COGS and margin by channel."
+      />
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1.5">

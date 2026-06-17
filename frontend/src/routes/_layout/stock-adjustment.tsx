@@ -3,6 +3,8 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useId, useState } from "react"
 
 import { ApiError, StockAdjustmentsService } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
+import { ScanField } from "@/components/ScanField"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -68,13 +70,10 @@ function StockAdjustment() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Stock adjustment</h1>
-        <p className="text-muted-foreground">
-          Write off or recount stock. Adjustments are recorded permanently and
-          cannot be undone.
-        </p>
-      </div>
+      <PageHeader
+        title="Stock adjustment"
+        description="Write off or recount stock. Adjustments are recorded permanently and cannot be undone."
+      />
 
       <Card>
         <CardHeader>
@@ -99,10 +98,11 @@ function StockAdjustment() {
           {draft.targetKind === "UNIT" ? (
             <div className="space-y-2">
               <Label htmlFor={barcodeId}>CastraNova barcode</Label>
-              <Input
+              <ScanField
                 id={barcodeId}
                 value={draft.barcode}
-                onChange={(e) => set({ barcode: e.target.value })}
+                onValueChange={(barcode) => set({ barcode })}
+                onScan={(barcode) => set({ barcode })}
                 placeholder="Scan or type the unit barcode…"
               />
               <p className="text-muted-foreground text-sm">
@@ -113,10 +113,11 @@ function StockAdjustment() {
             <>
               <div className="space-y-2">
                 <Label htmlFor={skuId}>SKU</Label>
-                <Input
+                <ScanField
                   id={skuId}
                   value={draft.sku}
-                  onChange={(e) => set({ sku: e.target.value })}
+                  onValueChange={(sku) => set({ sku })}
+                  onScan={(sku) => set({ sku })}
                   placeholder="Scan or type the SKU…"
                 />
               </div>
