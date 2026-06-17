@@ -537,6 +537,11 @@ export type SerialMovementPublic = {
     project_pull_id: (string | null);
     stock_adjustment_id: (string | null);
     notes: (string | null);
+    from_location_name?: (string | null);
+    to_location_name?: (string | null);
+    actor_name?: (string | null);
+    reference_kind?: (string | null);
+    reference_label?: (string | null);
 };
 
 export type SerialSearchResult = {
@@ -583,6 +588,15 @@ export type ServiceTicketPublic = {
     parts: Array<ServiceTicketPartPublic>;
 };
 
+export type SkuBatchAdminPublic = {
+    batch_no: string;
+    received_at: string;
+    received_qty: number;
+    remaining_qty: number;
+    is_adjustment: boolean;
+    purchase_cost_thb: string;
+};
+
 export type SkuBatchPublic = {
     batch_no: string;
     received_at: string;
@@ -591,12 +605,65 @@ export type SkuBatchPublic = {
     is_adjustment: boolean;
 };
 
+/**
+ * One FIFO batch draw inside a consumption event — ADMIN only (cost).
+ */
+export type SkuConsumptionDrawAdminPublic = {
+    batch_no: string;
+    quantity: number;
+    unit_cost_thb: string;
+    total_cost_thb: string;
+};
+
+export type SkuConsumptionEventAdminPublic = {
+    event_type: MovementType;
+    occurred_at: string;
+    quantity: number;
+    reference_kind: string;
+    reference_id: string;
+    customer_name?: (string | null);
+    project_name?: (string | null);
+    project_code?: (string | null);
+    actor_name?: (string | null);
+    notes?: (string | null);
+    total_cost_thb: string;
+    draws: Array<SkuConsumptionDrawAdminPublic>;
+};
+
+/**
+ * One consuming part_movement, STAFF view — attribution only, NO cost.
+ * Any NEW cost/margin field MUST go on the Admin subclass only; staff must
+ * never see cost data (mirrors SaleStaffPublic).
+ */
+export type SkuConsumptionEventPublic = {
+    event_type: MovementType;
+    occurred_at: string;
+    quantity: number;
+    reference_kind: string;
+    reference_id: string;
+    customer_name?: (string | null);
+    project_name?: (string | null);
+    project_code?: (string | null);
+    actor_name?: (string | null);
+    notes?: (string | null);
+};
+
+export type SkuSearchAdminResult = {
+    sku: string;
+    product_id: string;
+    tracking_mode: TrackingMode;
+    total_on_hand: number;
+    batches: Array<SkuBatchAdminPublic>;
+    consumption: Array<SkuConsumptionEventAdminPublic>;
+};
+
 export type SkuSearchResult = {
     sku: string;
     product_id: string;
     tracking_mode: TrackingMode;
     total_on_hand: number;
     batches: Array<SkuBatchPublic>;
+    consumption?: Array<SkuConsumptionEventPublic>;
 };
 
 export type StockAdjustmentCreate = {
@@ -1145,7 +1212,7 @@ export type SearchSearchSkuData = {
     sku: string;
 };
 
-export type SearchSearchSkuResponse = (SkuSearchResult);
+export type SearchSearchSkuResponse = ((SkuSearchAdminResult | SkuSearchResult));
 
 export type ServiceTicketsOpenServiceTicketData = {
     requestBody: ServiceTicketCreate;

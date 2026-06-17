@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, Fragment, useState } from "react"
 
-import { SearchService } from "@/client"
+import { SearchService, type SkuConsumptionEventAdminPublic } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,21 @@ export const Route = createFileRoute("/_layout/search")({
     meta: [{ title: "Search - CastraNova POS" }],
   }),
 })
+
+function consumptionLabel(eventType: string): string {
+  switch (eventType) {
+    case "SOLD":
+      return "Sale"
+    case "MAINTENANCE_OUT":
+      return "Service"
+    case "PROJECT_OUT":
+      return "Project"
+    case "ADJUSTED_OUT":
+      return "Adjustment"
+    default:
+      return eventType
+  }
+}
 
 function Search() {
   return (
@@ -106,6 +121,9 @@ function SerialSearch() {
                   <TableRow>
                     <TableHead>Event</TableHead>
                     <TableHead>When</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>By</TableHead>
+                    <TableHead>Reference</TableHead>
                     <TableHead>Notes</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -117,6 +135,17 @@ function SerialSearch() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(m.occurred_at).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {m.from_location_name && m.to_location_name
+                          ? `${m.from_location_name} → ${m.to_location_name}`
+                          : (m.to_location_name ?? m.from_location_name ?? "—")}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {m.actor_name ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {m.reference_label ?? m.reference_kind ?? "—"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {m.notes ?? "—"}
@@ -221,6 +250,123 @@ function SkuSearch() {
               )}
             </div>
           ) : null}
+          {data.tracking_mode === "QUANTITY"
+            ? (() => {
+                const consumption = data.consumption ?? []
+                return (
+                  <div>
+                    <h3 className="mb-2 text-sm font-medium">Consumption</h3>
+                    {consumption.length === 0 ? (
+                      <p className="text-muted-foreground text-sm">
+                        No consumption yet.
+                      </p>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>When</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead className="text-right">Qty</TableHead>
+                            <TableHead>Customer / Project</TableHead>
+                            <TableHead>By</TableHead>
+                            {"total_cost_thb" in consumption[0] ? (
+                              <TableHead className="text-right">
+                                COGS (฿)
+                              </TableHead>
+                            ) : null}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {consumption.map((c, i) => (
+                            <Fragment
+                              key={`${c.reference_id}-${c.occurred_at}-${i}`}
+                            >
+                              <TableRow>
+                                <TableCell className="text-muted-foreground">
+                                  {new Date(c.occurred_at).toLocaleString()}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">
+                                    {consumptionLabel(c.event_type)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="num text-right">
+                                  {c.quantity}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {c.project_name
+                                    ? `${c.project_code ?? ""} ${c.project_name}`.trim()
+                                    : (c.customer_name ?? "—")}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {c.actor_name ?? "—"}
+                                </TableCell>
+                                {"total_cost_thb" in c ? (
+                                  <TableCell className="num text-right">
+                                    {
+                                      (c as SkuConsumptionEventAdminPublic)
+                                        .total_cost_thb
+                                    }
+                                  </TableCell>
+                                ) : null}
+                              </TableRow>
+                              {"draws" in c ? (
+                                <TableRow className="hover:bg-transparent">
+                                  <TableCell colSpan={6} className="py-2">
+                                    {/* admin column count */}
+                                    <details className="text-sm">
+                                      <summary className="cursor-pointer text-muted-foreground">
+                                        FIFO draws
+                                      </summary>
+                                      <Table className="mt-2">
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead>Batch</TableHead>
+                                            <TableHead className="text-right">
+                                              Qty
+                                            </TableHead>
+                                            <TableHead className="text-right">
+                                              Unit cost (฿)
+                                            </TableHead>
+                                            <TableHead className="text-right">
+                                              Line total (฿)
+                                            </TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {(
+                                            c as SkuConsumptionEventAdminPublic
+                                          ).draws.map((d) => (
+                                            <TableRow key={d.batch_no}>
+                                              <TableCell className="num">
+                                                {d.batch_no}
+                                              </TableCell>
+                                              <TableCell className="num text-right">
+                                                {d.quantity}
+                                              </TableCell>
+                                              <TableCell className="num text-right">
+                                                {d.unit_cost_thb}
+                                              </TableCell>
+                                              <TableCell className="num text-right">
+                                                {d.total_cost_thb}
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </details>
+                                  </TableCell>
+                                </TableRow>
+                              ) : null}
+                            </Fragment>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+                )
+              })()
+            : null}
         </div>
       )}
     </div>

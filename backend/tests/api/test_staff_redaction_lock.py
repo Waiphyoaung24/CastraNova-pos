@@ -309,3 +309,52 @@ def test_staff_customer_dashboard_carries_no_financials(
     body = r.json()
     _assert_no_forbidden_keys(body)
     assert body["transactions"]
+
+
+def test_staff_sku_search_consumption_carries_no_cost(
+    client: TestClient, staff_token_headers: dict[str, str], db: Session
+) -> None:
+    _seed(db)
+    uid = _user_id(db)
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"RLCC-{uuid.uuid4().hex[:8]}",
+            model_name="Widget",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="100.00",
+            repair_price_thb="20.00",
+        ),
+    )
+    supplier = crud.create_supplier(
+        session=db, supplier_in=SupplierCreate(name=f"Sup-{uuid.uuid4().hex[:6]}")
+    )
+    crud.receive_quantity(
+        session=db,
+        product_id=product.id,
+        supplier_id=supplier.id,
+        received_qty=10,
+        purchase_cost_thb=Decimal("10.00"),
+        idempotency_key=uuid.uuid4(),
+        received_by_user_id=uid,
+    )
+    customer = crud.create_customer(
+        session=db, customer_in=CustomerCreate(name="Lock Buyer")
+    )
+    crud.create_sale(
+        session=db,
+        customer_id=customer.id,
+        lines=[SaleLineInput(line_kind=SaleLineKind.PART, sku=product.sku, quantity=4)],
+        idempotency_key=uuid.uuid4(),
+        created_by_user_id=uid,
+    )
+
+    r = client.get(f"{PREFIX}/search/sku/{product.sku}", headers=staff_token_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    _assert_no_forbidden_keys(body)  # NO cogs/cost/margin keys at any depth
+    # Non-vacuous: the consuming event is present with attribution.
+    assert body["consumption"], "consumption must be populated"
+    ev = body["consumption"][0]
+    assert ev["reference_kind"] == "SALE"
+    assert ev["customer_name"] == "Lock Buyer"
