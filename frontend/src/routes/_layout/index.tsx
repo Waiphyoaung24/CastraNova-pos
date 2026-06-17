@@ -17,6 +17,7 @@ import {
   Wrench,
 } from "lucide-react"
 
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Card, CardContent } from "@/components/ui/card"
 import useAuth from "@/hooks/useAuth"
 import { useRole } from "@/hooks/useRole"
@@ -149,19 +150,16 @@ function Dashboard() {
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold tracking-tight break-words sm:text-2xl">
-            Welcome back, {name}
-          </h1>
-          <p className="text-muted-foreground text-sm sm:text-base">
-            Jump straight into a task.
-          </p>
-        </div>
-        <span className="inline-flex shrink-0 items-center rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-          {isAdmin ? "Admin" : "Staff"}
-        </span>
-      </div>
+      <PageHeader
+        title={`Welcome back, ${name}`}
+        titleClassName="text-xl break-words sm:text-2xl"
+        description="Jump straight into a task."
+        actions={
+          <span className="inline-flex shrink-0 items-center rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+            {isAdmin ? "Admin" : "Staff"}
+          </span>
+        }
+      />
 
       {/* Featured: New Sale — the primary POS action, in the gold CTA tone. */}
       <Link to="/sale" className="group block">
