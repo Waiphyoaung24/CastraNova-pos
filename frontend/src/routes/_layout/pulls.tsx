@@ -15,7 +15,7 @@ import { PageHeader } from "@/components/Common/PageHeader"
 import { PullCreatePanel } from "@/components/pos/PullCreatePanel"
 import { PullFulfillPanel } from "@/components/pos/PullFulfillPanel"
 import { PullQueue, type PullStateFilter } from "@/components/pos/PullQueue"
-import type { ScanInputHandle } from "@/components/ScanInput"
+import type { ScanFieldHandle } from "@/components/ScanField"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
@@ -57,7 +57,7 @@ function Pulls() {
   const [projectId, setProjectId] = useState<string>("")
   const [adminNotes, setAdminNotes] = useState<string>("")
   const [scanNotice, setScanNotice] = useState<string>("")
-  const scanRef = useRef<ScanInputHandle>(null)
+  const scanRef = useRef<ScanFieldHandle>(null)
 
   const { data: pulls } = useQuery({
     queryKey: ["project-pulls", stateFilter],

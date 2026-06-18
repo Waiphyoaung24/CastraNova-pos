@@ -1,8 +1,7 @@
 import { ArrowLeft, Minus, Plus, Trash2 } from "lucide-react"
 import { type Ref, useId } from "react"
 import type { ProjectPublic } from "@/client/types.gen"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,7 +30,7 @@ interface PullCreatePanelProps {
   adminNotes: string
   onNotesChange: (value: string) => void
   lines: CreateLine[]
-  scanRef: Ref<ScanInputHandle>
+  scanRef: Ref<ScanFieldHandle>
   onScan: (code: string) => void
   isSearching: boolean
   notFound: boolean
@@ -105,24 +104,32 @@ export function PullCreatePanel({
         />
       </div>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">Scan item to request</p>
-        <ScanInput ref={scanRef} onScan={onScan} />
-        <CameraScanFallback onScan={onScan} />
-        <p
-          aria-live="assertive"
-          className="text-muted-foreground min-h-5 text-sm"
-        >
-          {isError
-            ? "Scan lookup failed. Try again."
-            : notFound
-              ? "No item found for that code."
-              : scanNotice}
-        </p>
-        <p aria-live="polite" className="text-muted-foreground min-h-5 text-sm">
-          {isSearching ? "Searching…" : ""}
-        </p>
-      </div>
+      <ScanField
+        ref={scanRef}
+        label="Scan item to request"
+        clearOnScan
+        onScan={onScan}
+        status={
+          <>
+            <p
+              aria-live="assertive"
+              className="text-muted-foreground min-h-5 text-sm"
+            >
+              {isError
+                ? "Scan lookup failed. Try again."
+                : notFound
+                  ? "No item found for that code."
+                  : scanNotice}
+            </p>
+            <p
+              aria-live="polite"
+              className="text-muted-foreground min-h-5 text-sm"
+            >
+              {isSearching ? "Searching…" : ""}
+            </p>
+          </>
+        }
+      />
 
       {lines.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">

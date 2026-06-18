@@ -4,8 +4,7 @@ import type {
   ProjectPullLinePublic,
   ProjectPullPublic,
 } from "@/client/types.gen"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,7 +28,7 @@ interface PullFulfillPanelProps {
   /** product_id -> model name, for PART line labels. */
   productNames: Map<string, string>
   draft: FulfillDraft
-  scanRef: Ref<ScanInputHandle>
+  scanRef: Ref<ScanFieldHandle>
   onScan: (code: string) => void
   isSearching: boolean
   notFound: boolean
@@ -81,27 +80,32 @@ export function PullFulfillPanel({
       </div>
 
       {pull.state === "PENDING" ? (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Scan item</p>
-          <ScanInput ref={scanRef} onScan={onScan} />
-          <CameraScanFallback onScan={onScan} />
-          <p
-            aria-live="assertive"
-            className="text-muted-foreground min-h-5 text-sm"
-          >
-            {isError
-              ? "Scan lookup failed. Try again."
-              : notFound
-                ? "No item found for that code."
-                : scanNotice}
-          </p>
-          <p
-            aria-live="polite"
-            className="text-muted-foreground min-h-5 text-sm"
-          >
-            {isSearching ? "Searching…" : ""}
-          </p>
-        </div>
+        <ScanField
+          ref={scanRef}
+          label="Scan item"
+          clearOnScan
+          onScan={onScan}
+          status={
+            <>
+              <p
+                aria-live="assertive"
+                className="text-muted-foreground min-h-5 text-sm"
+              >
+                {isError
+                  ? "Scan lookup failed. Try again."
+                  : notFound
+                    ? "No item found for that code."
+                    : scanNotice}
+              </p>
+              <p
+                aria-live="polite"
+                className="text-muted-foreground min-h-5 text-sm"
+              >
+                {isSearching ? "Searching…" : ""}
+              </p>
+            </>
+          }
+        />
       ) : (
         <Badge variant="outline">This pull is {pull.state}</Badge>
       )}
