@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectEmpty,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -81,11 +82,15 @@ export function PullCreatePanel({
             <SelectValue placeholder="Select a project" />
           </SelectTrigger>
           <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name} ({p.code})
-              </SelectItem>
-            ))}
+            {projects.length ? (
+              projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name} ({p.code})
+                </SelectItem>
+              ))
+            ) : (
+              <SelectEmpty>No projects available</SelectEmpty>
+            )}
           </SelectContent>
         </Select>
       </div>

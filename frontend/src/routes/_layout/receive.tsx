@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectEmpty,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -224,11 +225,15 @@ function SerializedTab() {
               <SelectValue placeholder="Select a serialized product" />
             </SelectTrigger>
             <SelectContent>
-              {serializedProducts.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.model_name} ({p.sku})
-                </SelectItem>
-              ))}
+              {serializedProducts.length ? (
+                serializedProducts.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.model_name} ({p.sku})
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectEmpty>No serialized products available</SelectEmpty>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -251,11 +256,15 @@ function SerializedTab() {
               <SelectValue placeholder="Select a supplier" />
             </SelectTrigger>
             <SelectContent>
-              {suppliers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
+              {suppliers.length ? (
+                suppliers.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectEmpty>No suppliers available</SelectEmpty>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -511,11 +520,15 @@ function QuantityTab() {
               <SelectValue placeholder="Select a quantity product" />
             </SelectTrigger>
             <SelectContent>
-              {quantityProducts.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.model_name} ({p.sku})
-                </SelectItem>
-              ))}
+              {quantityProducts.length ? (
+                quantityProducts.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.model_name} ({p.sku})
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectEmpty>No quantity products available</SelectEmpty>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -541,11 +554,15 @@ function QuantityTab() {
               <SelectValue placeholder="Select a supplier" />
             </SelectTrigger>
             <SelectContent>
-              {suppliers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
+              {suppliers.length ? (
+                suppliers.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectEmpty>No suppliers available</SelectEmpty>
+              )}
             </SelectContent>
           </Select>
         </div>
