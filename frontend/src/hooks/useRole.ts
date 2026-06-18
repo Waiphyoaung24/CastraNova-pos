@@ -1,7 +1,10 @@
 import type { UserRole } from "@/client"
 import useAuth from "./useAuth"
 
-type UserLike = { is_superuser?: boolean; role?: UserRole | null } | null | undefined
+type UserLike =
+  | { is_superuser?: boolean; role?: UserRole | null }
+  | null
+  | undefined
 
 /**
  * Pure helper — unit-testable without React.

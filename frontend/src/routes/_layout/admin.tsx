@@ -13,8 +13,8 @@ import PendingUsers from "@/components/Pending/PendingUsers"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import useAuth from "@/hooks/useAuth"
-import { tierLabel } from "@/hooks/useRole"
 import { useIsMobile } from "@/hooks/useMobile"
+import { tierLabel } from "@/hooks/useRole"
 import { requireSuperuser } from "@/lib/route-guards"
 import { cn } from "@/lib/utils"
 
@@ -133,8 +133,8 @@ function Admin() {
         <AlertDescription>
           Add teammates with Add User and pick a role — Admins see financial
           reports, overrides, and config; Staff get day-to-day POS access. Only
-          Superusers (the primary account) manage user accounts. Use the row menu
-          to edit or deactivate an account. Every user's stock actions stay
+          Superusers (the primary account) manage user accounts. Use the row
+          menu to edit or deactivate an account. Every user's stock actions stay
           traceable in the Audit ledger.
         </AlertDescription>
       </Alert>

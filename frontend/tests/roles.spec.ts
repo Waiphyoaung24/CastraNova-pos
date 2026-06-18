@@ -19,9 +19,7 @@ test.describe("Role select in Add User dialog", () => {
     await expect(page.getByRole("option", { name: "Staff" })).toBeVisible()
 
     // Superuser must NOT be offered as a role option
-    await expect(
-      page.getByRole("option", { name: "Superuser" }),
-    ).toHaveCount(0)
+    await expect(page.getByRole("option", { name: "Superuser" })).toHaveCount(0)
   })
 
   test("Superuser creates an Admin user via the role select and tier badge is shown", async ({
