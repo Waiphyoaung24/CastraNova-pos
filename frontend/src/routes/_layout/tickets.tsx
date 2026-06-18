@@ -1,6 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ScanLine } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
@@ -10,14 +9,13 @@ import {
   type ServiceTicketPublic,
   ServiceTicketsService,
 } from "@/client"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import {
   TicketPartsList,
   type TicketResultSummary,
 } from "@/components/pos/TicketPartsList"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -157,7 +155,7 @@ function Tickets() {
   // UNIT-rejection notice: a UNIT scan resolves successfully (not notFound/error),
   // so it needs its own message slot, cleared on the next successful PART add.
   const [scanNotice, setScanNotice] = useState<string>("")
-  const scanRef = useRef<ScanInputHandle>(null)
+  const scanRef = useRef<ScanFieldHandle>(null)
   // One idempotency key per logical submission. Reused across retries so a retry
   // after a partial failure resumes the same ticket instead of opening a duplicate.
   // Rotated only after a ticket successfully closes.
@@ -302,33 +300,32 @@ function Tickets() {
             />
           </div>
 
-          <div className="space-y-2">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <ScanLine
-                className="text-muted-foreground size-4"
-                aria-hidden="true"
-              />
-              Scan part
-            </p>
-            <ScanInput ref={scanRef} onScan={resolve} />
-            <CameraScanFallback onScan={resolve} />
-            <p
-              aria-live="assertive"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isError
-                ? "Scan lookup failed. Try again."
-                : notFound
-                  ? "No item found for that code."
-                  : scanNotice}
-            </p>
-            <p
-              aria-live="polite"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isSearching ? "Searching…" : ""}
-            </p>
-          </div>
+          <ScanField
+            ref={scanRef}
+            label="Scan part"
+            clearOnScan
+            onScan={resolve}
+            status={
+              <>
+                <p
+                  aria-live="assertive"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isError
+                    ? "Scan lookup failed. Try again."
+                    : notFound
+                      ? "No item found for that code."
+                      : scanNotice}
+                </p>
+                <p
+                  aria-live="polite"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isSearching ? "Searching…" : ""}
+                </p>
+              </>
+            }
+          />
 
           <TicketPartsList
             lines={parts}
