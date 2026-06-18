@@ -6,6 +6,7 @@ import { Suspense } from "react"
 import { type UserPublic, UsersService } from "@/client"
 import AddUser from "@/components/Admin/AddUser"
 import { columns, type UserTableData } from "@/components/Admin/columns"
+import { TierBadge } from "@/components/Admin/TierBadge"
 import { UserActionsMenu } from "@/components/Admin/UserActionsMenu"
 import { DataTable } from "@/components/Common/DataTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -14,7 +15,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import useAuth from "@/hooks/useAuth"
 import { useIsMobile } from "@/hooks/useMobile"
-import { tierLabel } from "@/hooks/useRole"
 import { requireSuperuser } from "@/lib/route-guards"
 import { cn } from "@/lib/utils"
 
@@ -64,9 +64,7 @@ function UserCard({ user }: { user: UserTableData }) {
         <UserActionsMenu user={user} />
       </div>
       <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
-        <Badge variant={tierLabel(user) === "Staff" ? "secondary" : "default"}>
-          {tierLabel(user)}
-        </Badge>
+        <TierBadge user={user} />
         <div className="flex items-center gap-2 text-sm">
           <span
             className={cn(

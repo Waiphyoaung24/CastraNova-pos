@@ -2,8 +2,8 @@ import type { ColumnDef } from "@tanstack/react-table"
 
 import type { UserPublic } from "@/client"
 import { Badge } from "@/components/ui/badge"
-import { tierLabel } from "@/hooks/useRole"
 import { cn } from "@/lib/utils"
+import { TierBadge } from "./TierBadge"
 import { UserActionsMenu } from "./UserActionsMenu"
 
 export type UserTableData = UserPublic & {
@@ -42,14 +42,7 @@ export const columns: ColumnDef<UserTableData>[] = [
   {
     accessorKey: "is_superuser",
     header: "Role",
-    cell: ({ row }) => {
-      const label = tierLabel(row.original)
-      return (
-        <Badge variant={label === "Staff" ? "secondary" : "default"}>
-          {label}
-        </Badge>
-      )
-    },
+    cell: ({ row }) => <TierBadge user={row.original} />,
   },
   {
     accessorKey: "is_active",

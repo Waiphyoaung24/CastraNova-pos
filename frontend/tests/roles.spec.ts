@@ -11,8 +11,9 @@ test.describe("Role select in Add User dialog", () => {
     await page.goto("/admin")
     await page.getByRole("button", { name: "Add User" }).click()
 
-    // Open the Role combobox
-    await page.getByRole("combobox").click()
+    // Open the Role combobox (scoped to the dialog)
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("combobox").click()
 
     // Admin and Staff must be visible
     await expect(page.getByRole("option", { name: "Admin" })).toBeVisible()
@@ -37,7 +38,7 @@ test.describe("Role select in Add User dialog", () => {
     await page.getByPlaceholder("Password").last().fill(password)
 
     // Select "Admin" in the Role combobox (default is Staff, so we change it)
-    await page.getByRole("combobox").click()
+    await page.getByRole("dialog").getByRole("combobox").click()
     await page.getByRole("option", { name: "Admin" }).click()
 
     await page.getByRole("button", { name: "Save" }).click()
@@ -48,6 +49,6 @@ test.describe("Role select in Add User dialog", () => {
     // The new user's row must display an "Admin" tier badge
     const userRow = page.getByRole("row").filter({ hasText: email })
     await expect(userRow).toBeVisible()
-    await expect(userRow.getByText("Admin")).toBeVisible()
+    await expect(userRow.getByText("Admin", { exact: true })).toBeVisible()
   })
 })

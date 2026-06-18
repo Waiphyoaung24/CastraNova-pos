@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Pencil } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -27,6 +27,7 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { LoadingButton } from "@/components/ui/loading-button"
 import {
   Select,
@@ -65,6 +66,7 @@ interface EditUserProps {
 
 const EditUser = ({ user, onSuccess }: EditUserProps) => {
   const [isOpen, setIsOpen] = useState(false)
+  const roleDisplayId = useId()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -198,12 +200,15 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
               />
 
               {user.is_superuser ? (
-                <FormItem>
-                  <FormLabel>Role</FormLabel>
-                  <FormControl>
-                    <Input value="Superuser" disabled readOnly />
-                  </FormControl>
-                </FormItem>
+                <div className="grid gap-2">
+                  <Label htmlFor={roleDisplayId}>Role</Label>
+                  <Input
+                    id={roleDisplayId}
+                    value="Superuser"
+                    disabled
+                    readOnly
+                  />
+                </div>
               ) : (
                 <FormField
                   control={form.control}

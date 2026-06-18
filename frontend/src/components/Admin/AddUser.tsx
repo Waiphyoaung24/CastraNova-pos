@@ -49,7 +49,6 @@ const formSchema = z
     confirm_password: z
       .string()
       .min(1, { message: "Please confirm your password" }),
-    is_superuser: z.boolean(),
     is_active: z.boolean(),
     role: z.enum(["BKK_ADMIN", "YGN_STAFF"]),
   })
@@ -74,7 +73,6 @@ const AddUser = () => {
       full_name: "",
       password: "",
       confirm_password: "",
-      is_superuser: false,
       is_active: false,
       role: "YGN_STAFF",
     },
