@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import useAuth from "@/hooks/useAuth"
 import { tierLabel } from "@/hooks/useRole"
 import { useIsMobile } from "@/hooks/useMobile"
-import { requireAdmin } from "@/lib/route-guards"
+import { requireSuperuser } from "@/lib/route-guards"
 import { cn } from "@/lib/utils"
 
 function getUsersQueryOptions() {
@@ -27,7 +27,7 @@ function getUsersQueryOptions() {
 
 export const Route = createFileRoute("/_layout/admin")({
   component: Admin,
-  beforeLoad: () => requireAdmin(),
+  beforeLoad: () => requireSuperuser(),
   head: () => ({
     meta: [
       {
@@ -131,10 +131,11 @@ function Admin() {
         <Users />
         <AlertTitle>Manage who has access</AlertTitle>
         <AlertDescription>
-          Add teammates with Add User and set each one's role — Superusers
-          manage users and see financial reports; staff get day-to-day POS
-          access. Use the row menu to edit or deactivate an account. Every
-          user's stock actions stay traceable in the Audit ledger.
+          Add teammates with Add User and pick a role — Admins see financial
+          reports, overrides, and config; Staff get day-to-day POS access. Only
+          Superusers (the primary account) manage user accounts. Use the row menu
+          to edit or deactivate an account. Every user's stock actions stay
+          traceable in the Audit ledger.
         </AlertDescription>
       </Alert>
 

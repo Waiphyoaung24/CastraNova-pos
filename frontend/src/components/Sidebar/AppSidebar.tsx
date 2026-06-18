@@ -118,12 +118,16 @@ const adminItems: Entry[] = [
   },
   // Append-only audit ledger viewer + offline sync-review queue — admin-only.
   { icon: ScrollText, title: "Audit", path: "/audit" },
+]
+
+// User-management page — Superuser-only (Superuser owns user management).
+const superuserItems: Entry[] = [
   { icon: Users, title: "Admin", path: "/admin" },
 ]
 
 export function AppSidebar() {
   const { user: currentUser } = useAuth()
-  const { isAdmin } = useRole()
+  const { isAdmin, isSuperuser } = useRole()
 
   return (
     <Sidebar collapsible="icon">
@@ -133,6 +137,7 @@ export function AppSidebar() {
       <SidebarContent>
         <Main entries={baseItems} label="Workspace" />
         {isAdmin ? <Main entries={adminItems} label="Admin" /> : null}
+        {isSuperuser ? <Main entries={superuserItems} label="Users" /> : null}
       </SidebarContent>
       <SidebarFooter>
         <User user={currentUser} />
