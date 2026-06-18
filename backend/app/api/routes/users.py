@@ -193,6 +193,22 @@ def update_user(
                 status_code=409, detail="User with this email already exists"
             )
 
+    # Block removing the last active superuser (by demotion or deactivation),
+    # which would lock everyone out of user management.
+    changes = user_in.model_dump(exclude_unset=True)
+    removes_superuser_access = (
+        changes.get("is_superuser") is False or changes.get("is_active") is False
+    )
+    if (
+        db_user.is_superuser
+        and db_user.is_active
+        and removes_superuser_access
+        and crud.count_active_superusers(session=session) <= 1
+    ):
+        raise HTTPException(
+            status_code=403, detail="Cannot remove the last active superuser"
+        )
+
     db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
     return db_user
 

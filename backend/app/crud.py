@@ -128,6 +128,22 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
     return session_user
 
 
+def count_active_superusers(*, session: Session) -> int:
+    """Number of users who can still log in with superuser access. Used to block
+    demoting/deactivating the last one (which would lock everyone out of user
+    management).
+
+    Locks the matching rows with FOR UPDATE so two concurrent demotions of the
+    last two superusers serialize instead of both reading 2 and racing to zero
+    (FOR UPDATE can't apply to a bare COUNT aggregate, so we lock+count rows)."""
+    statement = (
+        select(User.id)
+        .where(col(User.is_superuser).is_(True), col(User.is_active).is_(True))
+        .with_for_update()
+    )
+    return len(session.exec(statement).all())
+
+
 _T = TypeVar("_T", bound=SQLModel)
 
 
