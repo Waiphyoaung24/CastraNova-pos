@@ -15,7 +15,12 @@ test("editing a supplier updates its row", async ({ page }) => {
   await dialog.getByRole("button", { name: "Save" }).click()
 
   await expect(page.getByText("Supplier updated.")).toBeVisible()
+
+  // Reload to prove the edit persisted server-side (not just a cache refresh).
+  await page.reload()
   await expect(
-    page.getByRole("row", { name: new RegExp(name) }).getByText("e2e@example.com"),
+    page
+      .getByRole("row", { name: new RegExp(name) })
+      .getByText("e2e@example.com"),
   ).toBeVisible()
 })

@@ -53,7 +53,13 @@ export function SupplierEditDialog({
       showErrorToast("Could not update the supplier. Please try again."),
   })
 
-  const canSave = canCreateSupplier(draft) && !mutation.isPending
+  // Skip a no-op PATCH (which would still bump updated_at) when nothing changed.
+  const isUnchanged =
+    draft.name === supplier.name &&
+    draft.country === (supplier.country ?? "") &&
+    draft.contact === (supplier.contact ?? "")
+  const canSave =
+    canCreateSupplier(draft) && !isUnchanged && !mutation.isPending
 
   return (
     <Dialog

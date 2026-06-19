@@ -26,6 +26,9 @@ test("editing a project's status updates its row", async ({ page }) => {
   await dialog.getByRole("button", { name: "Save" }).click()
 
   await expect(page.getByText("Project updated.")).toBeVisible()
+
+  // Reload to prove the edit persisted server-side (not just a cache refresh).
+  await page.reload()
   await expect(
     page.getByRole("row", { name: new RegExp(code) }).getByText("CLOSED"),
   ).toBeVisible()

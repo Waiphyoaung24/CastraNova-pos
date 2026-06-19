@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectEmpty,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -111,14 +112,18 @@ export function ProjectEditDialog({
               onValueChange={(v) => patch({ customerId: v })}
             >
               <SelectTrigger id={customerSelectId} className="w-full">
-                <SelectValue />
+                <SelectValue placeholder="Select a customer" />
               </SelectTrigger>
               <SelectContent>
-                {customers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
+                {customers.length ? (
+                  customers.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectEmpty>No customers available</SelectEmpty>
+                )}
               </SelectContent>
             </Select>
           </div>
