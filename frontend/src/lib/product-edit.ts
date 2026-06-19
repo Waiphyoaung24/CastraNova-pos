@@ -26,7 +26,9 @@ export function productToDraft(p: ProductPublic): ProductEditDraft {
     brand: p.brand ?? "",
     category: p.category ?? "",
     minStock:
-      p.default_min_stock_level != null ? String(p.default_min_stock_level) : "",
+      p.default_min_stock_level != null
+        ? String(p.default_min_stock_level)
+        : "",
     retailPrice: String(p.retail_price_thb),
     repairPrice: String(p.repair_price_thb),
   }
