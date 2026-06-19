@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { Pencil } from "lucide-react"
 import { useId, useState } from "react"
 
 import {
@@ -8,6 +9,7 @@ import {
   SuppliersService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { SupplierEditDialog } from "@/components/suppliers/SupplierEditDialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -44,6 +46,7 @@ function Suppliers() {
   const [name, setName] = useState("")
   const [country, setCountry] = useState("")
   const [contact, setContact] = useState("")
+  const [editing, setEditing] = useState<SupplierPublic | null>(null)
 
   const { data: suppliers } = useQuery({
     queryKey: ["suppliers"],
@@ -129,6 +132,7 @@ function Suppliers() {
                 <TableHead>Name</TableHead>
                 <TableHead>Country</TableHead>
                 <TableHead>Contact</TableHead>
+                <TableHead className="text-right" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -141,12 +145,30 @@ function Suppliers() {
                   <TableCell className="text-muted-foreground">
                     {s.contact ?? "—"}
                   </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditing(s)}
+                    >
+                      <Pencil className="mr-1 size-4" />
+                      Edit
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
       </div>
+
+      {editing && (
+        <SupplierEditDialog
+          supplier={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   )
 }
