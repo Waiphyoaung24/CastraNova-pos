@@ -11,6 +11,7 @@ import {
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { EmptyState } from "@/components/EmptyState"
+import { EditProductDialog } from "@/components/products/EditProductDialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -257,7 +258,10 @@ function Products() {
                     {formatThb(p.repair_price_thb)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <PriceHistoryDialog productId={p.id} sku={p.sku} />
+                    <div className="flex justify-end gap-2">
+                      <EditProductDialog product={p} />
+                      <PriceHistoryDialog productId={p.id} sku={p.sku} />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
