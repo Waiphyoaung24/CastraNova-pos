@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
+import { Pencil } from "lucide-react"
 import { useId, useMemo, useState } from "react"
 
 import {
@@ -9,6 +10,7 @@ import {
   ProjectsService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { ProjectEditDialog } from "@/components/projects/ProjectEditDialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -52,6 +54,7 @@ function Projects() {
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
   const [customerId, setCustomerId] = useState("")
+  const [editing, setEditing] = useState<ProjectPublic | null>(null)
 
   const { data: projects } = useQuery({
     queryKey: ["projects"],
@@ -162,6 +165,7 @@ function Projects() {
                 <TableHead>Name</TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead className="text-right" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -189,12 +193,31 @@ function Projects() {
                   <TableCell>
                     <Badge variant="secondary">{p.status ?? "ACTIVE"}</Badge>
                   </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditing(p)}
+                    >
+                      <Pencil className="mr-1 size-4" />
+                      Edit
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
       </div>
+
+      {editing && (
+        <ProjectEditDialog
+          project={editing}
+          customers={customers ?? []}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   )
 }
