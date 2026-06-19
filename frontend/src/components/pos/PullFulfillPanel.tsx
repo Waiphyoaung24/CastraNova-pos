@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table"
 import {
   type FulfillDraft,
+  fulfilledLineCount,
   lineCap,
   projectedPullState,
 } from "@/lib/pull-fulfill"
@@ -67,16 +68,34 @@ export function PullFulfillPanel({
 }: PullFulfillPanelProps) {
   const canFulfill = pull.state === "PENDING" && !isPending
   const projected = projectedPullState(pull.lines, draft)
+  const given = fulfilledLineCount(pull.lines, draft)
+  const total = pull.lines.length
+  const pct = total === 0 ? 0 : Math.round((given / total) * 100)
+  const stateWord =
+    pull.state === "FULFILLED"
+      ? "done"
+      : pull.state === "CANCELLED"
+        ? "cancelled"
+        : "short"
 
   return (
     <div className="space-y-4">
       <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-        <ArrowLeft /> Back to queue
+        <ArrowLeft /> Back to requests
       </Button>
 
       <div>
         <h2 className="text-lg font-semibold">{projectLabel}</h2>
         <p className="text-muted-foreground text-sm">{customerLabel}</p>
+      </div>
+
+      <div>
+        <p className="text-sm font-medium">
+          Given out: {given} of {total} {total === 1 ? "item" : "items"}
+        </p>
+        <div className="bg-muted mt-2 h-2 w-full overflow-hidden rounded-full">
+          <div className="bg-cta h-full" style={{ width: `${pct}%` }} />
+        </div>
       </div>
 
       {pull.state === "PENDING" ? (
@@ -107,15 +126,15 @@ export function PullFulfillPanel({
           }
         />
       ) : (
-        <Badge variant="outline">This pull is {pull.state}</Badge>
+        <Badge variant="outline">This request is {stateWord}</Badge>
       )}
 
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Line</TableHead>
-            <TableHead className="text-muted-foreground">Type</TableHead>
-            <TableHead className="text-center">Fulfilled / Requested</TableHead>
+            <TableHead>Item</TableHead>
+            <TableHead className="text-muted-foreground">Kind</TableHead>
+            <TableHead className="text-center">Given / Needed</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -169,9 +188,9 @@ export function PullFulfillPanel({
       </Table>
 
       <div className="flex items-center justify-end gap-4">
-        <span className="text-muted-foreground text-sm">Will settle as</span>
+        <span className="text-muted-foreground text-sm">When you finish</span>
         <Badge variant={projected === "FULFILLED" ? "default" : "destructive"}>
-          {projected}
+          {projected === "FULFILLED" ? "All items ready" : "Some items short"}
         </Badge>
       </div>
 
@@ -181,7 +200,7 @@ export function PullFulfillPanel({
         disabled={!canFulfill}
         className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
       >
-        {isPending ? "Fulfilling…" : "Fulfill pull"}
+        {isPending ? "Saving…" : "Done — give out parts"}
       </button>
     </div>
   )

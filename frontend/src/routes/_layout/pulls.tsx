@@ -40,7 +40,7 @@ export const Route = createFileRoute("/_layout/pulls")({
   component: Pulls,
   beforeLoad: requireAuth,
   head: () => ({
-    meta: [{ title: "Pulls - CastraNova POS" }],
+    meta: [{ title: "Stock requests - CastraNova POS" }],
   }),
 })
 
@@ -127,7 +127,7 @@ function Pulls() {
     if (mode === "create") {
       const next = addScanToCreateCart(createLines, result, createCatalog)
       if (next === createLines && result.kind !== "NOT_FOUND") {
-        setScanNotice("That item can't be added as a pull line.")
+        setScanNotice("That item can't be added to this request.")
       } else {
         setCreateLines(next)
         setScanNotice("")
@@ -135,7 +135,7 @@ function Pulls() {
     } else if (selectedPull) {
       const next = applyScanToFulfill(fulfillDraft, selectedPull.lines, result)
       if (next === fulfillDraft && result.kind !== "NOT_FOUND") {
-        setScanNotice("Scanned item isn't on this pull.")
+        setScanNotice("That part isn't on this request — scan a different one.")
       } else {
         setFulfillDraft(next)
         setScanNotice("")
@@ -164,13 +164,17 @@ function Pulls() {
       }),
     onSuccess: (pull) => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
-      showSuccessToast(`Pull ${pull.state.toLowerCase()}.`)
+      showSuccessToast(
+        pull.state === "FULFILLED"
+          ? "Parts given out."
+          : "Parts given out — some items still short.",
+      )
       setSelectedPullId(null)
       setFulfillDraft({})
       setScanNotice("")
     },
     onError: () =>
-      showErrorToast("Could not fulfill the pull. Please try again."),
+      showErrorToast("Could not give out the parts. Please try again."),
   })
 
   const createMutation = useMutation<
@@ -182,7 +186,7 @@ function Pulls() {
       ProjectPullsService.createProjectPull({ requestBody: payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
-      showSuccessToast("Pull created.")
+      showSuccessToast("Request created.")
       setMode("queue")
       setCreateLines([])
       setProjectId("")
@@ -190,7 +194,7 @@ function Pulls() {
       setScanNotice("")
     },
     onError: () =>
-      showErrorToast("Could not create the pull. Please try again."),
+      showErrorToast("Could not create the request. Please try again."),
   })
 
   const cancelMutation = useMutation({
@@ -198,10 +202,10 @@ function Pulls() {
       ProjectPullsService.cancelProjectPull({ pullId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
-      showSuccessToast("Pull cancelled.")
+      showSuccessToast("Request cancelled.")
     },
     onError: () =>
-      showErrorToast("Could not cancel the pull. Please try again."),
+      showErrorToast("Could not cancel the request. Please try again."),
   })
 
   const handleSelect = useCallback((pull: ProjectPullPublic) => {
@@ -239,8 +243,8 @@ function Pulls() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Project pulls"
-        description="Fulfill pending pulls at the warehouse."
+        title="Stock requests"
+        description="Give out parts for project requests."
       />
 
       {mode === "create" ? (

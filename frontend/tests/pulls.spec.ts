@@ -92,7 +92,7 @@ test.describe("Pulls screen", () => {
 
     await page.goto("/pulls")
     await expect(
-      page.getByRole("heading", { name: "Project pulls" }),
+      page.getByRole("heading", { name: "Stock requests" }),
     ).toBeVisible()
 
     // The queue defaults to the PENDING filter; open our seeded pull's row
@@ -100,7 +100,7 @@ test.describe("Pulls screen", () => {
     await page
       .getByRole("row")
       .filter({ hasText: `Pull Project ${r}` })
-      .getByRole("button", { name: "Open" })
+      .getByRole("button", { name: "Give out parts" })
       .click()
 
     // Fulfill 2 of the 3 requested via the line's +/- stepper.
@@ -112,12 +112,14 @@ test.describe("Pulls screen", () => {
     await expect(page.getByText(`${fulfilled} / ${requested}`)).toBeVisible()
 
     // A line below its requested qty projects the pull to settle as SHORT.
-    await expect(page.getByText("SHORT", { exact: true })).toBeVisible()
+    await expect(page.getByText("Some items short")).toBeVisible()
 
-    await page.getByRole("button", { name: "Fulfill pull" }).click()
+    await page.getByRole("button", { name: "Done — give out parts" }).click()
 
     // The success toast echoes the settled state returned by the backend.
-    await expect(page.getByText("Pull short.")).toBeVisible()
+    await expect(
+      page.getByText("Parts given out — some items still short."),
+    ).toBeVisible()
 
     // Authoritative backend assertions: the pull settled SHORT with the
     // partial quantity recorded, and stock dropped by exactly what was pulled.
