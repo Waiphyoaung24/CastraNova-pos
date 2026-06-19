@@ -64,22 +64,16 @@ async function seedRepairPart(onHand: number): Promise<SeededPart> {
 }
 
 /**
- * Drive the keyboard-wedge scan field. The wedge buffer resets on inter-key
- * gaps >50ms, and Playwright's per-key typing (one CDP roundtrip per key)
- * can stall past that under suite load — so dispatch the whole keydown burst
- * in one in-page evaluate, like a real wedge's ~1ms keystroke stream.
+ * Drive the scan field. ScanField is typing-first — the input's value is the
+ * source of truth and Enter commits it via onScan. Fill the value (which fires
+ * the change the controlled input needs) and press Enter; there is no wedge
+ * inter-key timing to worry about on this path.
  */
 async function scanCode(page: import("@playwright/test").Page, code: string) {
-  await expect(
-    page.getByRole("textbox", { name: "Scan barcode" }),
-  ).toBeVisible()
-  await page.evaluate((c) => {
-    const el = document.querySelector('input[aria-label="Scan barcode"]')
-    if (!el) throw new Error("scan input not found")
-    for (const key of [...c, "Enter"]) {
-      el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
-    }
-  }, code)
+  const input = page.getByRole("textbox", { name: "Scan barcode" })
+  await expect(input).toBeVisible()
+  await input.fill(code)
+  await input.press("Enter")
 }
 
 test.describe("Tickets screen", () => {
