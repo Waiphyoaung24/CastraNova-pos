@@ -61,7 +61,9 @@ test("canSaveProduct requires model name and valid prices", () => {
 })
 
 test("buildProductUpdate trims and sends prices as strings", () => {
-  expect(buildProductUpdate(draft({ retailPrice: " 1999 ", repairPrice: "350" }))).toEqual({
+  expect(
+    buildProductUpdate(draft({ retailPrice: " 1999 ", repairPrice: "350" })),
+  ).toEqual({
     model_name: "Compressor",
     brand: "Hitec",
     category: "Machine",
@@ -85,7 +87,13 @@ test("buildProductUpdate sends null for cleared brand/category/min-stock", () =>
 })
 
 test("buildProductUpdate drops an invalid min-stock to null", () => {
-  expect(buildProductUpdate(draft({ minStock: "-3" })).default_min_stock_level).toBe(
-    null,
-  )
+  expect(
+    buildProductUpdate(draft({ minStock: "-3" })).default_min_stock_level,
+  ).toBe(null)
+})
+
+test("buildProductUpdate preserves a zero min-stock", () => {
+  expect(
+    buildProductUpdate(draft({ minStock: "0" })).default_min_stock_level,
+  ).toBe(0)
 })

@@ -8,6 +8,7 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -94,6 +95,11 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
     },
   })
 
+  // Don't fire a no-op PATCH (which would still bump updated_at) when nothing
+  // changed; both sides compare the same SKU/tracking-free editable draft.
+  const isUnchanged =
+    JSON.stringify(draft) === JSON.stringify(productToDraft(product))
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
@@ -105,6 +111,10 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit product — {product.sku}</DialogTitle>
+          <DialogDescription>
+            Update this product's details and pricing. Changing a price is
+            recorded in its price history.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2 sm:grid-cols-2">
           <EditField label="SKU" value={product.sku} disabled />
@@ -159,7 +169,7 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
           <LoadingButton
             type="button"
             loading={mutation.isPending}
-            disabled={!canSaveProduct(draft)}
+            disabled={!canSaveProduct(draft) || isUnchanged}
             onClick={() => mutation.mutate()}
           >
             Save
