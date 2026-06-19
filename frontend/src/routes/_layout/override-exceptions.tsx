@@ -5,6 +5,7 @@ import { useState } from "react"
 
 import { ReportsService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,14 +19,17 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
 import { formatDeviationPct } from "@/lib/pricing-overrides"
 import { downloadReport } from "@/lib/report-download"
 import {
   currentMonth,
+  formatPct,
   formatThb,
   isValidMonth,
   overrideExceptionsExport,
   type ReportFormat,
+  sharePct,
 } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
 
@@ -39,8 +43,19 @@ export const Route = createFileRoute("/_layout/override-exceptions")({
   }),
 })
 
+/** "62% of total" caption for an outcome count, omitted when there are none. */
+function shareHint(part: number, total: number): string | undefined {
+  if (total === 0) return undefined
+  return `${formatPct(sharePct(String(part), String(total)), 0)} of total`
+}
+
+function formatDate(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleDateString() : "—"
+}
+
 function OverrideExceptions() {
   const { showErrorToast } = useCustomToast()
+  const isMobile = useIsMobile()
   const [month, setMonth] = useState(currentMonth())
   const validMonth = isValidMonth(month)
 
@@ -100,12 +115,28 @@ function OverrideExceptions() {
       </div>
 
       {data && (
-        <div className="flex flex-wrap gap-2">
-          <Count label="Total" value={data.total} />
-          <Count label="Auto-approved" value={data.auto_approved} />
-          <Count label="Pending" value={data.pending} />
-          <Count label="Approved" value={data.approved} />
-          <Count label="Rejected" value={data.rejected} />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <StatCard label="Total" value={data.total} />
+          <StatCard
+            label="Auto-approved"
+            value={data.auto_approved}
+            hint={shareHint(data.auto_approved, data.total)}
+          />
+          <StatCard
+            label="Pending"
+            value={data.pending}
+            hint={shareHint(data.pending, data.total)}
+          />
+          <StatCard
+            label="Approved"
+            value={data.approved}
+            hint={shareHint(data.approved, data.total)}
+          />
+          <StatCard
+            label="Rejected"
+            value={data.rejected}
+            hint={shareHint(data.rejected, data.total)}
+          />
         </div>
       )}
 
@@ -125,6 +156,35 @@ function OverrideExceptions() {
         <p className="text-muted-foreground py-6 text-center text-sm">
           No override requests for {month}.
         </p>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {rows.map((r) => (
+            <div key={r.id} className="bg-card rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <span className="num font-medium">{r.sku}</span>
+                <Badge variant="secondary">{r.state}</Badge>
+              </div>
+              <div className="mt-2 flex items-baseline gap-2 text-sm">
+                <span className="num text-muted-foreground line-through">
+                  {formatThb(r.default_price_thb)}
+                </span>
+                <span className="num font-semibold">
+                  {formatThb(r.requested_price_thb)}
+                </span>
+                <span className="num text-muted-foreground">
+                  ({formatDeviationPct(r.deviation_pct)})
+                </span>
+              </div>
+              {r.reason ? (
+                <p className="text-muted-foreground mt-2 text-sm">{r.reason}</p>
+              ) : null}
+              <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
+                Raised {formatDate(r.created_at)} · Decided{" "}
+                {formatDate(r.decided_at)}
+              </p>
+            </div>
+          ))}
+        </div>
       ) : (
         <Table>
           <TableHeader>
@@ -135,6 +195,8 @@ function OverrideExceptions() {
               <TableHead className="text-right">Deviation</TableHead>
               <TableHead>Reason</TableHead>
               <TableHead>State</TableHead>
+              <TableHead>Raised</TableHead>
+              <TableHead>Decided</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -156,22 +218,17 @@ function OverrideExceptions() {
                 <TableCell>
                   <Badge variant="secondary">{r.state}</Badge>
                 </TableCell>
+                <TableCell className="text-muted-foreground num">
+                  {formatDate(r.created_at)}
+                </TableCell>
+                <TableCell className="text-muted-foreground num">
+                  {formatDate(r.decided_at)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
-    </div>
-  )
-}
-
-function Count({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="bg-muted/50 rounded-md px-3 py-2">
-      <span className="text-muted-foreground text-xs uppercase tracking-wide">
-        {label}
-      </span>{" "}
-      <span className="num font-semibold">{value}</span>
     </div>
   )
 }

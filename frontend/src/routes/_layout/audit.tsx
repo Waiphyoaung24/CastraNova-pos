@@ -1,9 +1,16 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useId, useState } from "react"
+import { useId, useMemo, useState } from "react"
 
-import { AuditService, type MovementType } from "@/client"
+import {
+  type AuditEntryPublic,
+  AuditService,
+  type MovementType,
+  ProductsService,
+  UsersService,
+} from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,11 +29,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { type AuditFilter, buildAuditQuery } from "@/lib/audit"
+import { useIsMobile } from "@/hooks/useMobile"
+import {
+  type AuditFilter,
+  buildAuditQuery,
+  movementSource,
+  summarizeAudit,
+} from "@/lib/audit"
 import { requireAdmin } from "@/lib/route-guards"
 
 // Admin-only append-only audit ledger (FR-019). Read-only view of the unit/part
-// movement ledgers with event-type + date filtering.
+// movement ledgers with event-type, date, and actor filtering plus per-row
+// who-did-what attribution.
 export const Route = createFileRoute("/_layout/audit")({
   component: Audit,
   beforeLoad: () => requireAdmin(),
@@ -36,6 +50,8 @@ export const Route = createFileRoute("/_layout/audit")({
 })
 
 const ALL = "ALL"
+// The endpoint's default page size; a full page means there may be older rows.
+const PAGE_LIMIT = 100
 const EVENT_TYPES: MovementType[] = [
   "RECEIVED",
   "SOLD",
@@ -45,27 +61,61 @@ const EVENT_TYPES: MovementType[] = [
 ]
 
 function Audit() {
+  const isMobile = useIsMobile()
   const eventId = useId()
   const fromId = useId()
   const toId = useId()
+  const userSelectId = useId()
   const [filter, setFilter] = useState<AuditFilter>({
     eventType: "",
     fromDate: "",
     toDate: "",
+    actorUserId: "",
   })
 
   const { data, isPending, isError } = useQuery({
     queryKey: ["audit", filter],
     queryFn: () => AuditService.listAudit(buildAuditQuery(filter)),
   })
+  // Reference data to resolve UUIDs -> readable names (admin-only screen, so
+  // both reads are permitted). Held steady; the ledger itself is the live data.
+  const { data: users } = useQuery({
+    queryKey: ["users"],
+    queryFn: () => UsersService.readUsers(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const { data: products } = useQuery({
+    queryKey: ["products"],
+    queryFn: () => ProductsService.readProducts(),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const userList = users?.data ?? []
+  const userNames = useMemo(
+    () => new Map(userList.map((u) => [u.id, u.full_name || u.email])),
+    [userList],
+  )
+  const skuById = useMemo(
+    () => new Map((products ?? []).map((p) => [p.id, p.sku])),
+    [products],
+  )
 
   const rows = data ?? []
+  const summary = useMemo(() => summarizeAudit(rows), [rows])
+  const capped = rows.length >= PAGE_LIMIT
+
+  const actorName = (id: string) => userNames.get(id) ?? "Unknown user"
+  const itemRef = (e: AuditEntryPublic) => {
+    if (e.product_id) return skuById.get(e.product_id) ?? "Part"
+    if (e.unit_id) return `Unit ·${e.unit_id.slice(0, 8)}`
+    return "—"
+  }
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Audit ledger"
-        description="Append-only stock-movement history. Read-only."
+        description="Append-only stock-movement history — who moved what, and why. Read-only."
       />
 
       <div className="flex flex-wrap items-end gap-3">
@@ -85,6 +135,27 @@ function Audit() {
               {EVENT_TYPES.map((t) => (
                 <SelectItem key={t} value={t}>
                   {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={userSelectId}>User</Label>
+          <Select
+            value={filter.actorUserId || ALL}
+            onValueChange={(v) =>
+              setFilter((f) => ({ ...f, actorUserId: v === ALL ? "" : v }))
+            }
+          >
+            <SelectTrigger id={userSelectId} className="w-full sm:w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All users</SelectItem>
+              {userList.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.full_name || u.email}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -116,6 +187,19 @@ function Audit() {
         </div>
       </div>
 
+      {rows.length > 0 ? (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard
+            label="Movements"
+            value={summary.total}
+            hint={capped ? "latest 100 shown" : undefined}
+          />
+          <StatCard label="Distinct users" value={summary.distinctActors} />
+          <StatCard label="Receipts" value={summary.received} />
+          <StatCard label="Outflows" value={summary.outflow} />
+        </div>
+      ) : null}
+
       {isPending ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
           Loading…
@@ -128,33 +212,88 @@ function Audit() {
         <p className="text-muted-foreground py-6 text-center text-sm">
           No movements match the filter.
         </p>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {rows.map((e) => {
+            const source = movementSource(e)
+            return (
+              <div key={e.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{e.event_type}</p>
+                    <p className="text-muted-foreground mt-0.5 text-xs">
+                      {new Date(e.occurred_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <span className="num shrink-0 font-semibold">
+                    ×{e.quantity}
+                  </span>
+                </div>
+                <dl className="text-muted-foreground mt-3 grid grid-cols-[5rem_1fr] gap-y-1 border-t pt-3 text-sm">
+                  <dt>By</dt>
+                  <dd className="text-foreground truncate">
+                    {actorName(e.actor_user_id)}
+                  </dd>
+                  <dt>Item</dt>
+                  <dd className="num text-foreground truncate">{itemRef(e)}</dd>
+                  <dt>Source</dt>
+                  <dd>
+                    {source ? (
+                      <Badge variant="outline">{source.label}</Badge>
+                    ) : (
+                      "—"
+                    )}
+                  </dd>
+                </dl>
+                {e.notes ? (
+                  <p className="text-muted-foreground mt-2 text-sm">
+                    {e.notes}
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>When</TableHead>
-              <TableHead>Ledger</TableHead>
+              <TableHead>By</TableHead>
               <TableHead>Event</TableHead>
+              <TableHead>Item</TableHead>
+              <TableHead>Source</TableHead>
               <TableHead className="text-right">Qty</TableHead>
               <TableHead>Notes</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((e) => (
-              <TableRow key={e.id}>
-                <TableCell className="text-muted-foreground">
-                  {new Date(e.occurred_at).toLocaleString()}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{e.ledger}</Badge>
-                </TableCell>
-                <TableCell className="font-medium">{e.event_type}</TableCell>
-                <TableCell className="num text-right">{e.quantity}</TableCell>
-                <TableCell className="text-muted-foreground max-w-xs truncate">
-                  {e.notes ?? "—"}
-                </TableCell>
-              </TableRow>
-            ))}
+            {rows.map((e) => {
+              const source = movementSource(e)
+              return (
+                <TableRow key={e.id}>
+                  <TableCell className="text-muted-foreground whitespace-nowrap">
+                    {new Date(e.occurred_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    {actorName(e.actor_user_id)}
+                  </TableCell>
+                  <TableCell>{e.event_type}</TableCell>
+                  <TableCell className="num">{itemRef(e)}</TableCell>
+                  <TableCell>
+                    {source ? (
+                      <Badge variant="outline">{source.label}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="num text-right">{e.quantity}</TableCell>
+                  <TableCell className="text-muted-foreground max-w-xs truncate">
+                    {e.notes ?? "—"}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       )}

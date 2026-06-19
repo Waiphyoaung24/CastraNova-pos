@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Pencil } from "lucide-react"
+import { Pencil, Truck } from "lucide-react"
 import { useId, useState } from "react"
 
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { SupplierEditDialog } from "@/components/suppliers/SupplierEditDialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -23,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
 import { requireAdmin } from "@/lib/route-guards"
 import { buildSupplierPayload, canCreateSupplier } from "@/lib/supplier-create"
 
@@ -39,6 +41,7 @@ export const Route = createFileRoute("/_layout/suppliers")({
 function Suppliers() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
   const nameId = useId()
   const countryId = useId()
   const contactId = useId()
@@ -76,6 +79,16 @@ function Suppliers() {
         title="Suppliers"
         description="Create and review supplier records used when receiving stock."
       />
+
+      <Alert>
+        <Truck />
+        <AlertTitle>Manage your suppliers</AlertTitle>
+        <AlertDescription>
+          Add a supplier here so you can pick it when receiving stock. Fill in
+          the details and Create supplier — saved suppliers appear in the list
+          below.
+        </AlertDescription>
+      </Alert>
 
       <Card>
         <CardHeader>
@@ -125,6 +138,24 @@ function Suppliers() {
           <p className="text-muted-foreground py-6 text-center text-sm">
             No suppliers yet.
           </p>
+        ) : isMobile ? (
+          <div className="space-y-3">
+            {(suppliers ?? []).map((s) => (
+              <div key={s.id} className="bg-card rounded-lg border p-4">
+                <p className="font-medium">{s.name}</p>
+                <div className="mt-2 flex flex-col gap-1 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Country</span>
+                    <span>{s.country ?? "—"}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Contact</span>
+                    <span>{s.contact ?? "—"}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <Table>
             <TableHeader>

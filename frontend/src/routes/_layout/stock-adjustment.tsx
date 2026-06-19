@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { SlidersHorizontal } from "lucide-react"
 import { useId, useState } from "react"
 
 import { ApiError, StockAdjustmentsService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { ScanField } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -74,6 +76,17 @@ function StockAdjustment() {
         title="Stock adjustment"
         description="Write off or recount stock. Adjustments are recorded permanently and cannot be undone."
       />
+
+      <Alert>
+        <SlidersHorizontal />
+        <AlertTitle>Correct your stock counts</AlertTitle>
+        <AlertDescription>
+          Pick Serialized unit or Quantity SKU, scan the item, and enter the
+          change with a reason — a negative delta writes stock off, a positive
+          one adds it back. Every adjustment is logged permanently, so
+          double-check before recording.
+        </AlertDescription>
+      </Alert>
 
       <Card>
         <CardHeader>

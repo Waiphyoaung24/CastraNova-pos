@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { RefreshCw } from "lucide-react"
 import { useState } from "react"
 
 import {
@@ -8,6 +9,7 @@ import {
   type SyncReviewState,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -27,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
 import { requireAdmin } from "@/lib/route-guards"
 import { isResolvable } from "@/lib/sync-review"
 
@@ -45,6 +48,7 @@ const STATES: SyncReviewState[] = ["PENDING", "RESOLVED", "DISCARDED"]
 function SyncReview() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
   const [state, setState] = useState<SyncReviewState>("PENDING")
 
   const {
@@ -87,6 +91,16 @@ function SyncReview() {
         description="Offline mutations that need a manual keep/discard decision."
       />
 
+      <Alert>
+        <RefreshCw />
+        <AlertTitle>Resolve offline conflicts</AlertTitle>
+        <AlertDescription>
+          Actions taken offline that clashed on sync wait here. Review each
+          one's mutation and reason, then Keep it to commit the change or
+          Discard it to drop it.
+        </AlertDescription>
+      </Alert>
+
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="state">State</Label>
         <Select
@@ -118,6 +132,61 @@ function SyncReview() {
         <p className="text-muted-foreground py-6 text-center text-sm">
           No {state} items.
         </p>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {rows.map((item) => (
+            <div key={item.id} className="bg-card rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{item.mutation_kind}</p>
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    {new Date(item.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <Badge variant="secondary" className="shrink-0">
+                  {item.reason}
+                </Badge>
+              </div>
+              <div className="mt-3 border-t pt-3">
+                {isResolvable(item.state) ? (
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="flex-1"
+                      disabled={resolveMutation.isPending}
+                      onClick={() =>
+                        resolveMutation.mutate({
+                          itemId: item.id,
+                          decision: "RESOLVED",
+                        })
+                      }
+                    >
+                      Keep
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      disabled={resolveMutation.isPending}
+                      onClick={() =>
+                        resolveMutation.mutate({
+                          itemId: item.id,
+                          decision: "DISCARDED",
+                        })
+                      }
+                    >
+                      Discard
+                    </Button>
+                  </div>
+                ) : (
+                  <Badge variant="secondary">{item.state}</Badge>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <Table>
           <TableHeader>

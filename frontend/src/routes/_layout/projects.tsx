@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { Pencil } from "lucide-react"
+import { FolderKanban, Pencil } from "lucide-react"
 import { useId, useMemo, useState } from "react"
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { ProjectEditDialog } from "@/components/projects/ProjectEditDialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -33,6 +34,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
 import { buildProjectPayload, canCreateProject } from "@/lib/project-create"
 import { requireAdmin } from "@/lib/route-guards"
 
@@ -47,6 +49,7 @@ export const Route = createFileRoute("/_layout/projects")({
 function Projects() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
   const codeId = useId()
   const nameId = useId()
   const customerSelectId = useId()
@@ -94,6 +97,16 @@ function Projects() {
         title="Projects"
         description="Create and review project records used by pulls."
       />
+
+      <Alert>
+        <FolderKanban />
+        <AlertTitle>Manage your projects</AlertTitle>
+        <AlertDescription>
+          Set up a project with its code, name, and customer so warehouse pulls
+          can be raised against it. Open any project's code in the list to view
+          its full record.
+        </AlertDescription>
+      </Alert>
 
       <Card>
         <CardHeader>
@@ -157,6 +170,36 @@ function Projects() {
           <p className="text-muted-foreground py-6 text-center text-sm">
             No projects yet.
           </p>
+        ) : isMobile ? (
+          <div className="space-y-3">
+            {(projects ?? []).map((p) => (
+              <div key={p.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link
+                      to="/project/$projectId"
+                      params={{ projectId: p.id }}
+                      className="num font-medium hover:underline"
+                    >
+                      {p.code}
+                    </Link>
+                    <p className="truncate text-sm">{p.name}</p>
+                  </div>
+                  <Badge variant="secondary">{p.status ?? "ACTIVE"}</Badge>
+                </div>
+                <div className="mt-3 flex justify-between gap-3 border-t pt-3 text-sm">
+                  <span className="text-muted-foreground">Customer</span>
+                  <Link
+                    to="/customer/$customerId"
+                    params={{ customerId: p.customer_id }}
+                    className="truncate hover:underline"
+                  >
+                    {customerLabels.get(p.customer_id) ?? p.customer_id}
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <Table>
             <TableHeader>

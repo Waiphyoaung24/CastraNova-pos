@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Boxes, Trash2 } from "lucide-react"
+import { Boxes, PackagePlus, Trash2 } from "lucide-react"
 import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
@@ -18,6 +18,7 @@ import { PageHeader } from "@/components/Common/PageHeader"
 import { EmptyState } from "@/components/EmptyState"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { ScanField } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -40,6 +41,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
 import {
   addPiece,
   buildReceiveQuantityRequest,
@@ -68,6 +70,15 @@ function Receive() {
         title="Receive stock"
         description="Record incoming units from a supplier delivery."
       />
+      <Alert>
+        <PackagePlus />
+        <AlertTitle>Book in a delivery</AlertTitle>
+        <AlertDescription>
+          Use Serialized for items tracked by individual barcode — scan each
+          serial and its cost, then receive to print unit labels. Use Quantity
+          for bulk SKUs — enter the count and cost to open a new stock batch.
+        </AlertDescription>
+      </Alert>
       <Tabs defaultValue="serialized">
         <TabsList>
           <TabsTrigger value="serialized">Serialized</TabsTrigger>
@@ -107,6 +118,7 @@ function SectionLabel({
 
 function SerializedTab() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const isMobile = useIsMobile()
 
   const [productId, setProductId] = useState("")
   const [supplierId, setSupplierId] = useState("")
@@ -357,6 +369,33 @@ function SerializedTab() {
             title="No pieces added yet"
             hint="Scan or type a serial above, then add it."
           />
+        ) : isMobile ? (
+          <div className="space-y-3">
+            {pieces.map((p) => (
+              <div
+                key={p.key}
+                className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4"
+              >
+                <div className="min-w-0">
+                  <p className="num truncate font-medium">{p.supplierSerial}</p>
+                  <p className="text-muted-foreground num text-sm">
+                    ฿{p.purchaseCostThb}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 shrink-0"
+                  aria-label={`Remove piece ${p.supplierSerial}`}
+                  disabled={mutation.isPending}
+                  onClick={() => handleRemovePiece(p.key, p.supplierSerial)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
         ) : (
           <Table>
             <TableHeader>
@@ -681,35 +720,63 @@ function QuantityTab() {
 }
 
 function ReceivedUnits({ units }: { units: UnitPublic[] }) {
+  const isMobile = useIsMobile()
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-semibold">Received units ({units.length})</h2>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>CastraNova barcode</TableHead>
-            <TableHead>Supplier serial</TableHead>
-            <TableHead className="w-0" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+      {isMobile ? (
+        <div className="space-y-3">
           {units.map((u) => (
-            <TableRow key={u.id}>
-              <TableCell className="num">{u.castranova_barcode}</TableCell>
-              <TableCell className="num">{u.supplier_serial}</TableCell>
-              <TableCell className="text-right">
-                <PrintLabelButton
-                  target={{
-                    kind: "unit",
-                    unitId: u.id,
-                    serial: u.supplier_serial,
-                  }}
-                />
-              </TableCell>
-            </TableRow>
+            <div
+              key={u.id}
+              className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4"
+            >
+              <div className="min-w-0">
+                <p className="num truncate font-medium">
+                  {u.castranova_barcode}
+                </p>
+                <p className="num text-muted-foreground truncate text-sm">
+                  {u.supplier_serial}
+                </p>
+              </div>
+              <PrintLabelButton
+                target={{
+                  kind: "unit",
+                  unitId: u.id,
+                  serial: u.supplier_serial,
+                }}
+              />
+            </div>
           ))}
-        </TableBody>
-      </Table>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>CastraNova barcode</TableHead>
+              <TableHead>Supplier serial</TableHead>
+              <TableHead className="w-0" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {units.map((u) => (
+              <TableRow key={u.id}>
+                <TableCell className="num">{u.castranova_barcode}</TableCell>
+                <TableCell className="num">{u.supplier_serial}</TableCell>
+                <TableCell className="text-right">
+                  <PrintLabelButton
+                    target={{
+                      kind: "unit",
+                      unitId: u.id,
+                      serial: u.supplier_serial,
+                    }}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </div>
   )
 }

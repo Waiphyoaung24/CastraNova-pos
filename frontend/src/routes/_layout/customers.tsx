@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { Contact } from "lucide-react"
 import { useId, useState } from "react"
 
 import {
@@ -8,6 +9,7 @@ import {
   type CustomerType,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -36,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
 import { buildCustomerPayload, canCreateCustomer } from "@/lib/customer-create"
 import { requireAdmin } from "@/lib/route-guards"
 
@@ -208,6 +211,7 @@ function CustomerEditDialog({
 function Customers() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
   const [draft, setDraft] = useState<CustomerDraft>(EMPTY_DRAFT)
   const [editing, setEditing] = useState<CustomerPublic | null>(null)
 
@@ -239,6 +243,16 @@ function Customers() {
         description="Create and review customer records used by sales, tickets, and projects."
       />
 
+      <Alert>
+        <Contact />
+        <AlertTitle>Manage your customers</AlertTitle>
+        <AlertDescription>
+          Add customers here so they're ready to pick during sales, tickets, and
+          projects. Create a record below, then Edit any entry in the list to
+          keep its details current.
+        </AlertDescription>
+      </Alert>
+
       <Card>
         <CardHeader>
           <CardTitle>New customer</CardTitle>
@@ -264,6 +278,39 @@ function Customers() {
           <p className="text-muted-foreground py-6 text-center text-sm">
             No customers yet.
           </p>
+        ) : isMobile ? (
+          <div className="space-y-3">
+            {(customers ?? []).map((c) => (
+              <div key={c.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{c.name}</p>
+                    <Badge variant="secondary" className="mt-1">
+                      {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
+                    </Badge>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditing(c)}
+                  >
+                    Edit
+                  </Button>
+                </div>
+                <div className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Contact</span>
+                    <span>{c.contact ?? "—"}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Country</span>
+                    <span>{c.country ?? "—"}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <Table>
             <TableHeader>
