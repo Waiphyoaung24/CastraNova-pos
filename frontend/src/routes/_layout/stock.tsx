@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight, Warehouse } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { DashboardsService, SuppliersService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,7 +25,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useIsMobile } from "@/hooks/useMobile"
 import { useRole } from "@/hooks/useRole"
+import { trackingModeLabel, unitStatusLabel } from "@/lib/labels"
 import { requireAuth } from "@/lib/route-guards"
 import { deriveCategories, filterStockRows } from "@/lib/stock-on-hand"
 
@@ -41,6 +44,7 @@ const ALL = "__all__"
 
 function StockOnHand() {
   const { isAdmin } = useRole()
+  const isMobile = useIsMobile()
   const [category, setCategory] = useState("")
   const [query, setQuery] = useState("")
   const [supplierId, setSupplierId] = useState("")
@@ -72,12 +76,22 @@ function StockOnHand() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Stock on hand"
-        description="Current quantity on hand across the catalog."
+        description="What's in stock right now across the shop."
       />
+
+      <Alert>
+        <Warehouse />
+        <AlertTitle>Check what's in stock</AlertTitle>
+        <AlertDescription>
+          Search by name or barcode, or narrow the list with the filters. Tap a
+          row to see each delivery or unit. Print shelf or unit labels straight
+          from the list.
+        </AlertDescription>
+      </Alert>
 
       <div className="flex flex-wrap gap-3">
         <Input
-          placeholder="Search SKU or model…"
+          placeholder="Search by name or barcode…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="w-full sm:w-64"
@@ -122,16 +136,34 @@ function StockOnHand() {
         <p className="text-muted-foreground py-6 text-center text-sm">
           No stock matches these filters.
         </p>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {rows.map((r) => {
+            const isQuantity = r.tracking_mode === "QUANTITY"
+            const isOpen = expandedId === r.product_id
+            return (
+              <StockCard
+                key={r.product_id}
+                productId={r.product_id}
+                sku={r.sku}
+                modelName={r.model_name}
+                category={r.category}
+                trackingMode={r.tracking_mode}
+                quantityOnHand={r.quantity_on_hand}
+                isQuantity={isQuantity}
+                isOpen={isOpen}
+                onToggle={() => setExpandedId(isOpen ? null : r.product_id)}
+              />
+            )
+          })}
+        </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>SKU</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Mode</TableHead>
-              <TableHead className="text-right">On hand</TableHead>
+              <TableHead>Product</TableHead>
+              <TableHead className="text-right">In stock</TableHead>
               <TableHead className="w-0" aria-label="Labels" />
             </TableRow>
           </TableHeader>
@@ -161,7 +193,7 @@ function StockOnHand() {
   )
 }
 
-interface StockRowProps {
+interface StockItemProps {
   productId: string
   sku: string
   modelName: string
@@ -173,30 +205,124 @@ interface StockRowProps {
   onToggle: () => void
 }
 
+/**
+ * Lazily-loaded expansion detail for one product. QUANTITY products drill into
+ * FIFO batches; SERIALIZED products drill into in-stock units (each with its
+ * CastraNova barcode). Rendered only when the row/card is open, so the lookup
+ * fires on first expand. Shared by the desktop table row and the mobile card.
+ */
+function StockDrillDown({
+  productId,
+  isQuantity,
+}: Pick<StockItemProps, "productId" | "isQuantity">) {
+  const { data: batches, isPending: batchesPending } = useQuery({
+    queryKey: ["stock-batches", productId],
+    queryFn: () => DashboardsService.getStockOnHandBatches({ productId }),
+    enabled: isQuantity,
+  })
+  const { data: units, isPending: unitsPending } = useQuery({
+    queryKey: ["stock-units", productId],
+    queryFn: () => DashboardsService.getStockOnHandUnits({ productId }),
+    enabled: !isQuantity,
+  })
+
+  if (isQuantity) {
+    if (batchesPending) {
+      return <p className="text-muted-foreground py-2 text-sm">Loading…</p>
+    }
+    if ((batches ?? []).length === 0) {
+      return (
+        <p className="text-muted-foreground py-2 text-sm">
+          No deliveries in stock.
+        </p>
+      )
+    }
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Delivery</TableHead>
+            <TableHead className="text-right">Remaining</TableHead>
+            <TableHead>Received</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {(batches ?? []).map((b) => (
+            <TableRow key={b.batch_no}>
+              <TableCell className="num">{b.batch_no}</TableCell>
+              <TableCell className="num text-right">
+                {b.remaining_qty}
+              </TableCell>
+              <TableCell className="text-muted-foreground">
+                {new Date(b.received_at).toLocaleDateString()}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    )
+  }
+
+  if (unitsPending) {
+    return <p className="text-muted-foreground py-2 text-sm">Loading…</p>
+  }
+  if ((units ?? []).length === 0) {
+    return (
+      <p className="text-muted-foreground py-2 text-sm">No units in stock.</p>
+    )
+  }
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Shop barcode</TableHead>
+          <TableHead>Maker's serial no.</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Received</TableHead>
+          <TableHead className="w-0" aria-label="Actions" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {(units ?? []).map((u) => (
+          <TableRow key={u.castranova_barcode}>
+            <TableCell className="num font-medium">
+              {u.castranova_barcode}
+            </TableCell>
+            <TableCell className="num">{u.supplier_serial}</TableCell>
+            <TableCell>
+              <Badge variant="outline">
+                {unitStatusLabel(u.current_state)}
+              </Badge>
+            </TableCell>
+            <TableCell className="text-muted-foreground">
+              {new Date(u.received_at).toLocaleDateString()}
+            </TableCell>
+            <TableCell className="text-right">
+              <PrintLabelButton
+                target={{
+                  kind: "unit",
+                  unitId: u.id,
+                  serial: u.supplier_serial,
+                }}
+              />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
 function StockRow({
   productId,
   sku,
   modelName,
-  category,
   trackingMode,
   quantityOnHand,
   isQuantity,
   isOpen,
   onToggle,
-}: StockRowProps) {
-  // QUANTITY rows drill into FIFO batches; SERIALIZED rows drill into in-stock
-  // units (each with its CastraNova barcode). Both fetch lazily on expand.
-  const { data: batches, isPending: batchesPending } = useQuery({
-    queryKey: ["stock-batches", productId],
-    queryFn: () => DashboardsService.getStockOnHandBatches({ productId }),
-    enabled: isQuantity && isOpen,
-  })
-  const { data: units, isPending: unitsPending } = useQuery({
-    queryKey: ["stock-units", productId],
-    queryFn: () => DashboardsService.getStockOnHandUnits({ productId }),
-    enabled: !isQuantity && isOpen,
-  })
-
+}: StockItemProps) {
   return (
     <>
       <TableRow>
@@ -213,13 +339,11 @@ function StockRow({
             {isOpen ? <ChevronDown /> : <ChevronRight />}
           </Button>
         </TableCell>
-        <TableCell className="num font-medium">{sku}</TableCell>
-        <TableCell>{modelName}</TableCell>
-        <TableCell className="text-muted-foreground">
-          {category ?? "—"}
-        </TableCell>
         <TableCell>
-          <Badge variant="secondary">{trackingMode}</Badge>
+          <div className="font-medium">{modelName}</div>
+          <div className="text-muted-foreground num text-xs">
+            {sku} · {trackingModeLabel(trackingMode)}
+          </div>
         </TableCell>
         <TableCell className="num text-right">{quantityOnHand}</TableCell>
         <TableCell className="text-right">
@@ -230,85 +354,71 @@ function StockRow({
       </TableRow>
       {isOpen ? (
         <TableRow>
-          <TableCell colSpan={7} className="bg-muted/30">
-            {isQuantity ? (
-              batchesPending ? (
-                <p className="text-muted-foreground py-2 text-sm">Loading…</p>
-              ) : (batches ?? []).length === 0 ? (
-                <p className="text-muted-foreground py-2 text-sm">
-                  No open batches.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Batch</TableHead>
-                      <TableHead className="text-right">Remaining</TableHead>
-                      <TableHead>Received</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(batches ?? []).map((b) => (
-                      <TableRow key={b.batch_no}>
-                        <TableCell className="num">{b.batch_no}</TableCell>
-                        <TableCell className="num text-right">
-                          {b.remaining_qty}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {new Date(b.received_at).toLocaleDateString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )
-            ) : unitsPending ? (
-              <p className="text-muted-foreground py-2 text-sm">Loading…</p>
-            ) : (units ?? []).length === 0 ? (
-              <p className="text-muted-foreground py-2 text-sm">
-                No units in stock.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>CastraNova barcode</TableHead>
-                    <TableHead>Supplier serial</TableHead>
-                    <TableHead>State</TableHead>
-                    <TableHead>Received</TableHead>
-                    <TableHead className="w-0" aria-label="Actions" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(units ?? []).map((u) => (
-                    <TableRow key={u.castranova_barcode}>
-                      <TableCell className="num font-medium">
-                        {u.castranova_barcode}
-                      </TableCell>
-                      <TableCell className="num">{u.supplier_serial}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{u.current_state}</Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(u.received_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <PrintLabelButton
-                          target={{
-                            kind: "unit",
-                            unitId: u.id,
-                            serial: u.supplier_serial,
-                          }}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+          <TableCell colSpan={4} className="bg-muted/30">
+            <StockDrillDown productId={productId} isQuantity={isQuantity} />
           </TableCell>
         </TableRow>
       ) : null}
     </>
+  )
+}
+
+/**
+ * Mobile presentation of one product: a tap-to-expand card replacing the
+ * desktop table row (a 7-column table can't fit a phone without horizontal
+ * scroll). The whole header is the toggle; the SKU print label and drill-down
+ * detail live in the expanded panel so no buttons nest inside the toggle.
+ */
+function StockCard({
+  productId,
+  sku,
+  modelName,
+  trackingMode,
+  quantityOnHand,
+  isQuantity,
+  isOpen,
+  onToggle,
+}: StockItemProps) {
+  return (
+    <div className="bg-card overflow-hidden rounded-lg border">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? `Collapse ${sku}` : `Expand ${sku}`}
+        className="flex w-full items-center gap-3 p-4 text-left"
+      >
+        <span className="text-muted-foreground shrink-0">
+          {isOpen ? (
+            <ChevronDown className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="num font-medium">{sku}</span>
+          </div>
+          <p className="truncate text-sm">{modelName}</p>
+          <p className="text-muted-foreground text-xs">
+            {trackingModeLabel(trackingMode)}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="num text-lg leading-none font-semibold">
+            {quantityOnHand}
+          </div>
+          <div className="text-muted-foreground mt-1 text-xs">in stock</div>
+        </div>
+      </button>
+      {isOpen ? (
+        <div className="bg-muted/30 space-y-3 border-t p-4">
+          {isQuantity ? (
+            <PrintLabelButton target={{ kind: "sku", productId, sku }} />
+          ) : null}
+          <StockDrillDown productId={productId} isQuantity={isQuantity} />
+        </div>
+      ) : null}
+    </div>
   )
 }

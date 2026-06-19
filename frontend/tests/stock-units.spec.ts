@@ -54,7 +54,7 @@ test.describe("Stock — serialized unit drill-down", () => {
     const barcode = recv.units[0].castranova_barcode
 
     await page.goto("/stock")
-    await page.getByPlaceholder("Search SKU or model…").fill(sku)
+    await page.getByPlaceholder("Search by name or barcode…").fill(sku)
     await page.getByRole("button", { name: `Expand ${sku}` }).click()
 
     await expect(
@@ -64,7 +64,7 @@ test.describe("Stock — serialized unit drill-down", () => {
     // Each in-stock unit row carries a reprint action (lost-label reprint):
     // the button is labelled by supplier serial so it survives re-ordering.
     await expect(
-      page.getByRole("button", { name: `Print label for serial SN-${r}` }),
+      page.getByRole("button", { name: `Print labels for serial SN-${r}` }),
     ).toBeVisible()
   })
 })
