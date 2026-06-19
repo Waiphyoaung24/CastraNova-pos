@@ -1,0 +1,171 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Pencil } from "lucide-react"
+import { useId, useState } from "react"
+
+import { type ProductPublic, ProductsService } from "@/client"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { LoadingButton } from "@/components/ui/loading-button"
+import useCustomToast from "@/hooks/useCustomToast"
+import {
+  buildProductUpdate,
+  canSaveProduct,
+  type ProductEditDraft,
+  productToDraft,
+} from "@/lib/product-edit"
+import { handleError } from "@/utils"
+
+/** One labelled text/number input row, matching the create form's Field. */
+function EditField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  numeric = false,
+  disabled = false,
+}: {
+  label: string
+  value: string
+  onChange?: (v: string) => void
+  type?: string
+  numeric?: boolean
+  disabled?: boolean
+}) {
+  const id = useId()
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange?.(e.target.value)}
+        className={numeric ? "num" : undefined}
+        {...(numeric ? { inputMode: "decimal" as const } : {})}
+        {...(type === "number" ? { min: 0 } : {})}
+      />
+    </div>
+  )
+}
+
+export function EditProductDialog({ product }: { product: ProductPublic }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<ProductEditDraft>(() =>
+    productToDraft(product),
+  )
+  const queryClient = useQueryClient()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+
+  // Reseed the form from the latest product each time the dialog opens.
+  function onOpenChange(next: boolean) {
+    if (next) setDraft(productToDraft(product))
+    setOpen(next)
+  }
+
+  function patch(key: keyof ProductEditDraft, value: string) {
+    setDraft((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      ProductsService.updateProduct({
+        productId: product.id,
+        requestBody: buildProductUpdate(draft),
+      }),
+    onSuccess: () => {
+      showSuccessToast("Product updated")
+      setOpen(false)
+    },
+    onError: handleError.bind(showErrorToast),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] })
+      queryClient.invalidateQueries({ queryKey: ["price-history", product.id] })
+    },
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          <Pencil className="mr-1 size-4" />
+          Edit
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit product — {product.sku}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4 py-2 sm:grid-cols-2">
+          <EditField label="SKU" value={product.sku} disabled />
+          <EditField
+            label="Tracking"
+            value={product.tracking_mode ?? "QUANTITY"}
+            disabled
+          />
+          <EditField
+            label="Model name"
+            value={draft.modelName}
+            onChange={(v) => patch("modelName", v)}
+          />
+          <EditField
+            label="Brand"
+            value={draft.brand}
+            onChange={(v) => patch("brand", v)}
+          />
+          <EditField
+            label="Category"
+            value={draft.category}
+            onChange={(v) => patch("category", v)}
+          />
+          <EditField
+            label="Min stock level"
+            value={draft.minStock}
+            onChange={(v) => patch("minStock", v)}
+            type="number"
+            numeric
+          />
+          <EditField
+            label="Retail price (THB)"
+            value={draft.retailPrice}
+            onChange={(v) => patch("retailPrice", v)}
+            type="number"
+            numeric
+          />
+          <EditField
+            label="Repair price (THB)"
+            value={draft.repairPrice}
+            onChange={(v) => patch("repairPrice", v)}
+            type="number"
+            numeric
+          />
+        </div>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" disabled={mutation.isPending}>
+              Cancel
+            </Button>
+          </DialogClose>
+          <LoadingButton
+            type="button"
+            loading={mutation.isPending}
+            disabled={!canSaveProduct(draft)}
+            onClick={() => mutation.mutate()}
+          >
+            Save
+          </LoadingButton>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
