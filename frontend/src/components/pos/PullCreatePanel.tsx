@@ -69,10 +69,10 @@ export function PullCreatePanel({
   return (
     <div className="space-y-4">
       <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-        <ArrowLeft /> Back to queue
+        <ArrowLeft /> Back to requests
       </Button>
 
-      <h2 className="text-lg font-semibold">New project pull</h2>
+      <h2 className="text-lg font-semibold">New stock request</h2>
 
       <div className="space-y-2">
         <Label htmlFor={projectSelectId}>Project</Label>
@@ -95,7 +95,7 @@ export function PullCreatePanel({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor={notesId}>Admin notes (optional)</Label>
+        <Label htmlFor={notesId}>Notes for the warehouse (optional)</Label>
         <Input
           id={notesId}
           value={adminNotes}
@@ -133,7 +133,7 @@ export function PullCreatePanel({
 
       {lines.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
-          Scan items to build the pull request.
+          Scan items to add to this request.
         </p>
       ) : (
         <Table>
@@ -218,7 +218,7 @@ export function PullCreatePanel({
         disabled={!canCreate}
         className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
       >
-        {isPending ? "Creating…" : "Create pull"}
+        {isPending ? "Creating…" : "Create request"}
       </button>
     </div>
   )

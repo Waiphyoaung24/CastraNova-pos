@@ -73,8 +73,8 @@ function Notifications() {
         <Bell />
         <AlertTitle>Get notified your way</AlertTitle>
         <AlertDescription>
-          Turn on the events you want pushed to LINE or Viber — low stock,
-          pulls, and more. Toggle each one on or off; changes save instantly.
+          Turn on the events you want pushed to LINE or Viber — low stock, stock
+          requests, and more. Toggle each one on or off; changes save instantly.
         </AlertDescription>
       </Alert>
 
