@@ -9,6 +9,7 @@ import {
   applyScanToFulfill,
   buildFulfillPayload,
   type FulfillDraft,
+  fulfilledLineCount,
   lineCap,
   projectedPullState,
   seedFulfillDraft,
@@ -144,4 +145,17 @@ test("projectedPullState is SHORT until all lines reach cap, then FULFILLED", ()
   draft = setLineFulfilledQty(draft, UNIT_LINE, 1)
   draft = setLineFulfilledQty(draft, PART_LINE, 3)
   expect(projectedPullState(LINES, draft)).toBe("FULFILLED")
+})
+
+// --- fulfilledLineCount --------------------------------------------------
+
+test("fulfilledLineCount counts only lines drafted to their full cap", () => {
+  const draft = seedFulfillDraft(LINES) // { "line-unit": 0, "line-part": 0 }
+  expect(fulfilledLineCount(LINES, draft)).toBe(0)
+
+  const partFull = setLineFulfilledQty(draft, PART_LINE, 3) // cap 3
+  expect(fulfilledLineCount(LINES, partFull)).toBe(1)
+
+  const both = { ...partFull, "line-unit": 1 } // UNIT cap 1
+  expect(fulfilledLineCount(LINES, both)).toBe(2)
 })

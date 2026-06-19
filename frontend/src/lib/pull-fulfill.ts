@@ -90,3 +90,11 @@ export function projectedPullState(
   const allFull = lines.every((l) => (draft[l.id] ?? 0) >= lineCap(l))
   return allFull ? "FULFILLED" : "SHORT"
 }
+
+/** How many lines are drafted to their full cap (for the give-out progress). */
+export function fulfilledLineCount(
+  lines: ProjectPullLinePublic[],
+  draft: FulfillDraft,
+): number {
+  return lines.filter((l) => (draft[l.id] ?? 0) >= lineCap(l)).length
+}
