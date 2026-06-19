@@ -58,6 +58,8 @@ test("canSaveProduct requires model name and valid prices", () => {
   expect(canSaveProduct(draft({ retailPrice: "" }))).toBe(false)
   expect(canSaveProduct(draft({ retailPrice: "-1" }))).toBe(false)
   expect(canSaveProduct(draft({ repairPrice: "abc" }))).toBe(false)
+  expect(canSaveProduct(draft({ repairPrice: "" }))).toBe(false)
+  expect(canSaveProduct(draft({ repairPrice: "-1" }))).toBe(false)
 })
 
 test("buildProductUpdate trims and sends prices as strings", () => {
