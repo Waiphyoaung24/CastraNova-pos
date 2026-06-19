@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { PageHeader } from "@/components/Common/PageHeader"
-import ExchangeRates from "@/components/SystemSettings/ExchangeRates"
 import ChangePassword from "@/components/UserSettings/ChangePassword"
 import DeleteAccount from "@/components/UserSettings/DeleteAccount"
 import UserInformation from "@/components/UserSettings/UserInformation"
@@ -12,14 +11,6 @@ const tabsConfig = [
   { value: "my-profile", title: "My profile", component: UserInformation },
   { value: "password", title: "Password", component: ChangePassword },
   { value: "danger-zone", title: "Danger zone", component: DeleteAccount },
-]
-
-const adminTabs = [
-  {
-    value: "exchange-rates",
-    title: "Exchange Rates",
-    component: ExchangeRates,
-  },
 ]
 
 export const Route = createFileRoute("/_layout/settings")({
@@ -40,8 +31,7 @@ function UserSettings() {
     return null
   }
 
-  const isAdmin = currentUser.is_superuser || currentUser.role === "BKK_ADMIN"
-  const finalTabs = isAdmin ? [...tabsConfig, ...adminTabs] : tabsConfig
+  const finalTabs = tabsConfig
 
   return (
     <div className="flex flex-col gap-6">
