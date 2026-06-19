@@ -309,6 +309,7 @@ function Tickets() {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               maxLength={512}
+              placeholder="Any extra details (optional)"
             />
           </div>
 
@@ -367,6 +368,7 @@ function Tickets() {
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
               maxLength={512}
+              placeholder="Describe the repair or outcome"
             />
           </div>
           {closeButton}

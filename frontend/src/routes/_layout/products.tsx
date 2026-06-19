@@ -136,19 +136,33 @@ function Products() {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <SectionLabel>Identity</SectionLabel>
-          <Field id={skuId} label="SKU" value={sku} onChange={setSku} />
+          <Field
+            id={skuId}
+            label="SKU"
+            value={sku}
+            onChange={setSku}
+            placeholder="e.g. IP15P-256-BLK"
+          />
           <Field
             id={modelId}
             label="Model name"
             value={modelName}
             onChange={setModelName}
+            placeholder="e.g. iPhone 15 Pro"
           />
-          <Field id={brandId} label="Brand" value={brand} onChange={setBrand} />
+          <Field
+            id={brandId}
+            label="Brand"
+            value={brand}
+            onChange={setBrand}
+            placeholder="e.g. Apple"
+          />
           <Field
             id={categoryId}
             label="Category"
             value={category}
             onChange={setCategory}
+            placeholder="e.g. Smartphone"
           />
 
           <SectionLabel>Classification</SectionLabel>
@@ -181,6 +195,7 @@ function Products() {
             onChange={setMinStock}
             type="number"
             numeric
+            placeholder="e.g. 5"
           />
 
           <SectionLabel>Pricing</SectionLabel>
@@ -191,6 +206,7 @@ function Products() {
             onChange={setRetailPrice}
             type="number"
             numeric
+            placeholder="0.00"
           />
           <Field
             id={repairId}
@@ -199,6 +215,7 @@ function Products() {
             onChange={setRepairPrice}
             type="number"
             numeric
+            placeholder="0.00"
           />
           <div className="sm:col-span-2">
             <Button
@@ -290,6 +307,7 @@ function Field({
   onChange,
   type = "text",
   numeric = false,
+  placeholder,
 }: {
   id: string
   label: string
@@ -298,6 +316,8 @@ function Field({
   type?: string
   /** Tabular monospace + decimal keypad for prices/quantities. */
   numeric?: boolean
+  /** Example/format hint shown when the field is empty. */
+  placeholder?: string
 }) {
   return (
     <div className="space-y-2">
@@ -306,6 +326,7 @@ function Field({
         id={id}
         type={type}
         value={value}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className={numeric ? "num" : undefined}
         {...(numeric ? { inputMode: "decimal" as const } : {})}

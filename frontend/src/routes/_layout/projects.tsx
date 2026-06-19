@@ -119,6 +119,7 @@ function Projects() {
               id={codeId}
               value={code}
               maxLength={64}
+              placeholder="e.g. PRJ-001"
               onChange={(e) => setCode(e.target.value)}
             />
           </div>
@@ -128,6 +129,7 @@ function Projects() {
               id={nameId}
               value={name}
               maxLength={255}
+              placeholder="e.g. Downtown store fit-out"
               onChange={(e) => setName(e.target.value)}
             />
           </div>

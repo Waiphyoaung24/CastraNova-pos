@@ -34,6 +34,7 @@ function EditField({
   type = "text",
   numeric = false,
   disabled = false,
+  placeholder,
 }: {
   label: string
   value: string
@@ -41,6 +42,7 @@ function EditField({
   type?: string
   numeric?: boolean
   disabled?: boolean
+  placeholder?: string
 }) {
   const id = useId()
   return (
@@ -51,6 +53,7 @@ function EditField({
         type={type}
         value={value}
         disabled={disabled}
+        placeholder={placeholder}
         onChange={(e) => onChange?.(e.target.value)}
         className={numeric ? "num" : undefined}
         {...(numeric ? { inputMode: "decimal" as const } : {})}
@@ -127,16 +130,19 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
             label="Model name"
             value={draft.modelName}
             onChange={(v) => patch("modelName", v)}
+            placeholder="e.g. iPhone 15 Pro"
           />
           <EditField
             label="Brand"
             value={draft.brand}
             onChange={(v) => patch("brand", v)}
+            placeholder="e.g. Apple"
           />
           <EditField
             label="Category"
             value={draft.category}
             onChange={(v) => patch("category", v)}
+            placeholder="e.g. Smartphone"
           />
           <EditField
             label="Min stock level"
@@ -144,6 +150,7 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
             onChange={(v) => patch("minStock", v)}
             type="number"
             numeric
+            placeholder="e.g. 5"
           />
           <EditField
             label="Retail price (THB)"
@@ -151,6 +158,7 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
             onChange={(v) => patch("retailPrice", v)}
             type="number"
             numeric
+            placeholder="0.00"
           />
           <EditField
             label="Repair price (THB)"
@@ -158,6 +166,7 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
             onChange={(v) => patch("repairPrice", v)}
             type="number"
             numeric
+            placeholder="0.00"
           />
         </div>
         <DialogFooter>

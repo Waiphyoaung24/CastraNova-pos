@@ -101,6 +101,7 @@ export function PullCreatePanel({
           value={adminNotes}
           onChange={(e) => onNotesChange(e.target.value)}
           maxLength={512}
+          placeholder="Any special handling notes (optional)"
         />
       </div>
 

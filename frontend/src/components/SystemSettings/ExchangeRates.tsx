@@ -94,6 +94,7 @@ const ExchangeRates = () => {
                     step="0.0001"
                     min="0"
                     inputMode="decimal"
+                    placeholder="e.g. 33.0000"
                     data-testid="usd-thb-input"
                     aria-invalid={fieldState.invalid}
                     {...field}
@@ -118,6 +119,7 @@ const ExchangeRates = () => {
                     step="0.0001"
                     min="0"
                     inputMode="decimal"
+                    placeholder="e.g. 0.0075"
                     data-testid="mmk-thb-input"
                     aria-invalid={fieldState.invalid}
                     {...field}

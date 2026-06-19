@@ -96,6 +96,7 @@ function CustomerFieldset({
           id={nameId}
           value={draft.name}
           maxLength={255}
+          placeholder="e.g. John Doe"
           onChange={(e) => onChange({ name: e.target.value })}
         />
       </div>
@@ -120,6 +121,7 @@ function CustomerFieldset({
           id={contactId}
           value={draft.contact}
           maxLength={255}
+          placeholder="Phone or email"
           onChange={(e) => onChange({ contact: e.target.value })}
         />
       </div>
@@ -129,6 +131,7 @@ function CustomerFieldset({
           id={countryId}
           value={draft.country}
           maxLength={64}
+          placeholder="e.g. Thailand"
           onChange={(e) => onChange({ country: e.target.value })}
         />
       </div>
@@ -138,6 +141,7 @@ function CustomerFieldset({
           id={notesId}
           value={draft.notes}
           maxLength={1024}
+          placeholder="Any extra details (optional)"
           onChange={(e) => onChange({ notes: e.target.value })}
         />
       </div>

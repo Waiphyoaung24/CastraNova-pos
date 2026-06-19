@@ -124,7 +124,7 @@ const AddUser = () => {
                     </FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Email"
+                        placeholder="user@example.com"
                         type="email"
                         {...field}
                         required
@@ -142,7 +142,11 @@ const AddUser = () => {
                   <FormItem>
                     <FormLabel>Full Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="Full name" type="text" {...field} />
+                      <Input
+                        placeholder="e.g. Jane Smith"
+                        type="text"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -159,7 +163,7 @@ const AddUser = () => {
                     </FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Password"
+                        placeholder="At least 8 characters"
                         type="password"
                         {...field}
                         required
@@ -181,7 +185,7 @@ const AddUser = () => {
                     </FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Password"
+                        placeholder="Re-enter the password"
                         type="password"
                         {...field}
                         required

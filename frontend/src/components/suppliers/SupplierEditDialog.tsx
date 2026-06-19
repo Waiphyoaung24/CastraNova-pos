@@ -79,6 +79,7 @@ export function SupplierEditDialog({
             <Input
               id={nameId}
               value={draft.name}
+              placeholder="e.g. Acme Trading Co."
               onChange={(e) =>
                 setDraft((d) => ({ ...d, name: e.target.value }))
               }
@@ -89,6 +90,7 @@ export function SupplierEditDialog({
             <Input
               id={countryId}
               value={draft.country}
+              placeholder="e.g. Thailand"
               onChange={(e) =>
                 setDraft((d) => ({ ...d, country: e.target.value }))
               }
@@ -99,6 +101,7 @@ export function SupplierEditDialog({
             <Input
               id={contactId}
               value={draft.contact}
+              placeholder="Phone, email, or contact person"
               onChange={(e) =>
                 setDraft((d) => ({ ...d, contact: e.target.value }))
               }

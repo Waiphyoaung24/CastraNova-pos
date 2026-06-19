@@ -101,6 +101,7 @@ function Suppliers() {
               id={nameId}
               value={name}
               maxLength={255}
+              placeholder="e.g. Acme Trading Co."
               onChange={(e) => setName(e.target.value)}
             />
           </div>
@@ -110,6 +111,7 @@ function Suppliers() {
               id={countryId}
               value={country}
               maxLength={255}
+              placeholder="e.g. Thailand"
               onChange={(e) => setCountry(e.target.value)}
             />
           </div>
@@ -119,6 +121,7 @@ function Suppliers() {
               id={contactId}
               value={contact}
               maxLength={255}
+              placeholder="Phone, email, or contact person"
               onChange={(e) => setContact(e.target.value)}
             />
           </div>

@@ -104,6 +104,7 @@ export function ProjectEditDialog({
             <Input
               id={nameId}
               value={draft.name}
+              placeholder="e.g. Downtown store fit-out"
               onChange={(e) => patch({ name: e.target.value })}
             />
           </div>
@@ -174,6 +175,7 @@ export function ProjectEditDialog({
               min={0}
               inputMode="decimal"
               className="num"
+              placeholder="0.00"
               value={draft.budget}
               onChange={(e) => patch({ budget: e.target.value })}
             />

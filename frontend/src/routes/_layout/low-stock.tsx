@@ -149,6 +149,7 @@ function LowStock() {
                     step={1}
                     aria-label={`Reorder level for ${r.sku}`}
                     className="num w-24 text-right"
+                    placeholder="e.g. 5"
                     value={valueFor(r.product_id, r.min_stock_level)}
                     onChange={(e) =>
                       setEdits((prev) => ({
@@ -196,6 +197,7 @@ function LowStock() {
                       step={1}
                       aria-label={`Reorder level for ${r.sku}`}
                       className="num ml-auto w-24 text-right"
+                      placeholder="e.g. 5"
                       value={valueFor(r.product_id, r.min_stock_level)}
                       onChange={(e) =>
                         setEdits((prev) => ({

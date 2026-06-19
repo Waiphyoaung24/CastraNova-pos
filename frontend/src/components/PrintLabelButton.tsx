@@ -65,6 +65,7 @@ export function PrintLabelButton({
         inputMode="numeric"
         min={1}
         max={1000}
+        placeholder="1"
         value={qty}
         onChange={(e) => setQty(e.target.value)}
         onKeyDown={(e) => {

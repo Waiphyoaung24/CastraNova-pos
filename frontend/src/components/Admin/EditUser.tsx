@@ -138,7 +138,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                     </FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Email"
+                        placeholder="user@example.com"
                         type="email"
                         {...field}
                         required
@@ -156,7 +156,11 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                   <FormItem>
                     <FormLabel>Full Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="Full name" type="text" {...field} />
+                      <Input
+                        placeholder="e.g. Jane Smith"
+                        type="text"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -171,7 +175,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                     <FormLabel>Set Password</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Password"
+                        placeholder="At least 8 characters"
                         type="password"
                         {...field}
                       />
@@ -189,7 +193,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                     <FormLabel>Confirm Password</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Password"
+                        placeholder="Re-enter the password"
                         type="password"
                         {...field}
                       />
