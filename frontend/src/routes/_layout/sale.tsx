@@ -259,8 +259,8 @@ function Sale() {
             }
           />
           <p className="text-muted-foreground text-sm">
-            Scan the CastraNova barcode on a unit, or a product SKU for
-            quantity-tracked items.
+            Scan the shop barcode on a unit, or a product code (SKU) for counted
+            items.
           </p>
 
           <ScanCart

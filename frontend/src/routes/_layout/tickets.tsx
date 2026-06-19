@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { Wrench } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
@@ -16,6 +17,7 @@ import {
   type TicketResultSummary,
 } from "@/components/pos/TicketPartsList"
 import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -279,6 +281,16 @@ function Tickets() {
       <div className="grid gap-6 md:grid-cols-[1fr_20rem]">
         {/* Left pane: issue + scan + parts */}
         <div className="space-y-4">
+          <Alert>
+            <Wrench />
+            <AlertTitle>Log a repair</AlertTitle>
+            <AlertDescription>
+              Describe the issue and pick a customer, then scan each repair part
+              to add it — parts are priced automatically. Close the ticket to
+              record the repair and draw the parts from stock.
+            </AlertDescription>
+          </Alert>
+
           <div className="space-y-2">
             <Label htmlFor={issueId}>Issue</Label>
             <Input
@@ -349,7 +361,7 @@ function Tickets() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={resolutionId}>Resolution (optional)</Label>
+            <Label htmlFor={resolutionId}>What was done (optional)</Label>
             <Input
               id={resolutionId}
               value={resolution}

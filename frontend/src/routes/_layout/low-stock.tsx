@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { AlertTriangle } from "lucide-react"
 import { useState } from "react"
 
 import { type BulkMinStockUpdate, LowStockService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,7 +18,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
 import { useRole } from "@/hooks/useRole"
+import { trackingModeLabel } from "@/lib/labels"
 import { buildBulkMinStockUpdate } from "@/lib/low-stock"
 import { requireAuth } from "@/lib/route-guards"
 
@@ -33,6 +37,7 @@ export const Route = createFileRoute("/_layout/low-stock")({
 
 function LowStock() {
   const { isAdmin } = useRole()
+  const isMobile = useIsMobile()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
   const [edits, setEdits] = useState<Record<string, string>>({})
@@ -69,8 +74,20 @@ function LowStock() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Low stock"
-        description="Products below their reorder threshold."
+        description="Products that have dropped to their reorder level."
       />
+
+      <Alert>
+        <AlertTriangle />
+        <AlertTitle>Your reorder watchlist</AlertTitle>
+        <AlertDescription>
+          These products have dropped to or below their reorder level — restock
+          them soon.{" "}
+          {isAdmin
+            ? "Adjust any min level inline, then Save changes to update them all at once."
+            : "Min levels are set by an admin."}
+        </AlertDescription>
+      </Alert>
 
       {isAdmin && (
         <div>
@@ -98,15 +115,64 @@ function LowStock() {
         <p className="text-muted-foreground py-6 text-center text-sm">
           Nothing below threshold. 🎉
         </p>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {rows.map((r) => (
+            <div key={r.product_id} className="bg-card rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="num font-medium">{r.sku}</span>
+                    <Badge variant="secondary">
+                      {trackingModeLabel(r.tracking_mode)}
+                    </Badge>
+                  </div>
+                  <p className="truncate text-sm">{r.model_name}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="num text-destructive text-lg leading-none font-semibold">
+                    {r.on_hand}
+                  </div>
+                  <div className="text-muted-foreground mt-1 text-xs">
+                    in stock
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+                <span className="text-muted-foreground text-sm">
+                  Reorder at
+                </span>
+                {isAdmin ? (
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    aria-label={`Reorder level for ${r.sku}`}
+                    className="num w-24 text-right"
+                    value={valueFor(r.product_id, r.min_stock_level)}
+                    onChange={(e) =>
+                      setEdits((prev) => ({
+                        ...prev,
+                        [r.product_id]: e.target.value,
+                      }))
+                    }
+                  />
+                ) : (
+                  <span className="num font-medium">{r.min_stock_level}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>SKU</TableHead>
               <TableHead>Model</TableHead>
-              <TableHead>Tracking</TableHead>
-              <TableHead className="text-right">On hand</TableHead>
-              <TableHead className="text-right">Min level</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead className="text-right">In stock</TableHead>
+              <TableHead className="text-right">Reorder at</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -115,7 +181,9 @@ function LowStock() {
                 <TableCell className="num font-medium">{r.sku}</TableCell>
                 <TableCell>{r.model_name}</TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{r.tracking_mode}</Badge>
+                  <Badge variant="secondary">
+                    {trackingModeLabel(r.tracking_mode)}
+                  </Badge>
                 </TableCell>
                 <TableCell className="num text-right font-semibold text-destructive">
                   {r.on_hand}
@@ -126,7 +194,7 @@ function LowStock() {
                       type="number"
                       min={0}
                       step={1}
-                      aria-label={`Min stock level for ${r.sku}`}
+                      aria-label={`Reorder level for ${r.sku}`}
                       className="num ml-auto w-24 text-right"
                       value={valueFor(r.product_id, r.min_stock_level)}
                       onChange={(e) =>

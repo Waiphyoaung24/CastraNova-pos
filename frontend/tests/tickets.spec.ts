@@ -119,7 +119,7 @@ test.describe("Tickets screen", () => {
 
     await page.getByRole("combobox", { name: "Customer" }).click()
     await page.getByRole("option", { name: customerName, exact: true }).click()
-    await page.getByLabel("Resolution (optional)").fill("Replaced part")
+    await page.getByLabel("What was done (optional)").fill("Replaced part")
 
     await page.getByRole("button", { name: "Close ticket" }).click()
 
