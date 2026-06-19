@@ -54,6 +54,9 @@ export function ProjectEditDialog({
   const [draft, setDraft] = useState<ProjectEditDraft>(() =>
     projectToEditDraft(project),
   )
+  // Baseline captured once at mount, so the dirty-check compares against what
+  // the user started editing (not a value shifted by a background refetch).
+  const [baseline] = useState(() => projectToEditDraft(project))
 
   function patch(p: Partial<ProjectEditDraft>) {
     setDraft((d) => ({ ...d, ...p }))
@@ -74,8 +77,7 @@ export function ProjectEditDialog({
       showErrorToast("Could not update the project. Please try again."),
   })
 
-  const isUnchanged =
-    JSON.stringify(draft) === JSON.stringify(projectToEditDraft(project))
+  const isUnchanged = JSON.stringify(draft) === JSON.stringify(baseline)
   const canSave = canSaveProject(draft) && !isUnchanged && !mutation.isPending
 
   return (
