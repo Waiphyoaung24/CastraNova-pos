@@ -117,6 +117,72 @@ export const AuditEntryPublicSchema = {
                 }
             ],
             title: 'Notes'
+        },
+        product_model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Model Name'
+        },
+        product_sku: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Sku'
+        },
+        unit_castranova_barcode: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Castranova Barcode'
+        },
+        unit_supplier_serial: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Supplier Serial'
+        },
+        customer_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Customer Name'
+        },
+        actor_full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Full Name'
         }
     },
     type: 'object',

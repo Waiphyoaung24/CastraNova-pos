@@ -3242,7 +3242,143 @@ def list_audit(
         )
 
     rows.sort(key=lambda e: (e.occurred_at, e.id), reverse=True)
-    return rows[skip : skip + limit]
+    page = rows[skip : skip + limit]
+    return _hydrate_audit(session=session, rows=page)
+
+
+def _hydrate_audit(
+    *, session: Session, rows: list[AuditEntryPublic]
+) -> list[AuditEntryPublic]:
+    """Populate the optional display fields on a page of audit rows via batched
+    lookups (no N+1). Read-only; runs only on the already-sliced page so the
+    ordering and filters of list_audit are untouched. Customer resolves through
+    the single source (sale/ticket/pull); cost/money is never added."""
+    if not rows:
+        return rows
+
+    unit_ids: set[uuid.UUID] = set()
+    product_ids: set[uuid.UUID] = set()
+    actor_ids: set[uuid.UUID] = set()
+    sale_ids: set[uuid.UUID] = set()
+    ticket_ids: set[uuid.UUID] = set()
+    pull_ids: set[uuid.UUID] = set()
+    for r in rows:
+        actor_ids.add(r.actor_user_id)
+        if r.unit_id is not None:
+            unit_ids.add(r.unit_id)
+        if r.product_id is not None:
+            product_ids.add(r.product_id)
+        if r.sale_id is not None:
+            sale_ids.add(r.sale_id)
+        if r.service_ticket_id is not None:
+            ticket_ids.add(r.service_ticket_id)
+        if r.project_pull_id is not None:
+            pull_ids.add(r.project_pull_id)
+
+    units: dict[uuid.UUID, Unit] = {
+        u.id: u
+        for u in (
+            session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all()
+            if unit_ids
+            else []
+        )
+    }
+    # UNIT rows carry their product via the unit; PART rows carry it directly.
+    for u in units.values():
+        product_ids.add(u.product_id)
+    products: dict[uuid.UUID, Product] = {
+        p.id: p
+        for p in (
+            session.exec(select(Product).where(col(Product.id).in_(product_ids))).all()
+            if product_ids
+            else []
+        )
+    }
+    actors: dict[uuid.UUID, User] = {
+        u.id: u
+        for u in (
+            session.exec(select(User).where(col(User.id).in_(actor_ids))).all()
+            if actor_ids
+            else []
+        )
+    }
+    sales: dict[uuid.UUID, Sale] = {
+        s.id: s
+        for s in (
+            session.exec(select(Sale).where(col(Sale.id).in_(sale_ids))).all()
+            if sale_ids
+            else []
+        )
+    }
+    tickets: dict[uuid.UUID, ServiceTicket] = {
+        t.id: t
+        for t in (
+            session.exec(
+                select(ServiceTicket).where(col(ServiceTicket.id).in_(ticket_ids))
+            ).all()
+            if ticket_ids
+            else []
+        )
+    }
+    pulls: dict[uuid.UUID, ProjectPull] = {
+        p.id: p
+        for p in (
+            session.exec(
+                select(ProjectPull).where(col(ProjectPull.id).in_(pull_ids))
+            ).all()
+            if pull_ids
+            else []
+        )
+    }
+    cust_ids: set[uuid.UUID] = set()
+    for s in sales.values():
+        cust_ids.add(s.customer_id)
+    for t in tickets.values():
+        cust_ids.add(t.customer_id)
+    for pl in pulls.values():
+        cust_ids.add(pl.customer_id)
+    customers: dict[uuid.UUID, str] = {
+        c.id: c.name
+        for c in (
+            session.exec(select(Customer).where(col(Customer.id).in_(cust_ids))).all()
+            if cust_ids
+            else []
+        )
+    }
+
+    for r in rows:
+        actor = actors.get(r.actor_user_id)
+        if actor is not None:
+            r.actor_full_name = actor.full_name or actor.email
+        if r.unit_id is not None:
+            unit = units.get(r.unit_id)
+            if unit is not None:
+                r.unit_castranova_barcode = unit.castranova_barcode
+                r.unit_supplier_serial = unit.supplier_serial
+                prod = products.get(unit.product_id)
+                if prod is not None:
+                    r.product_model_name = prod.model_name
+                    r.product_sku = prod.sku
+        elif r.product_id is not None:
+            prod = products.get(r.product_id)
+            if prod is not None:
+                r.product_model_name = prod.model_name
+                r.product_sku = prod.sku
+        # Resolve customer via the single source (sale/ticket/pull), if any.
+        if r.sale_id is not None:
+            sale = sales.get(r.sale_id)
+            if sale is not None:
+                r.customer_name = customers.get(sale.customer_id)
+        elif r.service_ticket_id is not None:
+            ticket = tickets.get(r.service_ticket_id)
+            if ticket is not None:
+                r.customer_name = customers.get(ticket.customer_id)
+        elif r.project_pull_id is not None:
+            pull = pulls.get(r.project_pull_id)
+            if pull is not None:
+                r.customer_name = customers.get(pull.customer_id)
+
+    return rows
 
 
 # --- Stock-on-hand dashboard (FR-012) -----------------------------------------

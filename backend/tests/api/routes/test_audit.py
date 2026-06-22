@@ -28,7 +28,7 @@ PREFIX = settings.API_V1_STR
 
 
 @pytest.fixture
-def seed_audit(db: Session) -> Iterator[dict[str, uuid.UUID]]:
+def seed_audit(db: Session) -> Iterator[dict[str, object]]:
     """A SERIALIZED receive (RECEIVED unit_movement) + a UNIT sale (SOLD
     unit_movement) and a QUANTITY receive + PART sale (RECEIVED + SOLD
     part_movement). Yields handy ids for filter assertions."""
@@ -118,6 +118,12 @@ def seed_audit(db: Session) -> Iterator[dict[str, uuid.UUID]]:
         "unit_id": unit.id,
         "part_product_id": qty.id,
         "serial_product_id": ser.id,
+        "customer_name": customer.name,
+        "actor_full_name": user.full_name or user.email,
+        "part_model_name": qty.model_name,
+        "part_sku": qty.sku,
+        "unit_castranova_barcode": unit.castranova_barcode,
+        "unit_supplier_serial": unit.supplier_serial,
     }
 
 
@@ -250,3 +256,51 @@ def test_audit_ledger_field_distinguishes(
         else:
             assert row["product_id"] is not None
             assert row["unit_id"] is None
+
+
+def test_audit_enriches_part_rows(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_audit: dict[str, object],
+) -> None:
+    pid = seed_audit["part_product_id"]
+    r = client.get(
+        f"{PREFIX}/audit?product_id={pid}", headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert rows
+    for row in rows:
+        assert row["product_model_name"] == seed_audit["part_model_name"]
+        assert row["product_sku"] == seed_audit["part_sku"]
+        assert row["actor_full_name"] == seed_audit["actor_full_name"]
+    sold = [row for row in rows if row["event_type"] == "SOLD"]
+    assert sold, "expected a SOLD part row"
+    for row in sold:
+        assert row["customer_name"] == seed_audit["customer_name"]
+
+
+def test_audit_enriches_unit_rows(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_audit: dict[str, object],
+) -> None:
+    uid = seed_audit["unit_id"]
+    r = client.get(
+        f"{PREFIX}/audit?unit_id={uid}", headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert rows
+    for row in rows:
+        assert (
+            row["unit_castranova_barcode"]
+            == seed_audit["unit_castranova_barcode"]
+        )
+        assert row["unit_supplier_serial"] == seed_audit["unit_supplier_serial"]
+        assert row["product_model_name"] == "Widget"
+        assert row["actor_full_name"] == seed_audit["actor_full_name"]
+    sold = [row for row in rows if row["event_type"] == "SOLD"]
+    assert sold, "expected a SOLD unit row"
+    for row in sold:
+        assert row["customer_name"] == seed_audit["customer_name"]

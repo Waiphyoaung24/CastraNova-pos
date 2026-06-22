@@ -604,6 +604,15 @@ class AuditEntryPublic(SQLModel):
     project_pull_id: uuid.UUID | None = None
     stock_adjustment_id: uuid.UUID | None = None
     notes: str | None = None
+    # Hydrated, read-only display fields for the admin detail drawer (populated
+    # by batched lookups in crud.list_audit). All optional; no cost/money — the
+    # ledger stays non-financial. The screen is admin-only, so no redaction.
+    product_model_name: str | None = None
+    product_sku: str | None = None
+    unit_castranova_barcode: str | None = None
+    unit_supplier_serial: str | None = None
+    customer_name: str | None = None  # source sale/ticket/pull customer, if any
+    actor_full_name: str | None = None  # acting user's full_name, else email
 
 
 # --- Serialized receive (FR-005) request/response -----------------------------

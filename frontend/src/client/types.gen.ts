@@ -16,6 +16,12 @@ export type AuditEntryPublic = {
     project_pull_id?: (string | null);
     stock_adjustment_id?: (string | null);
     notes?: (string | null);
+    product_model_name?: (string | null);
+    product_sku?: (string | null);
+    unit_castranova_barcode?: (string | null);
+    unit_supplier_serial?: (string | null);
+    customer_name?: (string | null);
+    actor_full_name?: (string | null);
 };
 
 export type ledger = 'UNIT' | 'PART';
