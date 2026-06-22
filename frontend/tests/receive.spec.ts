@@ -154,7 +154,7 @@ test.describe("Receive screen (admin)", () => {
     await page.getByRole("option", { name: supplier.name }).click()
 
     await page.getByLabel("Received qty", { exact: false }).fill(String(qty))
-    await page.getByLabel("Purchase cost (THB)").fill("100.00")
+    await page.getByLabel("Unit cost (THB)").fill("100.00")
 
     await page.getByRole("button", { name: "Receive" }).click()
 

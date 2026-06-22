@@ -633,7 +633,7 @@ function QuantityTab() {
         </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor={`${fieldId}-cost`}>
-            Purchase cost (THB)
+            Unit cost (THB)
             <span aria-hidden="true" className="text-destructive">
               {" "}
               *
