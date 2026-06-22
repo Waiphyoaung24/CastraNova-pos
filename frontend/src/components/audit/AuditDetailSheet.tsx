@@ -1,10 +1,14 @@
 import {
+  ArrowDownLeft,
   ArrowDownToLine,
   ArrowRightLeft,
+  ArrowUpRight,
   Boxes,
+  Clock,
   type LucideIcon,
   ShoppingCart,
   SlidersHorizontal,
+  Tag,
   Wrench,
 } from "lucide-react"
 import type { ReactNode } from "react"
@@ -18,17 +22,44 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { movementSource } from "@/lib/audit"
+import { type MovementSourceKind, movementSource } from "@/lib/audit"
+import { cn } from "@/lib/utils"
 
-// One icon per movement type — the drawer's single visual "signature". Unknown
-// types fall back to a neutral exchange glyph.
-const EVENT_ICONS: Record<string, LucideIcon> = {
-  RECEIVED: ArrowDownToLine,
-  SOLD: ShoppingCart,
-  MAINTENANCE_OUT: Wrench,
-  PROJECT_OUT: Boxes,
-  ADJUSTED_OUT: SlidersHorizontal,
-  ADJUSTED_IN: SlidersHorizontal,
+// Stock direction drives the one accent in the drawer: inbound movements read
+// success-green, outbound read brand-gold. Colour is always paired with the
+// "Stock in/out" caption + arrow so meaning never rests on hue alone.
+type Direction = "in" | "out"
+
+const EVENT_META: Record<string, { icon: LucideIcon; dir: Direction }> = {
+  RECEIVED: { icon: ArrowDownToLine, dir: "in" },
+  ADJUSTED_IN: { icon: SlidersHorizontal, dir: "in" },
+  SOLD: { icon: ShoppingCart, dir: "out" },
+  MAINTENANCE_OUT: { icon: Wrench, dir: "out" },
+  PROJECT_OUT: { icon: Boxes, dir: "out" },
+  ADJUSTED_OUT: { icon: SlidersHorizontal, dir: "out" },
+}
+
+const DIRECTION: Record<
+  Direction,
+  { tile: string; arrow: LucideIcon; label: string }
+> = {
+  in: {
+    tile: "bg-success/10 text-success ring-success/25",
+    arrow: ArrowDownLeft,
+    label: "Stock in",
+  },
+  out: {
+    tile: "bg-primary/10 text-primary ring-primary/25",
+    arrow: ArrowUpRight,
+    label: "Stock out",
+  },
+}
+
+const SOURCE_ICONS: Record<MovementSourceKind, LucideIcon> = {
+  sale: ShoppingCart,
+  ticket: Wrench,
+  pull: Boxes,
+  adjustment: SlidersHorizontal,
 }
 
 /** "MAINTENANCE_OUT" -> "Maintenance out". */
@@ -37,13 +68,22 @@ function humanizeEvent(type: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon
+  title: string
+  children: ReactNode
+}) {
   return (
-    <section className="flex flex-col gap-2">
-      <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+    <section className="flex flex-col gap-2.5">
+      <h3 className="text-muted-foreground flex items-center gap-1.5 text-xs font-semibold tracking-wider uppercase">
+        <Icon className="size-3.5" />
         {title}
       </h3>
-      <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-2 text-sm">
+      <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-2 text-sm">
         {children}
       </dl>
     </section>
@@ -84,7 +124,10 @@ export function AuditDetailSheet({
         if (!open) onClose()
       }}
     >
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+      <SheetContent
+        side="right"
+        className="w-full gap-0 overflow-y-auto sm:max-w-md"
+      >
         {entry ? <AuditDetailBody entry={entry} /> : null}
       </SheetContent>
     </Sheet>
@@ -92,50 +135,92 @@ export function AuditDetailSheet({
 }
 
 function AuditDetailBody({ entry }: { entry: AuditEntryPublic }) {
-  const Icon = EVENT_ICONS[entry.event_type] ?? ArrowRightLeft
+  const meta = EVENT_META[entry.event_type] ?? {
+    icon: ArrowRightLeft,
+    dir: "out" as Direction,
+  }
+  const dir = DIRECTION[meta.dir]
+  const Icon = meta.icon
+  const DirArrow = dir.arrow
   const source = movementSource(entry)
+  const SourceIcon = source ? SOURCE_ICONS[source.kind] : null
   const when = new Date(entry.occurred_at).toLocaleString()
+  const hasUnit = Boolean(
+    entry.unit_castranova_barcode || entry.unit_supplier_serial,
+  )
+
   return (
     <>
-      <SheetHeader>
+      <SheetHeader className="gap-3 pe-10">
         <div className="flex items-center gap-3">
-          <span className="bg-muted text-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
+          <span
+            className={cn(
+              "flex size-11 shrink-0 items-center justify-center rounded-xl ring-1",
+              dir.tile,
+            )}
+          >
             <Icon className="size-5" />
           </span>
-          <div className="min-w-0">
-            <SheetTitle>{humanizeEvent(entry.event_type)}</SheetTitle>
-            <SheetDescription>{when}</SheetDescription>
+          <div className="min-w-0 flex-1">
+            <SheetTitle className="text-lg leading-tight">
+              {humanizeEvent(entry.event_type)}
+            </SheetTitle>
+            <SheetDescription className="flex items-center gap-1.5">
+              <DirArrow className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {dir.label} · {when}
+              </span>
+            </SheetDescription>
           </div>
         </div>
       </SheetHeader>
 
-      <div className="flex flex-col gap-6 px-4 pb-6">
-        <Section title="Item">
-          <Field label="Model">{entry.product_model_name ?? "—"}</Field>
-          {entry.product_sku ? (
-            <Field label="SKU" mono>
-              {entry.product_sku}
-            </Field>
+      <div className="flex flex-col gap-5 px-4 pt-2 pb-6">
+        {/* Subject hero: what moved, and how many. */}
+        <div className="bg-muted/40 rounded-lg border p-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-display truncate text-base font-semibold">
+                {entry.product_model_name ?? "Unknown product"}
+              </p>
+              {entry.product_sku ? (
+                <p className="num text-muted-foreground mt-0.5 text-xs">
+                  {entry.product_sku}
+                </p>
+              ) : null}
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="num text-2xl leading-none font-semibold">
+                ×{entry.quantity}
+              </p>
+              <p className="text-muted-foreground mt-1 text-[11px] tracking-wide uppercase">
+                {entry.quantity === 1 ? "unit" : "units"}
+              </p>
+            </div>
+          </div>
+          {hasUnit ? (
+            <dl className="mt-3 grid grid-cols-[7.5rem_1fr] gap-y-1.5 border-t pt-3 text-sm">
+              {entry.unit_castranova_barcode ? (
+                <Field label="Shop barcode" mono>
+                  {entry.unit_castranova_barcode}
+                </Field>
+              ) : null}
+              {entry.unit_supplier_serial ? (
+                <Field label="Maker's serial" mono>
+                  {entry.unit_supplier_serial}
+                </Field>
+              ) : null}
+            </dl>
           ) : null}
-          {entry.unit_castranova_barcode ? (
-            <Field label="Shop barcode" mono>
-              {entry.unit_castranova_barcode}
-            </Field>
-          ) : null}
-          {entry.unit_supplier_serial ? (
-            <Field label="Maker's serial no." mono>
-              {entry.unit_supplier_serial}
-            </Field>
-          ) : null}
-          <Field label="Quantity" mono>
-            ×{entry.quantity}
-          </Field>
-        </Section>
+        </div>
 
-        <Section title="Source">
+        <Section icon={Tag} title="Source">
           <Field label="Raised by">
-            {source ? (
-              <Badge variant="outline">{source.label}</Badge>
+            {source && SourceIcon ? (
+              <Badge variant="secondary" className="gap-1">
+                <SourceIcon className="size-3" />
+                {source.label}
+              </Badge>
             ) : (
               <span className="text-muted-foreground">Direct receipt</span>
             )}
@@ -143,13 +228,21 @@ function AuditDetailBody({ entry }: { entry: AuditEntryPublic }) {
           {entry.customer_name ? (
             <Field label="Customer">{entry.customer_name}</Field>
           ) : null}
-          {entry.notes ? <Field label="Notes">{entry.notes}</Field> : null}
         </Section>
 
-        <Section title="Who & when">
+        <Section icon={Clock} title="Who & when">
           <Field label="By">{entry.actor_full_name ?? "Unknown user"}</Field>
           <Field label="When">{when}</Field>
         </Section>
+
+        {entry.notes ? (
+          <div className="bg-muted/40 rounded-md border p-3 text-sm">
+            <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
+              Note
+            </span>
+            <p className="mt-1 break-words">{entry.notes}</p>
+          </div>
+        ) : null}
       </div>
     </>
   )
