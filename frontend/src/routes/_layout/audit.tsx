@@ -254,8 +254,10 @@ function Audit() {
                   <dd className="text-foreground truncate">
                     {actorName(e.actor_user_id)}
                   </dd>
-                  <dt>Item</dt>
-                  <dd className="num text-foreground truncate">{itemRef(e)}</dd>
+                  <dt>Model name</dt>
+                  <dd className="text-foreground truncate">
+                    {e.product_model_name ?? itemRef(e)}
+                  </dd>
                   <dt>Source</dt>
                   <dd>
                     {source ? (
@@ -281,7 +283,7 @@ function Audit() {
               <TableHead>When</TableHead>
               <TableHead>By</TableHead>
               <TableHead>Event</TableHead>
-              <TableHead>Item</TableHead>
+              <TableHead>Model name</TableHead>
               <TableHead>Source</TableHead>
               <TableHead className="text-right">Qty</TableHead>
               <TableHead>Notes</TableHead>
@@ -303,7 +305,7 @@ function Audit() {
                     {actorName(e.actor_user_id)}
                   </TableCell>
                   <TableCell>{e.event_type}</TableCell>
-                  <TableCell className="num">{itemRef(e)}</TableCell>
+                  <TableCell>{e.product_model_name ?? itemRef(e)}</TableCell>
                   <TableCell>
                     {source ? (
                       <Badge variant="outline">{source.label}</Badge>
