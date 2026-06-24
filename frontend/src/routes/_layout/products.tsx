@@ -41,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { trackingModeLabel } from "@/lib/labels"
 import { buildProductPayload, canCreateProduct } from "@/lib/product-create"
 import { formatThb } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
@@ -265,7 +266,7 @@ function Products() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">
-                      {p.tracking_mode ?? "QUANTITY"}
+                      {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
                     </Badge>
                   </TableCell>
                   <TableCell className="num text-right">

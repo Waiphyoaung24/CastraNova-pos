@@ -17,9 +17,9 @@ function humanize(value: string): string {
 export function trackingModeLabel(mode: string): string {
   switch (mode) {
     case "SERIALIZED":
-      return "Serial-tracked"
+      return "Serialized"
     case "QUANTITY":
-      return "Counted"
+      return "Quantity"
     default:
       return mode
   }
