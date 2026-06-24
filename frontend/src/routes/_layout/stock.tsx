@@ -147,6 +147,7 @@ function StockOnHand() {
                 productId={r.product_id}
                 sku={r.sku}
                 modelName={r.model_name}
+                brand={r.brand}
                 category={r.category}
                 trackingMode={r.tracking_mode}
                 quantityOnHand={r.quantity_on_hand}
@@ -163,6 +164,8 @@ function StockOnHand() {
             <TableRow>
               <TableHead className="w-8" />
               <TableHead>Product</TableHead>
+              <TableHead>Brand</TableHead>
+              <TableHead>Category</TableHead>
               <TableHead className="text-right">In stock</TableHead>
               <TableHead className="w-0" aria-label="Labels" />
             </TableRow>
@@ -177,6 +180,7 @@ function StockOnHand() {
                   productId={r.product_id}
                   sku={r.sku}
                   modelName={r.model_name}
+                  brand={r.brand}
                   category={r.category}
                   trackingMode={r.tracking_mode}
                   quantityOnHand={r.quantity_on_hand}
@@ -197,6 +201,7 @@ interface StockItemProps {
   productId: string
   sku: string
   modelName: string
+  brand: string | null
   category: string | null
   trackingMode: string
   quantityOnHand: number
@@ -317,6 +322,8 @@ function StockRow({
   productId,
   sku,
   modelName,
+  brand,
+  category,
   trackingMode,
   quantityOnHand,
   isQuantity,
@@ -345,6 +352,10 @@ function StockRow({
             {sku} · {trackingModeLabel(trackingMode)}
           </div>
         </TableCell>
+        <TableCell className="text-muted-foreground">{brand ?? "—"}</TableCell>
+        <TableCell className="text-muted-foreground">
+          {category ?? "—"}
+        </TableCell>
         <TableCell className="num text-right">{quantityOnHand}</TableCell>
         <TableCell className="text-right">
           {isQuantity ? (
@@ -354,7 +365,7 @@ function StockRow({
       </TableRow>
       {isOpen ? (
         <TableRow>
-          <TableCell colSpan={4} className="bg-muted/30">
+          <TableCell colSpan={6} className="bg-muted/30">
             <StockDrillDown productId={productId} isQuantity={isQuantity} />
           </TableCell>
         </TableRow>
@@ -373,12 +384,15 @@ function StockCard({
   productId,
   sku,
   modelName,
+  brand,
+  category,
   trackingMode,
   quantityOnHand,
   isQuantity,
   isOpen,
   onToggle,
 }: StockItemProps) {
+  const brandCategory = [brand, category].filter(Boolean).join(" · ")
   return (
     <div className="bg-card overflow-hidden rounded-lg border">
       <button
@@ -400,6 +414,11 @@ function StockCard({
             <span className="num font-medium">{sku}</span>
           </div>
           <p className="truncate text-sm">{modelName}</p>
+          {brandCategory ? (
+            <p className="text-muted-foreground truncate text-xs">
+              {brandCategory}
+            </p>
+          ) : null}
           <p className="text-muted-foreground text-xs">
             {trackingModeLabel(trackingMode)}
           </p>

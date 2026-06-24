@@ -11,6 +11,7 @@ function row(over: Partial<StockOnHandRow>): StockOnHandRow {
     product_id: "00000000-0000-0000-0000-000000000000",
     sku: "SKU",
     model_name: "Model",
+    brand: null,
     category: null,
     tracking_mode: "QUANTITY",
     quantity_on_hand: 1,
