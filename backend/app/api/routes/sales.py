@@ -70,17 +70,15 @@ def create_sale(
 # surface.
 @router.get("/{sale_id}/receipt.pdf", dependencies=[Depends(get_current_user)])
 def read_sale_receipt(*, session: SessionDep, sale_id: uuid.UUID) -> Response:
-    sale = crud.get_sale(session=session, sale_id=sale_id)
-    if not sale:
+    data = crud.get_sale_receipt_data(session=session, sale_id=sale_id)
+    if data is None:
         raise HTTPException(status_code=404, detail="Sale not found")
-    lines = session.exec(select(SaleLine).where(SaleLine.sale_id == sale.id)).all()
     pdf = render_sale_receipt(
-        sale_id=str(sale.id),
-        sold_at=sale.sold_at.isoformat(timespec="seconds"),
-        lines=[
-            (line.line_kind.value, line.quantity, line.unit_price_thb)
-            for line in lines
-        ],
-        total_thb=sale.total_thb,
+        sale_id=str(data.sale_id),
+        sold_at=data.sold_at.isoformat(timespec="seconds"),
+        customer_name=data.customer_name,
+        sold_by=data.sold_by,
+        lines=data.lines,
+        total_thb=data.total_thb,
     )
     return Response(content=pdf, media_type="application/pdf")
