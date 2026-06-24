@@ -208,7 +208,8 @@ def test_get_sale_receipt_data_resolves_names_and_labels(
     data = crud.get_sale_receipt_data(session=db, sale_id=uuid.UUID(sale_id))
     assert data is not None
     assert data.customer_name == "Walk-in"
-    assert "@" in data.sold_by or data.sold_by  # full name or email, never empty
+    # seller resolved to a real name/email, not the missing-user fallback
+    assert data.sold_by and data.sold_by != "Unknown"
     assert len(data.lines) == 1
     label, qty, price = data.lines[0]
     assert "Compressor" in label  # not the raw "UNIT" placeholder
