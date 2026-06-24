@@ -171,7 +171,7 @@ export function PullCreatePanel({
 
       {lines.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
-          Scan items to add to this request.
+          Select items to add to this request.
         </p>
       ) : (
         <Table>
