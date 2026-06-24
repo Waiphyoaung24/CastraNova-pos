@@ -429,14 +429,15 @@ def latest_purchase_costs(*, session: Session) -> dict[uuid.UUID, Decimal]:
         sa_select(
             col(PartBatch.product_id), col(PartBatch.received_at), col(PartBatch.purchase_cost_thb)
         )
-        .order_by(col(PartBatch.product_id), col(PartBatch.received_at).desc())
+        .order_by(col(PartBatch.product_id), col(PartBatch.received_at).desc(), col(PartBatch.id).desc())
         .distinct(col(PartBatch.product_id))
     ).all()
     unit_rows = session.execute(
         sa_select(col(Unit.product_id), col(Unit.received_at), col(Unit.purchase_cost_thb))
-        .order_by(col(Unit.product_id), col(Unit.received_at).desc())
+        .order_by(col(Unit.product_id), col(Unit.received_at).desc(), col(Unit.id).desc())
         .distinct(col(Unit.product_id))
     ).all()
+    # On an exact cross-source received_at tie, batch_rows wins by iteration order; benign in practice (products are single-tracking-mode).
     for source in (batch_rows, unit_rows):
         for r in source:
             product_id, received_at, cost = r[0], r[1], r[2]
