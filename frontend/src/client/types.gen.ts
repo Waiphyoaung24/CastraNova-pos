@@ -690,6 +690,7 @@ export type StockOnHandRow = {
     product_id: string;
     sku: string;
     model_name: string;
+    brand: (string | null);
     category: (string | null);
     tracking_mode: TrackingMode;
     quantity_on_hand: number;

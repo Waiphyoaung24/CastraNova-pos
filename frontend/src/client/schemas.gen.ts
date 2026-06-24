@@ -3628,6 +3628,17 @@ export const StockOnHandRowSchema = {
             type: 'string',
             title: 'Model Name'
         },
+        brand: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Brand'
+        },
         category: {
             anyOf: [
                 {
@@ -3648,7 +3659,7 @@ export const StockOnHandRowSchema = {
         }
     },
     type: 'object',
-    required: ['product_id', 'sku', 'model_name', 'category', 'tracking_mode', 'quantity_on_hand'],
+    required: ['product_id', 'sku', 'model_name', 'brand', 'category', 'tracking_mode', 'quantity_on_hand'],
     title: 'StockOnHandRow'
 } as const;
 
