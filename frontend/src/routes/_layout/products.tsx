@@ -82,6 +82,16 @@ function Products() {
     queryKey: ["products"],
     queryFn: () => ProductsService.readProducts(),
   })
+  const { data: purchaseCosts } = useQuery({
+    queryKey: ["product-purchase-costs"],
+    queryFn: () => ProductsService.readPurchaseCosts(),
+  })
+  const costByProductId = new Map(
+    (purchaseCosts ?? []).map((c) => [
+      c.product_id,
+      String(c.latest_purchase_cost_thb),
+    ]),
+  )
 
   const draft = {
     sku,
@@ -248,6 +258,7 @@ function Products() {
                 <TableHead>Brand</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Tracking</TableHead>
+                <TableHead className="text-right">Purchase</TableHead>
                 <TableHead className="text-right">Retail</TableHead>
                 <TableHead className="text-right">Repair</TableHead>
                 <TableHead className="text-right">History</TableHead>
@@ -268,6 +279,11 @@ function Products() {
                     <Badge variant="secondary">
                       {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {costByProductId.has(p.id)
+                      ? formatThb(costByProductId.get(p.id) as string)
+                      : "—"}
                   </TableCell>
                   <TableCell className="num text-right">
                     {formatThb(p.retail_price_thb)}

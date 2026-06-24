@@ -305,6 +305,11 @@ export type ProductPublic = {
     id: string;
 };
 
+export type ProductPurchaseCost = {
+    product_id: string;
+    latest_purchase_cost_thb: string;
+};
+
 export type ProductUpdate = {
     model_name?: (string | null);
     brand?: (string | null);
@@ -1008,6 +1013,8 @@ export type ProductsCreateProductData = {
 };
 
 export type ProductsCreateProductResponse = (ProductPublic);
+
+export type ProductsReadPurchaseCostsResponse = (Array<ProductPurchaseCost>);
 
 export type ProductsReadSkuLabelData = {
     productId: string;

@@ -10,6 +10,7 @@ from app.models import (
     PriceChangePublic,
     ProductCreate,
     ProductPublic,
+    ProductPurchaseCost,
     ProductUpdate,
     TrackingMode,
 )
@@ -27,6 +28,21 @@ def read_products(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[ProductPublic]:
     return crud.list_products(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+
+
+@router.get(
+    "/purchase-costs",
+    response_model=list[ProductPurchaseCost],
+    dependencies=[Depends(get_admin)],
+)
+def read_purchase_costs(session: SessionDep) -> list[ProductPurchaseCost]:
+    """Latest purchase cost per product (admin-only COGS). One entry per product
+    that has at least one receipt."""
+    costs = crud.latest_purchase_costs(session=session)
+    return [
+        ProductPurchaseCost(product_id=pid, latest_purchase_cost_thb=cost)
+        for pid, cost in costs.items()
+    ]
 
 
 # Shared-team access (mirrors the serialized unit-label endpoint): any
