@@ -409,6 +409,13 @@ class ProductPublic(ProductBase):
     id: uuid.UUID
 
 
+class ProductPurchaseCost(SQLModel):
+    # Admin-only: latest receipt cost (COGS). Never added to ProductPublic,
+    # which is served by the staff-accessible GET /products/.
+    product_id: uuid.UUID
+    latest_purchase_cost_thb: Decimal
+
+
 # --- Low-stock alerts (FR-016) ------------------------------------------------
 
 

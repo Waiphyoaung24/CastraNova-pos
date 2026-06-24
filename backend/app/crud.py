@@ -418,6 +418,34 @@ def list_products(
     )
 
 
+def latest_purchase_costs(*, session: Session) -> dict[uuid.UUID, Decimal]:
+    """Latest purchase cost per product — the purchase_cost_thb of the most
+    recent receipt: newest PartBatch (QUANTITY) or newest Unit (SERIALIZED) by
+    received_at. COGS / admin-only data. Set-based via Postgres DISTINCT ON (one
+    row per product per source), merged in Python; no N+1. Products with no
+    receipts are absent from the result."""
+    latest: dict[uuid.UUID, tuple[datetime, Decimal]] = {}
+    batch_rows = session.execute(
+        sa_select(
+            col(PartBatch.product_id), col(PartBatch.received_at), col(PartBatch.purchase_cost_thb)
+        )
+        .order_by(col(PartBatch.product_id), col(PartBatch.received_at).desc())
+        .distinct(col(PartBatch.product_id))
+    ).all()
+    unit_rows = session.execute(
+        sa_select(col(Unit.product_id), col(Unit.received_at), col(Unit.purchase_cost_thb))
+        .order_by(col(Unit.product_id), col(Unit.received_at).desc())
+        .distinct(col(Unit.product_id))
+    ).all()
+    for source in (batch_rows, unit_rows):
+        for r in source:
+            product_id, received_at, cost = r[0], r[1], r[2]
+            current = latest.get(product_id)
+            if current is None or received_at > current[0]:
+                latest[product_id] = (received_at, cost)
+    return {pid: value[1] for pid, value in latest.items()}
+
+
 def update_product(
     *,
     session: Session,
