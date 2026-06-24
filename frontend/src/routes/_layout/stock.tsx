@@ -163,9 +163,11 @@ function StockOnHand() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Product</TableHead>
+              <TableHead>SKU</TableHead>
+              <TableHead>Model</TableHead>
               <TableHead>Brand</TableHead>
               <TableHead>Category</TableHead>
+              <TableHead>Tracking</TableHead>
               <TableHead className="text-right">In stock</TableHead>
               <TableHead className="w-0" aria-label="Labels" />
             </TableRow>
@@ -346,15 +348,14 @@ function StockRow({
             {isOpen ? <ChevronDown /> : <ChevronRight />}
           </Button>
         </TableCell>
-        <TableCell>
-          <div className="font-medium">{modelName}</div>
-          <div className="text-muted-foreground num text-xs">
-            {sku} · {trackingModeLabel(trackingMode)}
-          </div>
-        </TableCell>
+        <TableCell className="num font-medium">{sku}</TableCell>
+        <TableCell>{modelName}</TableCell>
         <TableCell className="text-muted-foreground">{brand ?? "—"}</TableCell>
         <TableCell className="text-muted-foreground">
           {category ?? "—"}
+        </TableCell>
+        <TableCell>
+          <Badge variant="secondary">{trackingModeLabel(trackingMode)}</Badge>
         </TableCell>
         <TableCell className="num text-right">{quantityOnHand}</TableCell>
         <TableCell className="text-right">
@@ -365,7 +366,7 @@ function StockRow({
       </TableRow>
       {isOpen ? (
         <TableRow>
-          <TableCell colSpan={6} className="bg-muted/30">
+          <TableCell colSpan={8} className="bg-muted/30">
             <StockDrillDown productId={productId} isQuantity={isQuantity} />
           </TableCell>
         </TableRow>
