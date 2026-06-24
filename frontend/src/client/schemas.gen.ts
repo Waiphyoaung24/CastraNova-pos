@@ -1519,6 +1519,24 @@ export const ProductPublicSchema = {
     title: 'ProductPublic'
 } as const;
 
+export const ProductPurchaseCostSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        latest_purchase_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Latest Purchase Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'latest_purchase_cost_thb'],
+    title: 'ProductPurchaseCost'
+} as const;
+
 export const ProductUpdateSchema = {
     properties: {
         model_name: {
