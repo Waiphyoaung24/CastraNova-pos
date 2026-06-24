@@ -378,6 +378,32 @@ def test_unit_drilldown_exposes_id_usable_for_label(
         assert label.content[:4] == b"%PDF"
 
 
+def test_stock_on_hand_includes_brand(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    branded_sku = f"BRAND-{uuid.uuid4().hex[:8]}"
+    crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=branded_sku,
+            model_name="Bearing",
+            brand="Acme",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="50.00",
+            repair_price_thb="10.00",
+        ),
+    )
+    r = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand",
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    rows = {row["sku"]: row for row in r.json()["rows"]}
+    assert rows[branded_sku]["brand"] == "Acme"
+
+
 def test_stock_on_hand_is_single_pass_not_n_plus_one(
     client: TestClient,
     superuser_token_headers: dict[str, str],

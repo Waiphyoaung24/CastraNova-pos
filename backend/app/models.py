@@ -1541,6 +1541,7 @@ class StockOnHandRow(SQLModel):
     product_id: uuid.UUID
     sku: str
     model_name: str
+    brand: str | None
     category: str | None
     tracking_mode: TrackingMode
     quantity_on_hand: int
