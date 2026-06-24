@@ -2,21 +2,13 @@ import type {
   ProjectPullCreate,
   ProjectPullLineCreate,
 } from "@/client/types.gen"
-import type { ScanLookupResult } from "@/hooks/useScanLookup"
 
 // ---------------------------------------------------------------------------
 // Pure create-cart logic for the project-pull screen (admin create flow).
 //
-// UNIT scans become serialized request lines (keyed by barcode, qty 1). PART
-// scans become quantity request lines (keyed by sku, qty merges). The catalog
-// (sku -> {productId, modelName}) supplies display names. No cost anywhere.
+// UNIT lines are serialized request lines (keyed by barcode, qty 1). PART
+// lines are quantity request lines (keyed by sku, qty merges). No cost anywhere.
 // ---------------------------------------------------------------------------
-
-/** Catalog entry keyed by sku, built from the products query. */
-export type CreateCatalogEntry = {
-  productId: string
-  modelName: string
-}
 
 /** A request line in the create cart, keyed by barcode (UNIT) or sku (PART). */
 export type CreateLine = {
@@ -29,60 +21,6 @@ export type CreateLine = {
   unitSerial?: string
   /** Always 1 for UNIT; the requested amount for PART. */
   requestedQty: number
-}
-
-/**
- * Append a scanned item to the create cart, or merge it.
- * UNIT: keyed by barcode; re-scan is a no-op (same ref). Always added (a scanned
- *       unit is real); name falls back to its sku if absent from the catalog.
- * PART: keyed by sku; must be in the catalog, else unchanged (same ref); re-scan
- *       increments requestedQty.
- * NOT_FOUND: unchanged (same ref).
- */
-export function addScanToCreateCart(
-  lines: CreateLine[],
-  scan: ScanLookupResult,
-  catalog: Map<string, CreateCatalogEntry>,
-): CreateLine[] {
-  if (scan.kind === "UNIT") {
-    const key = scan.data.castranova_barcode
-    if (lines.some((l) => l.lineKind === "UNIT" && l.key === key)) return lines
-    const entry = catalog.get(scan.data.sku)
-    return [
-      ...lines,
-      {
-        key,
-        lineKind: "UNIT",
-        productId: scan.data.product_id,
-        sku: scan.data.sku,
-        modelName: entry?.modelName ?? scan.data.sku,
-        unitSerial: key,
-        requestedQty: 1,
-      },
-    ]
-  }
-  if (scan.kind === "PART") {
-    const entry = catalog.get(scan.data.sku)
-    if (!entry) return lines
-    const key = scan.data.sku
-    if (lines.some((l) => l.key === key)) {
-      return lines.map((l) =>
-        l.key === key ? { ...l, requestedQty: l.requestedQty + 1 } : l,
-      )
-    }
-    return [
-      ...lines,
-      {
-        key,
-        lineKind: "PART",
-        productId: entry.productId,
-        sku: scan.data.sku,
-        modelName: entry.modelName,
-        requestedQty: 1,
-      },
-    ]
-  }
-  return lines
 }
 
 /** Merge a QUANTITY product into the cart as a PART line, keyed by sku. */

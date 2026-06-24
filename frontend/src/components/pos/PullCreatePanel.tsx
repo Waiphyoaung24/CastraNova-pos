@@ -1,7 +1,6 @@
 import { ArrowLeft, Minus, Plus, Trash2 } from "lucide-react"
-import { type Ref, useId } from "react"
-import type { ProjectPublic } from "@/client/types.gen"
-import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
+import { useId, useState } from "react"
+import type { ProductPublic, ProjectPublic } from "@/client/types.gen"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,13 +28,11 @@ interface PullCreatePanelProps {
   onProjectChange: (value: string) => void
   adminNotes: string
   onNotesChange: (value: string) => void
+  products: ProductPublic[]
+  onAddItem: (productId: string, qty: number) => void
+  addNotice: string
+  isAdding: boolean
   lines: CreateLine[]
-  scanRef: Ref<ScanFieldHandle>
-  onScan: (code: string) => void
-  isSearching: boolean
-  notFound: boolean
-  isError: boolean
-  scanNotice: string
   onQtyChange: (key: string, qty: number) => void
   onRemove: (key: string) => void
   onSubmit: () => void
@@ -49,13 +46,11 @@ export function PullCreatePanel({
   onProjectChange,
   adminNotes,
   onNotesChange,
+  products,
+  onAddItem,
+  addNotice,
+  isAdding,
   lines,
-  scanRef,
-  onScan,
-  isSearching,
-  notFound,
-  isError,
-  scanNotice,
   onQtyChange,
   onRemove,
   onSubmit,
@@ -64,6 +59,9 @@ export function PullCreatePanel({
 }: PullCreatePanelProps) {
   const projectSelectId = useId()
   const notesId = useId()
+  const itemSelectId = useId()
+  const [selectedProductId, setSelectedProductId] = useState("")
+  const [qty, setQty] = useState(1)
   const canCreate = projectId !== "" && lines.length > 0 && !isPending
 
   return (
@@ -105,32 +103,71 @@ export function PullCreatePanel({
         />
       </div>
 
-      <ScanField
-        ref={scanRef}
-        label="Scan item to request"
-        clearOnScan
-        onScan={onScan}
-        status={
-          <>
-            <p
-              aria-live="assertive"
-              className="text-muted-foreground min-h-5 text-sm"
+      <div className="space-y-2">
+        <Label htmlFor={itemSelectId}>Add item to request</Label>
+        <div className="flex items-end gap-2">
+          <Select
+            value={selectedProductId}
+            onValueChange={setSelectedProductId}
+          >
+            <SelectTrigger id={itemSelectId} className="w-full">
+              <SelectValue placeholder="Select an item" />
+            </SelectTrigger>
+            <SelectContent>
+              {products.length ? (
+                products.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.model_name} ({p.sku})
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectEmpty>No items available</SelectEmpty>
+              )}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-11"
+              disabled={qty <= 1}
+              aria-label="Decrease quantity"
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
             >
-              {isError
-                ? "Scan lookup failed. Try again."
-                : notFound
-                  ? "No item found for that code."
-                  : scanNotice}
-            </p>
-            <p
-              aria-live="polite"
-              className="text-muted-foreground min-h-5 text-sm"
+              <Minus />
+            </Button>
+            <span className="num w-8 text-center" aria-hidden="true">
+              {qty}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-11"
+              aria-label="Increase quantity"
+              onClick={() => setQty((q) => q + 1)}
             >
-              {isSearching ? "Searching…" : ""}
-            </p>
-          </>
-        }
-      />
+              <Plus />
+            </Button>
+          </div>
+          <Button
+            type="button"
+            className="h-11"
+            disabled={selectedProductId === "" || isAdding}
+            onClick={() => {
+              onAddItem(selectedProductId, qty)
+              setSelectedProductId("")
+              setQty(1)
+            }}
+          >
+            {isAdding ? "Adding…" : "Add"}
+          </Button>
+        </div>
+        <p aria-live="polite" className="text-muted-foreground min-h-5 text-sm">
+          {addNotice}
+        </p>
+      </div>
 
       {lines.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">

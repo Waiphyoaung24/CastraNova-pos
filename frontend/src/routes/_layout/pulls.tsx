@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
+  DashboardsService,
   ProductsService,
   type ProjectPullCreate,
   type ProjectPullFulfill,
@@ -20,9 +21,9 @@ import useCustomToast from "@/hooks/useCustomToast"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import {
-  addScanToCreateCart,
+  addPartToCreateCart,
+  addUnitsToCreateCart,
   buildCreatePayload,
-  type CreateCatalogEntry,
   type CreateLine,
   removeCreateLine,
   setCreateQty,
@@ -57,6 +58,7 @@ function Pulls() {
   const [projectId, setProjectId] = useState<string>("")
   const [adminNotes, setAdminNotes] = useState<string>("")
   const [scanNotice, setScanNotice] = useState<string>("")
+  const [isAddingItem, setIsAddingItem] = useState(false)
   const scanRef = useRef<ScanFieldHandle>(null)
 
   const { data: pulls } = useQuery({
@@ -103,15 +105,6 @@ function Pulls() {
     () => new Map((products ?? []).map((p) => [p.id, p.model_name])),
     [products],
   )
-  // sku -> {productId, modelName} for the create cart.
-  const createCatalog = useMemo(() => {
-    const map = new Map<string, CreateCatalogEntry>()
-    for (const p of products ?? []) {
-      map.set(p.sku, { productId: p.id, modelName: p.model_name })
-    }
-    return map
-  }, [products])
-
   const selectedPull = useMemo(
     () => (pulls ?? []).find((p) => p.id === selectedPullId),
     [pulls, selectedPullId],
@@ -120,19 +113,11 @@ function Pulls() {
   const { resolve, result, isSearching, notFound, isError, reset } =
     useScanLookup()
 
-  // Route each scan to the active view. A scan that changes nothing (no matching
-  // line / not in catalog) and isn't NOT_FOUND surfaces a context notice.
+  // Route each fulfill scan to the selected pull. A scan that matches no line
+  // (and isn't NOT_FOUND) surfaces a context notice. Create mode no longer scans.
   useEffect(() => {
     if (!result) return
-    if (mode === "create") {
-      const next = addScanToCreateCart(createLines, result, createCatalog)
-      if (next === createLines && result.kind !== "NOT_FOUND") {
-        setScanNotice("That item can't be added to this request.")
-      } else {
-        setCreateLines(next)
-        setScanNotice("")
-      }
-    } else if (selectedPull) {
+    if (selectedPull) {
       const next = applyScanToFulfill(fulfillDraft, selectedPull.lines, result)
       if (next === fulfillDraft && result.kind !== "NOT_FOUND") {
         setScanNotice("That part isn't on this request — scan a different one.")
@@ -142,15 +127,7 @@ function Pulls() {
       }
     }
     reset()
-  }, [
-    result,
-    mode,
-    selectedPull,
-    createLines,
-    fulfillDraft,
-    createCatalog,
-    reset,
-  ])
+  }, [result, selectedPull, fulfillDraft, reset])
 
   const fulfillMutation = useMutation<
     ProjectPullPublic,
@@ -232,6 +209,54 @@ function Pulls() {
     setScanNotice("")
   }, [])
 
+  const handleAddItem = useCallback(
+    async (productId: string, qty: number) => {
+      const product = (products ?? []).find((p) => p.id === productId)
+      if (!product) return
+      const meta = {
+        productId: product.id,
+        sku: product.sku,
+        modelName: product.model_name,
+      }
+      if (product.tracking_mode === "SERIALIZED") {
+        setIsAddingItem(true)
+        try {
+          // ponytail: auto-claim oldest N serials at create time. A concurrent
+          // create can grab the same serial → one line settles SHORT at
+          // fulfillment. Upgrade path: claim serials at fulfill time instead.
+          const units = await DashboardsService.getStockOnHandUnits({
+            productId,
+          })
+          const present = new Set(
+            createLines.filter((l) => l.lineKind === "UNIT").map((l) => l.key),
+          )
+          const available = units
+            .map((u) => u.castranova_barcode)
+            .filter((s) => !present.has(s))
+          const take = available.slice(0, qty)
+          if (take.length === 0) {
+            setScanNotice("No units in stock for that item.")
+          } else {
+            setCreateLines((prev) => addUnitsToCreateCart(prev, meta, take))
+            setScanNotice(
+              take.length < qty
+                ? `Only ${take.length} in stock — added what's available.`
+                : "",
+            )
+          }
+        } catch {
+          setScanNotice("Couldn't load stock for that item. Try again.")
+        } finally {
+          setIsAddingItem(false)
+        }
+      } else {
+        setScanNotice("")
+        setCreateLines((prev) => addPartToCreateCart(prev, meta, qty))
+      }
+    },
+    [products, createLines],
+  )
+
   const handleFulfill = useCallback(() => {
     if (!selectedPull) return
     fulfillMutation.mutate({
@@ -255,12 +280,10 @@ function Pulls() {
           adminNotes={adminNotes}
           onNotesChange={setAdminNotes}
           lines={createLines}
-          scanRef={scanRef}
-          onScan={resolve}
-          isSearching={isSearching}
-          notFound={notFound}
-          isError={isError}
-          scanNotice={scanNotice}
+          products={products ?? []}
+          onAddItem={handleAddItem}
+          addNotice={scanNotice}
+          isAdding={isAddingItem}
           onQtyChange={(key, qty) =>
             setCreateLines((prev) => setCreateQty(prev, key, qty))
           }
