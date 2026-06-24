@@ -3521,6 +3521,7 @@ def stock_on_hand(
         Product.id,
         Product.sku,
         Product.model_name,
+        Product.brand,
         Product.category,
         Product.tracking_mode,
         on_hand.label("quantity_on_hand"),
@@ -3533,9 +3534,10 @@ def stock_on_hand(
             product_id=r[0],
             sku=r[1],
             model_name=r[2],
-            category=r[3],
-            tracking_mode=r[4],
-            quantity_on_hand=int(r[5] or 0),
+            brand=r[3],
+            category=r[4],
+            tracking_mode=r[5],
+            quantity_on_hand=int(r[6] or 0),
         )
         for r in session.exec(stmt).all()
     ]
