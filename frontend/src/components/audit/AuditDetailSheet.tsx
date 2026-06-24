@@ -136,6 +136,7 @@ function ReceiptButton({ saleId }: { saleId: string }) {
       variant="outline"
       className="h-11 w-full"
       aria-label="View receipt for this sale"
+      aria-busy={isOpening}
       disabled={isOpening}
       onClick={handleOpen}
     >

@@ -40,8 +40,8 @@ def render_sale_receipt(
     y -= 8 * mm
     pdf.setFont("Helvetica", 8)
     for label, qty, price in lines:
-        pdf.drawString(8 * mm, y, f"{label[:28]}")
-        pdf.drawRightString(width - 8 * mm, y, f"{qty} x {price}")
+        pdf.drawString(8 * mm, y, f"{label[:24]}")
+        pdf.drawRightString(width - 8 * mm, y, f"{qty} x {price} = {qty * price}")
         y -= 5 * mm
     y -= 3 * mm
     pdf.setFont("Helvetica-Bold", 9)
