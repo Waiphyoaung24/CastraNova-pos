@@ -10,8 +10,8 @@ import {
 // No browser / backend required — mirrors the useRole.spec.ts pattern.
 
 test("trackingModeLabel maps known modes to plain words", () => {
-  expect(trackingModeLabel("SERIALIZED")).toBe("Serial-tracked")
-  expect(trackingModeLabel("QUANTITY")).toBe("Counted")
+  expect(trackingModeLabel("SERIALIZED")).toBe("Serialized")
+  expect(trackingModeLabel("QUANTITY")).toBe("Quantity")
 })
 
 test("trackingModeLabel returns the raw value for unknown modes", () => {
