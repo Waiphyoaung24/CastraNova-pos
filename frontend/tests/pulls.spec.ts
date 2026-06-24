@@ -5,6 +5,7 @@ import {
   LoginService,
   OpenAPI,
   ProductsService,
+  type ProjectPullPublic,
   ProjectPullsService,
   ProjectsService,
   ReceiptsService,
@@ -209,6 +210,7 @@ test.describe("Pulls screen", () => {
       },
     })
     const barcodes = recv.units.map((u) => u.castranova_barcode)
+    expect(barcodes).toHaveLength(2)
 
     await page.goto("/pulls")
     await page.getByRole("button", { name: "New request" }).click()
@@ -245,22 +247,20 @@ test.describe("Pulls screen", () => {
 
     // Backend: the seeded project now has a PENDING pull with 1 PART (qty 2)
     // and 2 UNIT lines bound to the two oldest serials.
+    let created: ProjectPullPublic | undefined
     await expect
       .poll(
         async () => {
           const list = await ProjectPullsService.readProjectPulls({
             state: "PENDING",
           })
-          return list.some((p) => p.project_id === project.id)
+          created = list.find((p) => p.project_id === project.id)
+          return created ? created.lines.length : 0
         },
         { timeout: 10_000, intervals: [500, 1_000] },
       )
-      .toBe(true)
+      .toBeGreaterThan(0)
 
-    const list = await ProjectPullsService.readProjectPulls({
-      state: "PENDING",
-    })
-    const created = list.find((p) => p.project_id === project.id)
     expect(created).toBeTruthy()
     const partLines = created!.lines.filter((l) => l.line_kind === "PART")
     const unitLines = created!.lines.filter((l) => l.line_kind === "UNIT")
