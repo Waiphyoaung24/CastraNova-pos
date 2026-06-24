@@ -85,6 +85,62 @@ export function addScanToCreateCart(
   return lines
 }
 
+/** Merge a QUANTITY product into the cart as a PART line, keyed by sku. */
+export function addPartToCreateCart(
+  lines: CreateLine[],
+  product: { productId: string; sku: string; modelName: string },
+  qty: number,
+): CreateLine[] {
+  const add = Math.max(1, Math.floor(Number.isFinite(qty) ? qty : 1))
+  const key = product.sku
+  if (lines.some((l) => l.key === key)) {
+    return lines.map((l) =>
+      l.key === key ? { ...l, requestedQty: l.requestedQty + add } : l,
+    )
+  }
+  return [
+    ...lines,
+    {
+      key,
+      lineKind: "PART",
+      productId: product.productId,
+      sku: product.sku,
+      modelName: product.modelName,
+      requestedQty: add,
+    },
+  ]
+}
+
+/**
+ * Append one UNIT line per serial (keyed by serial), skipping serials already
+ * in the cart. Returns the same array ref when nothing fresh is added.
+ */
+export function addUnitsToCreateCart(
+  lines: CreateLine[],
+  product: { productId: string; sku: string; modelName: string },
+  serials: string[],
+): CreateLine[] {
+  const present = new Set(
+    lines.filter((l) => l.lineKind === "UNIT").map((l) => l.key),
+  )
+  const fresh = serials.filter((s) => s.length > 0 && !present.has(s))
+  if (fresh.length === 0) return lines
+  return [
+    ...lines,
+    ...fresh.map(
+      (serial): CreateLine => ({
+        key: serial,
+        lineKind: "UNIT",
+        productId: product.productId,
+        sku: product.sku,
+        modelName: product.modelName,
+        unitSerial: serial,
+        requestedQty: 1,
+      }),
+    ),
+  ]
+}
+
 /** Set a PART line's requestedQty (floored at 1). UNIT lines are left at 1. */
 export function setCreateQty(
   lines: CreateLine[],
