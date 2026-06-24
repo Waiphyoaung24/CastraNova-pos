@@ -52,8 +52,9 @@ The endpoint resolves and the renderer displays:
 
 1. **Header:** "CastraNova POS — Receipt", a shortened sale id, and the date
    (existing `sold_at`).
-2. **Customer name** — resolve `sale.customer_id` → `Customer.name`; render
-   "Walk In" when null.
+2. **Customer name** — resolve `sale.customer_id` → `Customer.name`. (`customer_id`
+   is non-nullable, so a real walk-in is its own customer row, e.g. "Walk-in";
+   the "Unknown" fallback only fires if the customer row is missing.)
 3. **Sold by** — resolve `sale.created_by_user_id` → `User.full_name`, falling
    back to `User.email`.
 4. **Line items** — for each `SaleLine`, a human-readable label:

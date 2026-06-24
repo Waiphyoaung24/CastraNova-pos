@@ -6,15 +6,17 @@ import {
   Boxes,
   Clock,
   type LucideIcon,
+  Receipt,
   ShoppingCart,
   SlidersHorizontal,
   Tag,
   Wrench,
 } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 
 import type { AuditEntryPublic } from "@/client"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Sheet,
   SheetContent,
@@ -22,7 +24,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import useCustomToast from "@/hooks/useCustomToast"
 import { type MovementSourceKind, movementSource } from "@/lib/audit"
+import { openAuthedPdf } from "@/lib/print-pdf"
 import { cn } from "@/lib/utils"
 
 // Stock direction drives the one accent in the drawer: inbound movements read
@@ -104,6 +108,41 @@ function Field({
       <dt className="text-muted-foreground">{label}</dt>
       <dd className={mono ? "num break-all" : "break-words"}>{children}</dd>
     </>
+  )
+}
+
+/** Opens the sale's receipt PDF (authed) in a new tab. Disabled while the PDF
+ * is in flight so a double-tap cannot spawn two tabs. */
+function ReceiptButton({ saleId }: { saleId: string }) {
+  const { showErrorToast } = useCustomToast()
+  const [isOpening, setIsOpening] = useState(false)
+
+  async function handleOpen() {
+    setIsOpening(true)
+    const result = await openAuthedPdf(`/sales/${saleId}/receipt.pdf`)
+    setIsOpening(false)
+    if (result === "no-token") {
+      showErrorToast("Session expired. Please log in again.")
+    } else if (result === "popup-blocked") {
+      showErrorToast("Pop-up blocked. Allow pop-ups and try again.")
+    } else if (result === "fetch-failed") {
+      showErrorToast("Could not load receipt PDF.")
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="h-11 w-full"
+      aria-label="View receipt for this sale"
+      aria-busy={isOpening}
+      disabled={isOpening}
+      onClick={handleOpen}
+    >
+      <Receipt className="size-4" />
+      {isOpening ? "Opening…" : "View receipt"}
+    </Button>
   )
 }
 
@@ -243,6 +282,8 @@ function AuditDetailBody({ entry }: { entry: AuditEntryPublic }) {
             <p className="mt-1 break-words">{entry.notes}</p>
           </div>
         ) : null}
+
+        {entry.sale_id ? <ReceiptButton saleId={entry.sale_id} /> : null}
       </div>
     </>
   )

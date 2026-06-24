@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypeVar, cast
@@ -1925,6 +1926,97 @@ def resolve_sync_review_item(
 
 def get_sale(*, session: Session, sale_id: Any) -> Sale | None:
     return session.get(Sale, sale_id)
+
+
+@dataclass(frozen=True)
+class SaleReceiptData:
+    """Resolved display inputs for one sale's receipt PDF (non-financial beyond
+    price + total)."""
+
+    sale_id: uuid.UUID
+    sold_at: datetime
+    customer_name: str
+    sold_by: str
+    lines: list[tuple[str, int, Decimal]]
+    total_thb: Decimal
+
+
+def _receipt_line_label(
+    *,
+    line: SaleLine,
+    units: dict[uuid.UUID, Unit],
+    products: dict[uuid.UUID, Product],
+) -> str:
+    """Human-readable label for a receipt line: parts as ``Model (SKU)``, units
+    as ``Model · serial``. Falls back to ``Unknown product`` if a row is gone."""
+    if line.unit_id is not None:
+        unit = units.get(line.unit_id)
+        prod = products.get(unit.product_id) if unit is not None else None
+        name = prod.model_name if prod is not None else "Unknown product"
+        if unit is not None and unit.supplier_serial:
+            return f"{name} · {unit.supplier_serial}"
+        return name
+    if line.product_id is not None:
+        prod = products.get(line.product_id)
+        if prod is not None:
+            return f"{prod.model_name} ({prod.sku})"
+    return "Unknown product"
+
+
+def get_sale_receipt_data(
+    *, session: Session, sale_id: Any
+) -> SaleReceiptData | None:
+    """Resolve a sale into receipt display data via batched lookups (no N+1).
+    Returns None when the sale does not exist."""
+    sale = get_sale(session=session, sale_id=sale_id)
+    if sale is None:
+        return None
+    sale_lines = session.exec(
+        select(SaleLine).where(SaleLine.sale_id == sale.id)
+    ).all()
+
+    unit_ids = {ln.unit_id for ln in sale_lines if ln.unit_id is not None}
+    product_ids = {ln.product_id for ln in sale_lines if ln.product_id is not None}
+    units: dict[uuid.UUID, Unit] = {
+        u.id: u
+        for u in (
+            session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all()
+            if unit_ids
+            else []
+        )
+    }
+    for u in units.values():
+        product_ids.add(u.product_id)
+    products: dict[uuid.UUID, Product] = {
+        p.id: p
+        for p in (
+            session.exec(select(Product).where(col(Product.id).in_(product_ids))).all()
+            if product_ids
+            else []
+        )
+    }
+
+    customer = session.get(Customer, sale.customer_id)
+    customer_name = customer.name if customer is not None else "Unknown"
+    user = session.get(User, sale.created_by_user_id)
+    sold_by = (user.full_name or user.email) if user is not None else "Unknown"
+
+    lines: list[tuple[str, int, Decimal]] = [
+        (
+            _receipt_line_label(line=ln, units=units, products=products),
+            ln.quantity,
+            ln.unit_price_thb,
+        )
+        for ln in sale_lines
+    ]
+    return SaleReceiptData(
+        sale_id=sale.id,
+        sold_at=sale.sold_at,
+        customer_name=customer_name,
+        sold_by=sold_by,
+        lines=lines,
+        total_thb=sale.total_thb,
+    )
 
 
 def _sale_by_key(*, session: Session, idempotency_key: uuid.UUID) -> Sale | None:

@@ -188,3 +188,34 @@ def test_sale_part_line_unknown_sku_404(
     r = client.post(f"{PREFIX}/sales", headers=staff_token_headers, json=body)
     assert r.status_code == 404
     assert "Product" in r.json()["detail"]
+
+
+def test_get_sale_receipt_data_resolves_names_and_labels(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed_sale_unit: tuple[str, uuid.UUID],
+) -> None:
+    barcode, customer_id = seed_sale_unit
+    created = client.post(
+        f"{PREFIX}/sales",
+        headers=superuser_token_headers,
+        json=_sale_body(barcode, customer_id),
+    )
+    assert created.status_code == 200, created.text
+    sale_id = created.json()["id"]
+
+    data = crud.get_sale_receipt_data(session=db, sale_id=uuid.UUID(sale_id))
+    assert data is not None
+    assert data.customer_name == "Walk-in"
+    # seller resolved to a real name/email, not the missing-user fallback
+    assert data.sold_by and data.sold_by != "Unknown"
+    assert len(data.lines) == 1
+    label, qty, price = data.lines[0]
+    assert "Compressor" in label  # not the raw "UNIT" placeholder
+    assert "UNIT" != label
+    assert qty == 1
+
+
+def test_get_sale_receipt_data_unknown_sale_returns_none(db: Session) -> None:
+    assert crud.get_sale_receipt_data(session=db, sale_id=uuid.uuid4()) is None

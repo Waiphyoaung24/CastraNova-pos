@@ -16,6 +16,8 @@ def render_sale_receipt(
     *,
     sale_id: str,
     sold_at: str,
+    customer_name: str,
+    sold_by: str,
     lines: list[tuple[str, int, Decimal]],
     total_thb: Decimal,
 ) -> bytes:
@@ -28,14 +30,18 @@ def render_sale_receipt(
     pdf.drawString(8 * mm, y, "CastraNova POS — Receipt")
     pdf.setFont("Helvetica", 7)
     y -= 6 * mm
-    pdf.drawString(8 * mm, y, f"Sale {sale_id}")
+    pdf.drawString(8 * mm, y, f"Sale {sale_id[:8]}")
     y -= 4 * mm
     pdf.drawString(8 * mm, y, f"Date {sold_at}")
+    y -= 4 * mm
+    pdf.drawString(8 * mm, y, f"Customer {customer_name[:34]}")
+    y -= 4 * mm
+    pdf.drawString(8 * mm, y, f"Sold by {sold_by[:34]}")
     y -= 8 * mm
     pdf.setFont("Helvetica", 8)
     for label, qty, price in lines:
-        pdf.drawString(8 * mm, y, f"{label[:28]}")
-        pdf.drawRightString(width - 8 * mm, y, f"{qty} x {price}")
+        pdf.drawString(8 * mm, y, f"{label[:24]}")
+        pdf.drawRightString(width - 8 * mm, y, f"{qty} x {price} = {qty * price}")
         y -= 5 * mm
     y -= 3 * mm
     pdf.setFont("Helvetica-Bold", 9)

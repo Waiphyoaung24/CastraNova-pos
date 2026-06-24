@@ -30,7 +30,7 @@ def test_receipt_pdf_signature_has_no_cost_parameter() -> None:
     """
     sig = inspect.signature(render_sale_receipt)
     param_names = set(sig.parameters.keys())
-    expected = {"sale_id", "sold_at", "lines", "total_thb"}
+    expected = {"sale_id", "sold_at", "customer_name", "sold_by", "lines", "total_thb"}
     assert param_names == expected, (
         f"render_sale_receipt parameter names changed. "
         f"Expected exactly {expected}, got {param_names}. "
@@ -61,6 +61,8 @@ def test_receipt_pdf_lines_tuple_has_no_cost_position() -> None:
     pdf_bytes = render_sale_receipt(
         sale_id="test-sale-001",
         sold_at="2026-06-07T10:00:00",
+        customer_name="Walk-in",
+        sold_by="admin@example.com",
         lines=[("Compressor Model X", 1, Decimal("1000.00"))],
         total_thb=Decimal("1000.00"),
     )
@@ -72,6 +74,8 @@ def test_receipt_pdf_returns_valid_pdf_bytes() -> None:
     pdf_bytes = render_sale_receipt(
         sale_id="test-sale-abc",
         sold_at="2026-06-07T12:30:00",
+        customer_name="Walk-in",
+        sold_by="admin@example.com",
         lines=[
             ("Unit SN-ABC123", 1, Decimal("1500.00")),
             ("Service Charge", 1, Decimal("200.00")),
@@ -94,6 +98,8 @@ def test_receipt_pdf_selling_total_is_included() -> None:
     pdf_bytes = render_sale_receipt(
         sale_id="test-sale-xyz",
         sold_at="2026-06-07T09:00:00",
+        customer_name="Walk-in",
+        sold_by="admin@example.com",
         lines=[("Compressor A9", 2, Decimal("1000.00")), ("Filter Kit", 1, Decimal("500.00"))],
         total_thb=total,
     )
