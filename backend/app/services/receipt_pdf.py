@@ -38,15 +38,22 @@ def render_sale_receipt(
     y -= 4 * mm
     pdf.drawString(8 * mm, y, f"Sold by {sold_by[:34]}")
     y -= 8 * mm
-    pdf.setFont("Helvetica", 8)
+    # Each line item spans two rows: the full product name on its own row (so
+    # long "Model · serial" / "Model (SKU)" labels are not cut mid-word), then
+    # the quantity x unit price = line total right-aligned beneath it.
     for label, qty, price in lines:
-        pdf.drawString(8 * mm, y, f"{label[:24]}")
-        pdf.drawRightString(width - 8 * mm, y, f"{qty} x {price} = {qty * price}")
-        y -= 5 * mm
-    y -= 3 * mm
+        pdf.setFont("Helvetica", 8)
+        pdf.drawString(8 * mm, y, label[:46])
+        y -= 4 * mm
+        pdf.setFont("Helvetica", 7)
+        pdf.drawRightString(
+            width - 8 * mm, y, f"{qty} x {price:,.2f} = {qty * price:,.2f}"
+        )
+        y -= 6 * mm
+    y -= 1 * mm
     pdf.setFont("Helvetica-Bold", 9)
     pdf.drawString(8 * mm, y, "Total")
-    pdf.drawRightString(width - 8 * mm, y, f"{total_thb} THB")
+    pdf.drawRightString(width - 8 * mm, y, f"{total_thb:,.2f} THB")
     pdf.showPage()
     pdf.save()
     return buf.getvalue()
