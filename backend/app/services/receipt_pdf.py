@@ -10,6 +10,7 @@ import io
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors  # type: ignore[import-untyped]
@@ -71,7 +72,7 @@ def render_sale_receipt(
     cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=12)
     meta = ParagraphStyle("meta", parent=styles["Normal"], fontSize=9, leading=15)
 
-    story: list = []
+    story: list[Any] = []
     for label, value in (
         ("Sale #", sale_id[:8]),
         ("Date", _fmt_date(sold_at)),
@@ -81,7 +82,7 @@ def render_sale_receipt(
         story.append(Paragraph(f"<b>{label}</b>&nbsp;&nbsp;{escape(value)}", meta))
     story.append(Spacer(1, 8 * mm))
 
-    data: list = [["NO", "DESCRIPTION", "QTY", "PER UNIT", "TOTAL AMOUNT"]]
+    data: list[Any] = [["NO", "DESCRIPTION", "QTY", "PER UNIT", "TOTAL AMOUNT"]]
     for i, (label, qty, price) in enumerate(lines, start=1):
         data.append(
             [
@@ -97,7 +98,9 @@ def render_sale_receipt(
 
     table = Table(
         data,
-        colWidths=[12 * mm, 90 * mm, 16 * mm, 30 * mm, 36 * mm],
+        # Sum = 174 mm = A4 width (210) minus left+right margins (18+18); any
+        # wider overflows the printable frame and clips the TOTAL column.
+        colWidths=[11 * mm, 75 * mm, 14 * mm, 36 * mm, 38 * mm],
         repeatRows=1,
     )
     table.setStyle(
