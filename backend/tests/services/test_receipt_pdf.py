@@ -121,6 +121,19 @@ def test_receipt_pdf_is_a4() -> None:
     assert b"841.8" in pdf_bytes and b"595.2" in pdf_bytes
 
 
+def test_receipt_pdf_embeds_logo_image() -> None:
+    """With assets present, the rendered PDF embeds an image (logo/watermark)."""
+    pdf_bytes = render_sale_receipt(
+        sale_id="test-sale-img",
+        sold_at="2026-06-25T14:02:00",
+        customer_name="Walk-in",
+        sold_by="admin@example.com",
+        lines=[("Compressor Model X", 1, Decimal("1000.00"))],
+        total_thb=Decimal("1000.00"),
+    )
+    assert b"/Image" in pdf_bytes, "expected an embedded image XObject"
+
+
 def test_receipt_pdf_empty_lines_does_not_crash() -> None:
     """A sale with no resolvable lines still renders header + GRAND TOTAL."""
     pdf_bytes = render_sale_receipt(

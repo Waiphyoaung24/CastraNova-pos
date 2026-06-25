@@ -20,6 +20,7 @@ from reportlab.lib.styles import (  # type: ignore[import-untyped]
     getSampleStyleSheet,
 )
 from reportlab.lib.units import mm  # type: ignore[import-untyped]
+from reportlab.lib.utils import ImageReader  # type: ignore[import-untyped]
 from reportlab.platypus import (  # type: ignore[import-untyped]
     Paragraph,
     SimpleDocTemplate,
@@ -45,6 +46,44 @@ def _fmt_date(sold_at: str) -> str:
     except ValueError:
         return sold_at
     return dt.strftime("%d %b %Y, %H:%M")
+
+
+def _draw_page_furniture(canvas: Any, doc: Any) -> None:
+    """onPage callback: paint the faint watermark (behind the flowables) and the
+    logo header + title in the top margin. Missing assets are skipped so the
+    table still renders (belt-and-suspenders; the assets are committed)."""
+    page_w, page_h = A4
+    if _LOGO_WATERMARK.exists():
+        wm_w = 120 * mm
+        img = ImageReader(str(_LOGO_WATERMARK))
+        iw, ih = img.getSize()
+        wm_h = wm_w * ih / iw
+        canvas.drawImage(
+            img,
+            (page_w - wm_w) / 2,
+            (page_h - wm_h) / 2,
+            width=wm_w,
+            height=wm_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+    if _LOGO_HEADER.exists():
+        logo_w = 60 * mm
+        img = ImageReader(str(_LOGO_HEADER))
+        iw, ih = img.getSize()
+        logo_h = logo_w * ih / iw
+        top = page_h - 12 * mm - logo_h
+        canvas.drawImage(
+            img,
+            (page_w - logo_w) / 2,
+            top,
+            width=logo_w,
+            height=logo_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+        canvas.setFont("Helvetica", 11)
+        canvas.drawCentredString(page_w / 2, top - 6 * mm, "Sales Receipt")
 
 
 def render_sale_receipt(
@@ -128,5 +167,9 @@ def render_sale_receipt(
     )
     story.append(table)
 
-    doc.build(story)
+    doc.build(
+        story,
+        onFirstPage=_draw_page_furniture,
+        onLaterPages=_draw_page_furniture,
+    )
     return buf.getvalue()
