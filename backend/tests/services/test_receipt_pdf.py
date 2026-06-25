@@ -104,3 +104,31 @@ def test_receipt_pdf_selling_total_is_included() -> None:
         total_thb=total,
     )
     assert pdf_bytes[:4] == b"%PDF"
+
+
+def test_receipt_pdf_is_a4() -> None:
+    """The receipt renders at A4 (MediaBox ~595x842pt), not the old A6."""
+    pdf_bytes = render_sale_receipt(
+        sale_id="test-sale-a4",
+        sold_at="2026-06-25T14:02:00",
+        customer_name="Walk-in",
+        sold_by="admin@example.com",
+        lines=[("Compressor Model X", 1, Decimal("1000.00"))],
+        total_thb=Decimal("1000.00"),
+    )
+    # ponytail: grep the MediaBox bytes instead of adding a PDF-parser dep.
+    # A4 = 595.27 x 841.89 pt; the page dict is uncompressed plain text.
+    assert b"841.8" in pdf_bytes and b"595.2" in pdf_bytes
+
+
+def test_receipt_pdf_empty_lines_does_not_crash() -> None:
+    """A sale with no resolvable lines still renders header + GRAND TOTAL."""
+    pdf_bytes = render_sale_receipt(
+        sale_id="test-sale-empty",
+        sold_at="2026-06-25T14:02:00",
+        customer_name="Walk-in",
+        sold_by="admin@example.com",
+        lines=[],
+        total_thb=Decimal("0.00"),
+    )
+    assert pdf_bytes[:4] == b"%PDF"
