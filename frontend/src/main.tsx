@@ -8,7 +8,11 @@ import { ReloadPrompt } from "./components/ReloadPrompt"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
 import "./index.css"
-import { ensureValidSession, installAuthInterceptor } from "./lib/auth-session"
+import {
+  endSession,
+  ensureValidSession,
+  installAuthInterceptor,
+} from "./lib/auth-session"
 import { persister, queryClient } from "./lib/query-client"
 import { routeTree } from "./routeTree.gen"
 
@@ -19,6 +23,21 @@ OpenAPI.TOKEN = async () => {
 // Refresh-then-retry on 401: an active user's short access token is renewed
 // transparently; only a dead refresh cookie (12h idle) reaches endSession.
 installAuthInterceptor()
+
+// On load, proactively verify the session. A dead/idle token otherwise stays
+// invisible when the first view is served from the persisted query cache (no
+// request fires to trip the 401 interceptor). Skip on /login and while offline
+// (offline mode must keep working; the online listener re-checks on reconnect).
+if (navigator.onLine && !window.location.pathname.startsWith("/login")) {
+  void ensureValidSession()
+    .then((ok) => {
+      if (!ok) endSession()
+    })
+    .catch(() => {
+      // Network/unknown error — do not force logout; the interceptor handles a
+      // real 401 on the next request.
+    })
+}
 
 // Replay offline-queued mutations as soon as the network returns — but only
 // once we hold a valid session, so a replay never fires with a dead token

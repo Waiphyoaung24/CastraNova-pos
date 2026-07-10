@@ -20,11 +20,13 @@ test.describe("Idle auth / sliding refresh", () => {
     // We stay on the app (readUserMe succeeded after a transparent refresh),
     // NOT bounced to /login.
     await expect(page).toHaveURL(/\/$/)
-    // The token was replaced with a fresh, valid one.
+    // Boot-time refresh is async — poll until the corrupt token is replaced.
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("access_token")))
+      .not.toBe("not-a-valid-jwt")
     const token = await page.evaluate(() =>
       localStorage.getItem("access_token"),
     )
-    expect(token).not.toBe("not-a-valid-jwt")
     expect(token).toBeTruthy()
   })
 
