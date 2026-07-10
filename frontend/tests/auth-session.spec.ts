@@ -110,4 +110,33 @@ test.describe("Idle auth / sliding refresh", () => {
       .toBe(fresh.access_token)
     await expect(page).toHaveURL(/\/stock/)
   })
+
+  test("explicit logout hits the server logout endpoint and ends the session", async ({
+    page,
+  }) => {
+    await page.goto("/")
+
+    // Spy on the server-side cookie-clearing call (let it through so the backend
+    // actually clears the cookie). We assert the CALL here — the cross-site
+    // harness won't expose the SameSite=lax refresh cookie to context.cookies(),
+    // so the cookie's actual removal is covered by backend
+    // test_logout_clears_refresh_cookie; here we verify the client triggers it.
+    let logoutCalled = false
+    await page.route("**/api/v1/login/logout", async (route) => {
+      logoutCalled = true
+      await route.continue()
+    })
+
+    // User menu → Log Out.
+    await page.getByTestId("user-menu").click()
+    await page.getByRole("menuitem", { name: /log ?out/i }).click()
+
+    // True logout: server cookie-clear was called, session ended, token dropped.
+    await expect(page).toHaveURL(/\/login/)
+    expect(logoutCalled).toBe(true)
+    const token = await page.evaluate(() =>
+      localStorage.getItem("access_token"),
+    )
+    expect(token).toBeNull()
+  })
 })

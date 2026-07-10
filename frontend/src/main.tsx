@@ -64,10 +64,16 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <PersistQueryClientProvider
         client={queryClient}
         persistOptions={{ persister }}
-        onSuccess={() => {
-          // Once the persisted cache is restored, resume any mutations that
-          // were paused while offline before the last reload.
-          queryClient.resumePausedMutations()
+        onSuccess={async () => {
+          // Once the persisted cache is restored, replay any offline-queued
+          // mutations — but only if we hold a valid session. If the refresh
+          // token has expired (12h idle), leave them PAUSED so they survive to
+          // replay after the user logs back in (idempotency keys dedupe). This
+          // is what prevents a >12h-offline reconnect from firing a queued sale
+          // against a dead token and erroring it out of the queue (lost sale).
+          if (await ensureValidSession()) {
+            queryClient.resumePausedMutations()
+          }
         }}
       >
         <RouterProvider router={router} />
