@@ -110,7 +110,7 @@ function Suppliers() {
             <Input
               id={countryId}
               value={country}
-              maxLength={255}
+              maxLength={64}
               placeholder="e.g. Thailand"
               onChange={(e) => setCountry(e.target.value)}
             />
