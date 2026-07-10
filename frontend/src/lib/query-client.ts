@@ -130,10 +130,10 @@ export const persister = createAsyncStoragePersister({
 // reload. Every offline mutation carries a client idempotency_key, so the
 // backend dedupes replays (no app-level encryption — S4).
 queryClient.setMutationDefaults(["sales"], {
-  mutationFn: (requestBody: SaleCreateRequest) =>
-    SalesService.createSale({ requestBody }),
+  mutationFn: ({ body }: Queued<SaleCreateRequest>) =>
+    SalesService.createSale({ requestBody: body }),
 })
 queryClient.setMutationDefaults(["receipts"], {
-  mutationFn: (requestBody: ReceiveSerializedRequest) =>
-    ReceiptsService.receiveSerialized({ requestBody }),
+  mutationFn: ({ body }: Queued<ReceiveSerializedRequest>) =>
+    ReceiptsService.receiveSerialized({ requestBody: body }),
 })

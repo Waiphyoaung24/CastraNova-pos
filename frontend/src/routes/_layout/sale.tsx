@@ -29,6 +29,7 @@ import {
 import useCustomToast from "@/hooks/useCustomToast"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
+import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
 import {
   addScanToCart,
@@ -37,6 +38,7 @@ import {
   removeLine,
   setLineQuantity,
 } from "@/lib/sale-cart"
+import type { Queued } from "@/lib/sync-producer"
 
 export const Route = createFileRoute("/_layout/sale")({
   component: Sale,
@@ -173,7 +175,7 @@ function Sale() {
   const mutation = useMutation<
     SalePublic | SaleStaffPublic,
     Error,
-    SaleCreateRequest
+    Queued<SaleCreateRequest>
   >({
     // No mutationFn here on purpose: inherit the persisted ["sales"] default from
     // query-client.ts so offline mutations are queued and replayed by key.
@@ -206,7 +208,7 @@ function Sale() {
     // One idempotency key per attempt, captured into the variables passed to
     // mutate — an offline replay reuses the same key so the backend dedupes.
     const request = buildSaleRequest(lines, customerId, crypto.randomUUID())
-    mutation.mutate(request)
+    mutation.mutate(queued(request, request.idempotency_key))
   }, [canCheckout, lines, customerId, mutation])
 
   return (
