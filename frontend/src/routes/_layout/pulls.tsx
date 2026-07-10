@@ -35,7 +35,9 @@ import {
   seedFulfillDraft,
   setLineFulfilledQty,
 } from "@/lib/pull-fulfill"
+import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
+import type { Queued } from "@/lib/sync-producer"
 
 export const Route = createFileRoute("/_layout/pulls")({
   component: Pulls,
@@ -132,13 +134,11 @@ function Pulls() {
   const fulfillMutation = useMutation<
     ProjectPullPublic,
     Error,
-    { pullId: string; body: ProjectPullFulfill }
+    Queued<{ pullId: string; requestBody: ProjectPullFulfill }>
   >({
-    mutationFn: ({ pullId, body }) =>
-      ProjectPullsService.fulfillProjectPull({
-        pullId,
-        requestBody: body,
-      }),
+    // No mutationFn: inherit the persisted ["pull-fulfill"] default from
+    // query-client.ts so an offline fulfill is queued and replayed by key.
+    mutationKey: ["pull-fulfill"],
     onSuccess: (pull) => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
       showSuccessToast(
@@ -259,10 +259,15 @@ function Pulls() {
 
   const handleFulfill = useCallback(() => {
     if (!selectedPull) return
-    fulfillMutation.mutate({
-      pullId: selectedPull.id,
-      body: buildFulfillPayload(fulfillDraft),
-    })
+    fulfillMutation.mutate(
+      queued(
+        {
+          pullId: selectedPull.id,
+          requestBody: buildFulfillPayload(fulfillDraft),
+        },
+        crypto.randomUUID(),
+      ),
+    )
   }, [selectedPull, fulfillDraft, fulfillMutation])
 
   return (

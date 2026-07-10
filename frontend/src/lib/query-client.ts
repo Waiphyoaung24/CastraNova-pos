@@ -8,6 +8,8 @@ import {
 import { del, get, set } from "idb-keyval"
 import {
   ApiError,
+  type ProjectPullFulfill,
+  ProjectPullsService,
   ReceiptsService,
   type ReceiveSerializedRequest,
   type SaleCreateRequest,
@@ -136,4 +138,13 @@ queryClient.setMutationDefaults(["sales"], {
 queryClient.setMutationDefaults(["receipts"], {
   mutationFn: ({ body }: Queued<ReceiveSerializedRequest>) =>
     ReceiptsService.receiveSerialized({ requestBody: body }),
+})
+queryClient.setMutationDefaults(["pull-fulfill"], {
+  mutationFn: ({
+    body,
+  }: Queued<{ pullId: string; requestBody: ProjectPullFulfill }>) =>
+    ProjectPullsService.fulfillProjectPull({
+      pullId: body.pullId,
+      requestBody: body.requestBody,
+    }),
 })
