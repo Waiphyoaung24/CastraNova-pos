@@ -32,11 +32,14 @@ class Settings(BaseSettings):
     )
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = secrets.token_urlsafe(32)
-    # 60 minutes * 24 hours * 8 days = 8 days
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
-    # 60 minutes * 24 hours * 7 days = 7 days. Rotated on each /login/refresh-token
-    # call (sliding expiry), so the static 7-day window is an upper bound, not a fixed TTL.
-    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # spec §6.2: refresh tokens live 7 days
+    # Access tokens are short-lived (15 min); the frontend transparently
+    # refreshes them via /login/refresh-token while the user is active.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    # 12 hours. Rotated + re-set (max_age) on every /login/refresh-token call,
+    # so this is a SLIDING inactivity window, not a fixed session length:
+    # the clock resets on activity and only expires after 12h of silence.
+    # This is the concrete mechanism behind PRD §8.3 (12h idle auto-logout).
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 12
     # Rate limiting is enabled by default; the test session disables it globally
     # and re-enables it only inside the dedicated rate-limit test.
     RATE_LIMIT_ENABLED: bool = True
