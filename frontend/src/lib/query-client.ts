@@ -8,14 +8,15 @@ import {
   type SaleCreateRequest,
   SalesService,
 } from "@/client"
+import { endSession } from "./auth-session"
 
 const handleApiError = (error: Error) => {
-  // Only 401 (unauthenticated — bad/expired token) ends the session. A 403 means
-  // the user is authenticated but lacks the role for that resource (e.g. staff
-  // hitting an admin-only endpoint); logging them out on 403 is wrong.
+  // By the time a 401 reaches here, the request-boundary interceptor has
+  // already attempted a refresh and failed — so the session is genuinely dead.
+  // 403 = authenticated but under-privileged (e.g. staff hitting an admin
+  // route); never log those out.
   if (error instanceof ApiError && error.status === 401) {
-    localStorage.removeItem("access_token")
-    window.location.href = "/login"
+    endSession()
   }
 }
 

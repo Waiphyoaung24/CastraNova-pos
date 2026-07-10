@@ -8,6 +8,7 @@ import { ReloadPrompt } from "./components/ReloadPrompt"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
 import "./index.css"
+import { ensureValidSession, installAuthInterceptor } from "./lib/auth-session"
 import { persister, queryClient } from "./lib/query-client"
 import { routeTree } from "./routeTree.gen"
 
@@ -15,10 +16,15 @@ OpenAPI.BASE = import.meta.env.VITE_API_URL
 OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
 }
+// Refresh-then-retry on 401: an active user's short access token is renewed
+// transparently; only a dead refresh cookie (12h idle) reaches endSession.
+installAuthInterceptor()
 
-// Replay offline-queued mutations as soon as the network returns.
-window.addEventListener("online", () => {
-  queryClient.resumePausedMutations()
+// Replay offline-queued mutations as soon as the network returns — but only
+// once we hold a valid session, so a replay never fires with a dead token
+// (which would error the mutation out of the queue and lose the sale).
+window.addEventListener("online", async () => {
+  if (await ensureValidSession()) queryClient.resumePausedMutations()
 })
 
 const router = createRouter({ routeTree })
