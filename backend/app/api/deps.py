@@ -27,6 +27,19 @@ SessionDep = Annotated[Session, Depends(get_db)]
 TokenDep = Annotated[str, Depends(reusable_oauth2)]
 
 
+# A token the server cannot resolve to a valid, active user is an
+# AUTHENTICATION failure -> 401 (with WWW-Authenticate: Bearer) so clients
+# re-authenticate. 401 is reserved here for exactly that; 403 stays for an
+# authenticated user who lacks a role (see get_admin), and route-level resource
+# lookups keep their own 404s. This includes the stale-token case (valid
+# signature, subject no longer a user): still an auth failure, not a 404.
+_CREDENTIALS_EXC = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Could not validate credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+)
+
+
 def get_current_user(session: SessionDep, token: TokenDep) -> User:
     try:
         payload = jwt.decode(
@@ -34,20 +47,14 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
         )
         token_data = TokenPayload(**payload)
     except (InvalidTokenError, ValidationError):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials",
-        )
+        raise _CREDENTIALS_EXC
     # Only access-typed tokens may act as bearer credentials (rejects refresh
     # tokens and any token missing a type claim).
     if token_data.type != "access":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials",
-        )
+        raise _CREDENTIALS_EXC
     user = session.get(User, token_data.sub)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise _CREDENTIALS_EXC
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return user
