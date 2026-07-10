@@ -8,7 +8,11 @@ import { ReloadPrompt } from "./components/ReloadPrompt"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
 import "./index.css"
-import { persister, queryClient } from "./lib/query-client"
+import {
+  divertStaleMutations,
+  persister,
+  queryClient,
+} from "./lib/query-client"
 import { routeTree } from "./routeTree.gen"
 
 OpenAPI.BASE = import.meta.env.VITE_API_URL
@@ -16,8 +20,10 @@ OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
 }
 
-// Replay offline-queued mutations as soon as the network returns.
+// Replay offline-queued mutations as soon as the network returns — but first
+// hold back anything older than the 7-day cap for admin review.
 window.addEventListener("online", () => {
+  divertStaleMutations()
   queryClient.resumePausedMutations()
 })
 
@@ -35,8 +41,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         client={queryClient}
         persistOptions={{ persister }}
         onSuccess={() => {
-          // Once the persisted cache is restored, resume any mutations that
-          // were paused while offline before the last reload.
+          // Once the persisted cache is restored, hold back stale mutations,
+          // then resume any that were paused while offline before the reload.
+          divertStaleMutations()
           queryClient.resumePausedMutations()
         }}
       >
