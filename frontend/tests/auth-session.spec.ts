@@ -67,4 +67,44 @@ test.describe("Idle auth / sliding refresh", () => {
 
     await expect(page).toHaveURL(/\/login/)
   })
+
+  test("interceptor: a mid-session request that 401s is refreshed and retried (no reload)", async ({
+    page,
+  }) => {
+    const fresh = await LoginService.loginAccessToken({
+      formData: {
+        username: firstSuperuser,
+        password: firstSuperuserPassword,
+      },
+    })
+    await page.route("**/api/v1/login/refresh-token", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: fresh.access_token }),
+      }),
+    )
+
+    // Load with the valid storageState token so the boot check is a no-op.
+    await page.goto("/")
+    // "Stock" lives inside the collapsible "Inventory" group, which starts
+    // closed on "/" — expand it so the nested link is visible and clickable.
+    await page.getByRole("button", { name: "Inventory" }).click()
+    await expect(page.getByRole("link", { name: "Stock" })).toBeVisible()
+
+    // Corrupt the token WITHOUT reloading — now ONLY an in-app request (not the
+    // boot check) can trigger the refresh, isolating the interceptor path.
+    await page.evaluate(() =>
+      localStorage.setItem("access_token", "not-a-valid-jwt"),
+    )
+
+    // Client-side navigation to a data screen fires an authenticated query that
+    // 401s; the interceptor must refresh (mocked) and retry so the page loads.
+    await page.getByRole("link", { name: "Stock" }).click()
+
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("access_token")))
+      .toBe(fresh.access_token)
+    await expect(page).toHaveURL(/\/stock/)
+  })
 })

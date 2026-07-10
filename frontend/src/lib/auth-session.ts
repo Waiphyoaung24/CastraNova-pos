@@ -1,4 +1,4 @@
-import axios, { type AxiosResponse } from "axios"
+import axios, { type AxiosError, type AxiosResponse } from "axios"
 import { ApiError, LoginService, OpenAPI } from "@/client"
 
 const TOKEN_KEY = "access_token"
@@ -96,6 +96,17 @@ export function installAuthInterceptor(): void {
     config._authRetried = true
     const token = localStorage.getItem(TOKEN_KEY)
     config.headers.Authorization = `Bearer ${token}`
-    return axios.request(config)
+    // Mirror the SDK's sendRequest: axios rejects on non-2xx by default, but
+    // the SDK's response pipeline expects a resolved response (it converts
+    // non-2xx to ApiError downstream). Return the error response so a retried
+    // request that legitimately 4xx/5xxs still flows through ApiError, not a
+    // raw AxiosError.
+    try {
+      return await axios.request(config)
+    } catch (err) {
+      const axiosErr = err as AxiosError
+      if (axiosErr.response) return axiosErr.response
+      throw err
+    }
   })
 }
