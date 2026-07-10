@@ -17,6 +17,11 @@ import { persister, queryClient } from "./lib/query-client"
 import { routeTree } from "./routeTree.gen"
 
 OpenAPI.BASE = import.meta.env.VITE_API_URL
+// Send the httponly refresh cookie on cross-origin API calls. The axios client
+// reads WITH_CREDENTIALS (not the fetch-style CREDENTIALS field), and it
+// defaults to false, so without this the /login/refresh-token request carries
+// no cookie and refresh always fails. Backend CORS is allow_credentials=True.
+OpenAPI.WITH_CREDENTIALS = true
 OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
 }
