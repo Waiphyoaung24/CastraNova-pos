@@ -35,8 +35,9 @@ interface SeededUnit {
 
 /**
  * Seed one sellable serialized UNIT end-to-end: product (SERIALIZED) + supplier
- * + a walk-in-named customer (so the Sale screen auto-selects it) + a received
- * piece. Returns the unit's scannable castranova_barcode and the customer name.
+ * + a customer + a received piece. Returns the unit's scannable
+ * castranova_barcode and the customer name (which the Sale screen requires the
+ * operator to select explicitly — nothing is auto-selected).
  */
 async function seedSellableUnit(): Promise<SeededUnit> {
   const r = rand()
@@ -52,8 +53,7 @@ async function seedSellableUnit(): Promise<SeededUnit> {
   const supplier = await SuppliersService.createSupplier({
     requestBody: { name: `Supplier ${r}` },
   })
-  // Name matches the Sale screen's /walk[\s-]?in/i default-select pattern.
-  const customerName = `Walk-in ${r}`
+  const customerName = `Customer ${r}`
   await CustomersService.createCustomer({ requestBody: { name: customerName } })
   const recv: ReceiveSerializedResponse =
     await ReceiptsService.receiveSerialized({
@@ -145,6 +145,33 @@ test.describe("Sale screen", () => {
     await authSeedClient()
   })
 
+  test("sale: no customer is auto-selected and checkout is blocked until one is chosen (FR-007)", async ({
+    page,
+  }) => {
+    const { barcode } = await seedSellableUnit()
+
+    await page.goto("/sale")
+    await expect(
+      page.getByRole("heading", { name: "Sale", exact: true }),
+    ).toBeVisible()
+
+    // PRD FR-007: no walk-in / anonymous sales. The Customer field must start
+    // empty (placeholder showing) — nothing is auto-selected on load.
+    await expect(
+      page.getByRole("combobox", { name: "Customer" }),
+    ).toHaveText("Select a customer")
+
+    // Even with a unit in the cart, checkout stays disabled until a customer
+    // is explicitly chosen.
+    await scanBarcode(page, barcode)
+    await expect(
+      page.getByRole("cell", { name: barcode, exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Complete sale" }),
+    ).toBeDisabled()
+  })
+
   test("sale online: scan a serialized unit and complete the sale → unit is SOLD", async ({
     page,
   }) => {
@@ -155,8 +182,7 @@ test.describe("Sale screen", () => {
       page.getByRole("heading", { name: "Sale", exact: true }),
     ).toBeVisible()
 
-    // The seeded customer is named "Walk-in …" so the screen auto-selects it;
-    // make that explicit (and robust if multiple walk-ins exist in shared DB).
+    // No customer is auto-selected — the operator must choose one explicitly.
     await page.getByRole("combobox", { name: "Customer" }).click()
     await page.getByRole("option", { name: customerName, exact: true }).click()
     await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(

@@ -50,11 +50,6 @@ export const Route = createFileRoute("/_layout/tickets")({
   }),
 })
 
-const WALK_IN_RE = /walk[\s-]?in/i
-
-function findWalkIn(customers: CustomerPublic[]): CustomerPublic | undefined {
-  return customers.find((c) => WALK_IN_RE.test(c.name))
-}
 
 interface CustomerPickerProps {
   customers: CustomerPublic[]
@@ -192,13 +187,6 @@ function Tickets() {
     }
     return map
   }, [products])
-
-  // Default-select the walk-in customer once customers load, if one exists.
-  useEffect(() => {
-    if (!customers || customerId) return
-    const walkIn = findWalkIn(customers)
-    if (walkIn) setCustomerId(walkIn.id)
-  }, [customers, customerId])
 
   const { resolve, result, isSearching, notFound, isError, reset } =
     useScanLookup()
