@@ -87,10 +87,13 @@ test.describe("Idle auth / sliding refresh", () => {
 
     // Load with the valid storageState token so the boot check is a no-op.
     await page.goto("/")
-    // "Stock" lives inside the collapsible "Inventory" group, which starts
-    // closed on "/" — expand it so the nested link is visible and clickable.
-    await page.getByRole("button", { name: "Inventory" }).click()
-    await expect(page.getByRole("link", { name: "Stock" })).toBeVisible()
+    // "Stock" lives inside the collapsible "Inventory" group. Its open state is
+    // restored from storageState and can vary, so expand only if it's closed.
+    const stockLink = page.getByRole("link", { name: "Stock", exact: true })
+    if (!(await stockLink.isVisible().catch(() => false))) {
+      await page.getByRole("button", { name: "Inventory" }).click()
+    }
+    await expect(stockLink).toBeVisible()
 
     // Corrupt the token WITHOUT reloading — now ONLY an in-app request (not the
     // boot check) can trigger the refresh, isolating the interceptor path.
@@ -100,7 +103,7 @@ test.describe("Idle auth / sliding refresh", () => {
 
     // Client-side navigation to a data screen fires an authenticated query that
     // 401s; the interceptor must refresh (mocked) and retry so the page loads.
-    await page.getByRole("link", { name: "Stock" }).click()
+    await stockLink.click()
 
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("access_token")))
