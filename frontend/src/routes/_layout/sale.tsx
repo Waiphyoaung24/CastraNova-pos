@@ -46,13 +46,6 @@ export const Route = createFileRoute("/_layout/sale")({
   }),
 })
 
-const WALK_IN_RE = /walk[\s-]?in/i
-
-/** A walk-in customer is the default counter sale when no specific customer is chosen. */
-function findWalkIn(customers: CustomerPublic[]): CustomerPublic | undefined {
-  return customers.find((c) => WALK_IN_RE.test(c.name))
-}
-
 interface CheckoutPanelProps {
   customers: CustomerPublic[]
   customerId: string
@@ -148,13 +141,6 @@ function Sale() {
       new Map((products ?? []).map((p) => [p.id, Number(p.retail_price_thb)])),
     [products],
   )
-
-  // Default-select the walk-in customer once customers load, if one exists.
-  useEffect(() => {
-    if (!customers || customerId) return
-    const walkIn = findWalkIn(customers)
-    if (walkIn) setCustomerId(walkIn.id)
-  }, [customers, customerId])
 
   const { resolve, result, isSearching, notFound, isError, reset } =
     useScanLookup()
