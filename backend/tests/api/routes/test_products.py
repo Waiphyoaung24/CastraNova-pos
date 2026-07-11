@@ -228,3 +228,52 @@ def test_staff_can_fetch_sku_label(
         f"{PREFIX}/products/{p['id']}/label.pdf", headers=staff_token_headers
     )
     assert r.status_code == 200
+
+
+def test_read_skus_returns_all_ascending(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    sku_z = f"ZZZ-{uuid.uuid4().hex[:8]}"
+    sku_a = f"AAA-{uuid.uuid4().hex[:8]}"
+    for sku in (sku_z, sku_a):
+        r = client.post(
+            f"{PREFIX}/products/",
+            headers=superuser_token_headers,
+            json=_product_body(sku),
+        )
+        assert r.status_code == 200, r.text
+
+    r = client.get(f"{PREFIX}/products/skus", headers=superuser_token_headers)
+    assert r.status_code == 200
+    skus = r.json()
+    assert sku_a in skus
+    assert sku_z in skus
+    assert skus.index(sku_a) < skus.index(sku_z)
+    assert skus == sorted(skus)
+
+
+def test_read_skus_includes_inactive_product(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    sku = f"INACT-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        f"{PREFIX}/products/", headers=superuser_token_headers, json=_product_body(sku)
+    )
+    assert created.status_code == 200, created.text
+    pid = created.json()["id"]
+    upd = client.patch(
+        f"{PREFIX}/products/{pid}",
+        headers=superuser_token_headers,
+        json={"is_active": False},
+    )
+    assert upd.status_code == 200
+    assert upd.json()["is_active"] is False
+
+    r = client.get(f"{PREFIX}/products/skus", headers=superuser_token_headers)
+    assert r.status_code == 200
+    assert sku in r.json()
+
+
+def test_read_skus_requires_auth(client: TestClient) -> None:
+    r = client.get(f"{PREFIX}/products/skus")
+    assert r.status_code == 401

@@ -420,6 +420,13 @@ def list_products(
     )
 
 
+def list_skus(*, session: Session) -> list[str]:
+    """Every product SKU, ascending. Unpaginated single-column projection for the
+    audit SKU autocomplete (FR-019); includes inactive products, whose historical
+    movements still appear in the ledger."""
+    return list(session.exec(select(col(Product.sku)).order_by(col(Product.sku))).all())
+
+
 def latest_purchase_costs(*, session: Session) -> dict[uuid.UUID, Decimal]:
     """Latest purchase cost per product — the purchase_cost_thb of the most
     recent receipt: newest PartBatch (QUANTITY) or newest Unit (SERIALIZED) by
