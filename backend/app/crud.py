@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -3027,6 +3027,143 @@ def _channel_rows(
     ]
 
 
+def _merge(
+    acc: dict[uuid.UUID, list[Decimal]], key: uuid.UUID, rev: Decimal, cogs: Decimal
+) -> None:
+    slot = acc.setdefault(key, [Decimal("0"), Decimal("0")])
+    slot[0] += rev
+    slot[1] += cogs
+
+
+def _product_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per product across the requested channel(s). A SALE line
+    for a SERIALIZED product carries ``unit_id`` not ``product_id``, so the
+    product is recovered via ``Unit``."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.SALE):
+        # SALE product = COALESCE(SaleLine.product_id, Unit.product_id).
+        pid = func.coalesce(SaleLine.product_id, Unit.product_id)
+        for product_id, rev, cogs in session.exec(
+            select(
+                pid,
+                func.coalesce(
+                    func.sum(SaleLine.quantity * SaleLine.unit_price_thb), Decimal("0")
+                ),
+                func.coalesce(
+                    func.sum(SaleLine.quantity * SaleLine.unit_cost_thb), Decimal("0")
+                ),
+            )
+            .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
+            .join(Unit, col(SaleLine.unit_id) == col(Unit.id), isouter=True)
+            .where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
+            .group_by(pid)
+        ).all():
+            _merge(acc, product_id, rev, cogs)
+
+    if channel in (None, Channel.MAINTENANCE):
+        # revenue by ServiceTicketPart.product_id
+        for product_id, rev in session.exec(
+            select(
+                ServiceTicketPart.product_id,
+                func.coalesce(
+                    func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                    Decimal("0"),
+                ),
+            )
+            .join(
+                ServiceTicket,
+                col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
+            .group_by(col(ServiceTicketPart.product_id))
+        ).all():
+            _merge(acc, product_id, rev, Decimal("0"))
+        # COGS by PartMovement.product_id (MAINTENANCE_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(
+                ServiceTicket,
+                col(PartMovement.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(
+                PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+                col(ServiceTicket.closed_at) >= start,
+                col(ServiceTicket.closed_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+
+    if channel in (None, Channel.PROJECT):
+        # part COGS by PartMovement.product_id (PROJECT_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+        # unit COGS by Unit.product_id (PROJECT_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                Unit.product_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(Unit.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+
+    labels = _product_labels(session, list(acc))
+    return _sorted_rows(
+        (str(pid), labels[pid], _q(rev), _q(cogs)) for pid, (rev, cogs) in acc.items()
+    )
+
+
+def _product_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        p.id: f"{p.sku} — {p.model_name}"
+        for p in session.exec(select(Product).where(col(Product.id).in_(ids))).all()
+    }
+
+
+def _sorted_rows(
+    triples: Iterable[tuple[str, str, Decimal, Decimal]],
+) -> list[MarginBreakdownRow]:
+    rows = [
+        MarginBreakdownRow(
+            key=key, label=label, revenue_thb=rev, cogs_thb=cogs, margin_thb=rev - cogs
+        )
+        for key, label, rev, cogs in triples
+    ]
+    rows.sort(key=lambda r: (-r.revenue_thb, -r.margin_thb, r.label))
+    return rows
+
+
 def margin_report(
     *,
     session: Session,
@@ -3042,6 +3179,8 @@ def margin_report(
     start, end = _month_window(year, month)
     if group_by == MarginDimension.CHANNEL:
         rows = _channel_rows(session, start, end, channel)
+    elif group_by == MarginDimension.PRODUCT:
+        rows = _product_rows(session, start, end, channel)
     else:  # dimensions added in later tasks
         raise NotImplementedError(group_by)
     total_rev = sum((r.revenue_thb for r in rows), Decimal("0.00"))
