@@ -33,12 +33,17 @@ def list_audit(
     unit_id: Annotated[
         uuid.UUID | None, Query(description="Restrict to UNIT entries for a unit")
     ] = None,
+    sku: Annotated[
+        str | None,
+        Query(description="Restrict to a product's SKU (spans UNIT + PART ledgers)"),
+    ] = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[AuditEntryPublic]:
     """Chronological (occurred_at DESC) audit trail over the append-only
     unit_movement + part_movement ledgers, admin-only (FR-019). ``product_id``
-    restricts to PART entries; ``unit_id`` restricts to UNIT entries."""
+    restricts to PART entries; ``unit_id`` restricts to UNIT entries; ``sku``
+    scopes to a product across whichever ledger it uses."""
     return crud.list_audit(
         session=session,
         event_type=event_type,
@@ -47,6 +52,7 @@ def list_audit(
         actor_user_id=actor_user_id,
         product_id=product_id,
         unit_id=unit_id,
+        sku=sku,
         skip=skip,
         limit=limit,
     )

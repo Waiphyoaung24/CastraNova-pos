@@ -3272,6 +3272,7 @@ def list_audit(
     actor_user_id: uuid.UUID | None = None,
     product_id: uuid.UUID | None = None,
     unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[AuditEntryPublic]:
@@ -3280,14 +3281,25 @@ def list_audit(
 
     Filter semantics: ``product_id`` only ever matches PART rows and ``unit_id``
     only ever matches UNIT rows, so supplying one restricts the result to that
-    ledger (supplying both yields nothing, since no row is in both). The shared
-    filters (event_type, [from_date, to_date), actor_user_id) apply to both.
+    ledger (supplying both yields nothing, since no row is in both). ``sku``
+    resolves to a product and spans whichever ledger it uses (a product is one
+    tracking mode, so exactly one ledger yields rows); an unknown SKU returns no
+    rows. The shared filters (event_type, [from_date, to_date), actor_user_id)
+    apply to both.
 
     Implementation: each ledger is queried filtered + ordered DESC and bounded
     to ``skip + limit`` rows, the two bounded sets are merge-sorted in Python,
     then sliced — never an unbounded fetch.
     """
     bound = skip + limit
+
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return []  # unknown SKU matches nothing
 
     audit_unit = product_id is None
     audit_part = unit_id is None
@@ -3306,6 +3318,14 @@ def list_audit(
             u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
         if unit_id is not None:
             u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
         u_stmt = u_stmt.order_by(
             col(UnitMovement.occurred_at).desc(), col(UnitMovement.id).desc()
         ).limit(bound)
@@ -3340,6 +3360,10 @@ def list_audit(
             p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
         if product_id is not None:
             p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
         p_stmt = p_stmt.order_by(
             col(PartMovement.occurred_at).desc(), col(PartMovement.id).desc()
         ).limit(bound)
