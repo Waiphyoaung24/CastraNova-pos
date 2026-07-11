@@ -15,6 +15,7 @@ import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -23,7 +24,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -60,6 +60,22 @@ const EVENT_TYPES: MovementType[] = [
   "PROJECT_OUT",
   "ADJUSTED_OUT",
 ]
+
+// Shared fixed-layout column widths so the header table and the scrolling body
+// table stay aligned (sum to 100%; long text columns absorb the slack + truncate).
+function AuditColGroup() {
+  return (
+    <colgroup>
+      <col className="w-[20%]" /> {/* When — full timestamp */}
+      <col className="w-[13%]" /> {/* By */}
+      <col className="w-[19%]" /> {/* Event */}
+      <col className="w-[15%]" /> {/* Model name */}
+      <col className="w-[14%]" /> {/* Source */}
+      <col className="w-[6%]" /> {/* Qty */}
+      <col className="w-[13%]" /> {/* Notes */}
+    </colgroup>
+  )
+}
 
 function Audit() {
   const isMobile = useIsMobile()
@@ -322,53 +338,65 @@ function Audit() {
           })}
         </div>
       ) : (
-        <Table containerClassName="max-h-[60vh] overflow-y-auto">
-          <TableHeader className="bg-muted sticky top-0 z-10">
-            <TableRow>
-              <TableHead>When</TableHead>
-              <TableHead>By</TableHead>
-              <TableHead>Event</TableHead>
-              <TableHead>Model name</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
-              <TableHead>Notes</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((e) => {
-              const source = movementSource(e)
-              return (
-                <TableRow
-                  key={e.id}
-                  {...rowProps(e)}
-                  className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
-                >
-                  <TableCell className="text-muted-foreground whitespace-nowrap">
-                    {new Date(e.occurred_at).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    {actorName(e.actor_user_id)}
-                  </TableCell>
-                  <TableCell>{e.event_type}</TableCell>
-                  <TableCell className="max-w-xs truncate">
-                    {e.product_model_name ?? itemRef(e)}
-                  </TableCell>
-                  <TableCell>
-                    {source ? (
-                      <Badge variant="outline">{source.label}</Badge>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="num text-right">{e.quantity}</TableCell>
-                  <TableCell className="text-muted-foreground max-w-xs truncate">
-                    {e.notes ?? "—"}
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+        <div className="overflow-hidden rounded-lg border">
+          {/* Header lives in its own non-scrolling table so the body's vertical
+              scrollbar runs beside the rows only, not the header. */}
+          <table className="w-full table-fixed caption-bottom text-sm">
+            <AuditColGroup />
+            <TableHeader className="bg-muted">
+              <TableRow className="hover:bg-transparent">
+                <TableHead>When</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>Event</TableHead>
+                <TableHead>Model name</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead>Notes</TableHead>
+              </TableRow>
+            </TableHeader>
+          </table>
+          <ScrollArea type="auto" viewportClassName="max-h-[60vh]">
+            <table className="w-full table-fixed caption-bottom text-sm">
+              <AuditColGroup />
+              <TableBody>
+                {rows.map((e) => {
+                  const source = movementSource(e)
+                  return (
+                    <TableRow
+                      key={e.id}
+                      {...rowProps(e)}
+                      className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
+                    >
+                      <TableCell className="text-muted-foreground truncate">
+                        {new Date(e.occurred_at).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="truncate font-medium">
+                        {actorName(e.actor_user_id)}
+                      </TableCell>
+                      <TableCell className="truncate">{e.event_type}</TableCell>
+                      <TableCell className="truncate">
+                        {e.product_model_name ?? itemRef(e)}
+                      </TableCell>
+                      <TableCell className="overflow-hidden">
+                        {source ? (
+                          <Badge variant="outline">{source.label}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="num text-right">
+                        {e.quantity}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground truncate">
+                        {e.notes ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </table>
+          </ScrollArea>
+        </div>
       )}
 
       <AuditDetailSheet entry={selected} onClose={() => setSelected(null)} />
