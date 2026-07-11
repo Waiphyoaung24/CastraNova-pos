@@ -862,10 +862,6 @@ export type AuditListAuditData = {
      * Restrict to a single acting user
      */
     actorUserId?: (string | null);
-    /**
-     * Restrict to PART entries that created or drew from a batch
-     */
-    batchNo?: (string | null);
     eventType?: (MovementType | null);
     /**
      * ISO-8601 lower bound, inclusive

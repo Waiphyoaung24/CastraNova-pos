@@ -69,7 +69,7 @@ function AuditColGroup() {
       <col className="w-[17%]" /> {/* When */}
       <col className="w-[17%]" /> {/* By */}
       <col className="w-[16%]" /> {/* Event */}
-      <col className="w-[15%]" /> {/* Model name */}
+      <col className="w-[15%]" /> {/* Model */}
       <col className="w-[12%]" /> {/* Source */}
       <col className="w-[5%]" /> {/* Qty */}
       <col className="w-[18%]" /> {/* Notes */}
@@ -84,19 +84,14 @@ function Audit() {
   const toId = useId()
   const userSelectId = useId()
   const skuSelectId = useId()
-  const batchId = useId()
   const [filter, setFilter] = useState<AuditFilter>({
     eventType: "",
     fromDate: "",
     toDate: "",
     actorUserId: "",
     sku: "",
-    batchNo: "",
   })
   const [selected, setSelected] = useState<AuditEntryPublic | null>(null)
-  const [batchInput, setBatchInput] = useState("")
-  const commitBatch = () =>
-    setFilter((f) => ({ ...f, batchNo: batchInput.trim() }))
 
   const { data, isPending, isError } = useQuery({
     queryKey: ["audit", filter],
@@ -245,23 +240,6 @@ function Audit() {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={batchId}>Batch #</Label>
-          <Input
-            id={batchId}
-            value={batchInput}
-            onChange={(e) => setBatchInput(e.target.value)}
-            onBlur={commitBatch}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                commitBatch()
-              }
-            }}
-            placeholder="e.g. 20260611-ABC-001"
-            className="w-full sm:w-52"
-          />
-        </div>
       </div>
 
       {rows.length > 0 ? (
@@ -315,9 +293,16 @@ function Audit() {
                   <dd className="text-foreground truncate">
                     {actorName(e.actor_user_id)}
                   </dd>
-                  <dt>Model name</dt>
+                  <dt>Model</dt>
                   <dd className="text-foreground truncate">
-                    {e.product_model_name ?? itemRef(e)}
+                    <div className="truncate">
+                      {e.product_model_name ?? itemRef(e)}
+                    </div>
+                    {e.product_sku ? (
+                      <div className="text-muted-foreground truncate text-xs">
+                        {e.product_sku}
+                      </div>
+                    ) : null}
                   </dd>
                   <dt>Source</dt>
                   <dd>
@@ -348,7 +333,7 @@ function Audit() {
                 <TableHead>When</TableHead>
                 <TableHead>By</TableHead>
                 <TableHead>Event</TableHead>
-                <TableHead>Model name</TableHead>
+                <TableHead>Model</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead>Notes</TableHead>
@@ -375,7 +360,14 @@ function Audit() {
                       </TableCell>
                       <TableCell className="truncate">{e.event_type}</TableCell>
                       <TableCell className="truncate">
-                        {e.product_model_name ?? itemRef(e)}
+                        <div className="truncate">
+                          {e.product_model_name ?? itemRef(e)}
+                        </div>
+                        {e.product_sku ? (
+                          <div className="text-muted-foreground truncate text-xs">
+                            {e.product_sku}
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell className="overflow-hidden">
                         {source ? (

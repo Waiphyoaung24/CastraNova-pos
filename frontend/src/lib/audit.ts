@@ -18,8 +18,6 @@ export interface AuditFilter {
   actorUserId: string
   /** Product SKU to scope to (spans both ledgers), or "" for all. */
   sku: string
-  /** Batch number to scope to (PART only), or "" for all. */
-  batchNo: string
 }
 
 export function buildAuditQuery(f: AuditFilter): AuditListAuditData {
@@ -29,7 +27,6 @@ export function buildAuditQuery(f: AuditFilter): AuditListAuditData {
   if (f.toDate) q.toDate = f.toDate
   if (f.actorUserId) q.actorUserId = f.actorUserId
   if (f.sku) q.sku = f.sku
-  if (f.batchNo) q.batchNo = f.batchNo
   return q
 }
 

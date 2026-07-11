@@ -11,8 +11,7 @@ export class AuditService {
      * Chronological (occurred_at DESC) audit trail over the append-only
      * unit_movement + part_movement ledgers, admin-only (FR-019). ``product_id``
      * restricts to PART entries; ``unit_id`` restricts to UNIT entries; ``sku``
-     * scopes to a product across whichever ledger it uses; ``batch_no`` restricts
-     * to PART entries that created or consumed that batch.
+     * scopes to a product across whichever ledger it uses.
      * @param data The data for the request.
      * @param data.eventType
      * @param data.fromDate ISO-8601 lower bound, inclusive
@@ -21,7 +20,6 @@ export class AuditService {
      * @param data.productId Restrict to PART entries for a product
      * @param data.unitId Restrict to UNIT entries for a unit
      * @param data.sku Restrict to a product's SKU (spans UNIT + PART ledgers)
-     * @param data.batchNo Restrict to PART entries that created or drew from a batch
      * @param data.skip
      * @param data.limit
      * @returns AuditEntryPublic Successful Response
@@ -39,7 +37,6 @@ export class AuditService {
                 product_id: data.productId,
                 unit_id: data.unitId,
                 sku: data.sku,
-                batch_no: data.batchNo,
                 skip: data.skip,
                 limit: data.limit
             },

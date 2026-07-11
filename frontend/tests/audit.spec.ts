@@ -16,7 +16,6 @@ test("buildAuditQuery drops blank filters", () => {
       toDate: "",
       actorUserId: "",
       sku: "",
-      batchNo: "",
     }),
   ).toEqual({})
 })
@@ -29,7 +28,6 @@ test("buildAuditQuery includes set filters", () => {
       toDate: "2026-07-01",
       actorUserId: "u-1",
       sku: "ABC-123",
-      batchNo: "20260601-ABC-001",
     }),
   ).toEqual({
     eventType: "SOLD",
@@ -37,7 +35,6 @@ test("buildAuditQuery includes set filters", () => {
     toDate: "2026-07-01",
     actorUserId: "u-1",
     sku: "ABC-123",
-    batchNo: "20260601-ABC-001",
   })
 })
 
