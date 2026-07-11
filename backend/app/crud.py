@@ -3257,6 +3257,87 @@ def _customer_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, 
     }
 
 
+def _project_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        p.id: f"{p.code} — {p.name}"
+        for p in session.exec(select(Project).where(col(Project.id).in_(ids))).all()
+    }
+
+
+def _project_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per project (cost-only, mirroring the PROJECT channel).
+    Only PROJECT_OUT movements carry a project, so SALE + MAINTENANCE money
+    has no project home; when ``channel`` is unscoped, that remainder is
+    rolled into a single reconciling ``(not project work)`` bucket so totals
+    still match the channel view."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.PROJECT):
+        for proj_id, cogs in session.exec(
+            select(
+                ProjectPull.project_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.project_id))
+        ).all():
+            _merge(acc, proj_id, Decimal("0"), cogs)
+        for proj_id, cogs in session.exec(
+            select(
+                ProjectPull.project_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.project_id))
+        ).all():
+            _merge(acc, proj_id, Decimal("0"), cogs)
+
+    labels = _project_labels(session, list(acc))
+    rows = list(
+        _sorted_rows(
+            (str(pid), labels[pid], _q(rev), _q(cogs)) for pid, (rev, cogs) in acc.items()
+        )
+    )
+
+    if channel is None:
+        # SALE + MAINTENANCE have no project -> single reconciling bucket.
+        remainder = [
+            r
+            for r in _channel_rows(session, start, end, None)
+            if r.key in (Channel.SALE.value, Channel.MAINTENANCE.value)
+        ]
+        rev = sum((r.revenue_thb for r in remainder), Decimal("0.00"))
+        cogs = sum((r.cogs_thb for r in remainder), Decimal("0.00"))
+        if rev or cogs:
+            rows.append(
+                MarginBreakdownRow(
+                    key="",
+                    label="(not project work)",
+                    revenue_thb=_q(rev),
+                    cogs_thb=_q(cogs),
+                    margin_thb=_q(rev - cogs),
+                )
+            )
+    return rows
+
+
 def _sorted_rows(
     triples: Iterable[tuple[str, str, Decimal, Decimal]],
 ) -> list[MarginBreakdownRow]:
@@ -3289,8 +3370,8 @@ def margin_report(
         rows = _product_rows(session, start, end, channel)
     elif group_by == MarginDimension.CUSTOMER:
         rows = _customer_rows(session, start, end, channel)
-    else:  # dimensions added in later tasks
-        raise NotImplementedError(group_by)
+    else:
+        rows = _project_rows(session, start, end, channel)
     total_rev = sum((r.revenue_thb for r in rows), Decimal("0.00"))
     total_cogs = sum((r.cogs_thb for r in rows), Decimal("0.00"))
     return MarginBreakdownReport(

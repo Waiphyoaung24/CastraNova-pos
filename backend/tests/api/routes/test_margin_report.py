@@ -187,6 +187,40 @@ def test_customer_grouping_reconciles_and_labels(db: Session, seed: dict[str, An
     assert by_customer.rows[0].label == "Report Cust"
 
 
+def test_project_grouping_all_channels_has_bucket(db: Session, seed: dict[str, Any]) -> None:  # noqa: F811
+    # Dedicated month (2026-10): 2026-07/08/09 are used by test_reports.py's
+    # adjacent-month and pull tests, so this doesn't float their assertions.
+    when = datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc)
+    _seed_full_month(db, seed, when=when)
+    by_project = crud.margin_report(
+        session=db, year=2026, month=10, group_by=MarginDimension.PROJECT
+    )
+    by_channel = crud.margin_report(
+        session=db, year=2026, month=10, group_by=MarginDimension.CHANNEL
+    )
+    assert _totals(by_project) == _totals(by_channel)
+    labels = {r.label for r in by_project.rows}
+    assert "(not project work)" in labels  # SALE + MAINTENANCE remainder
+    bucket = next(r for r in by_project.rows if r.key == "")
+    # The bucket equals SALE + MAINTENANCE margin.
+    sale = next(r for r in by_channel.rows if r.key == Channel.SALE.value)
+    maint = next(r for r in by_channel.rows if r.key == Channel.MAINTENANCE.value)
+    assert bucket.margin_thb == sale.margin_thb + maint.margin_thb
+
+
+def test_project_grouping_scoped_to_project_has_no_bucket(db: Session, seed: dict[str, Any]) -> None:  # noqa: F811
+    # Dedicated month (2026-11): distinct from the sibling test above (2026-10)
+    # so the two seedings in this session-scoped db don't collide.
+    when = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+    _seed_full_month(db, seed, when=when)
+    scoped = crud.margin_report(
+        session=db, year=2026, month=11,
+        group_by=MarginDimension.PROJECT, channel=Channel.PROJECT,
+    )
+    assert all(r.key != "" for r in scoped.rows)
+    assert len(scoped.rows) == 1  # the single seeded project
+
+
 def test_product_grouping_scoped_to_sale_channel(db: Session, seed: dict[str, Any]) -> None:  # noqa: F811
     # Dedicated month (2026-04) so the session-scoped db's other SALE activity
     # (test_product_grouping_reconciles_to_channel pins to March) doesn't float
