@@ -66,13 +66,13 @@ const EVENT_TYPES: MovementType[] = [
 function AuditColGroup() {
   return (
     <colgroup>
-      <col className="w-[20%]" /> {/* When — full timestamp */}
-      <col className="w-[13%]" /> {/* By */}
-      <col className="w-[19%]" /> {/* Event */}
+      <col className="w-[17%]" /> {/* When */}
+      <col className="w-[17%]" /> {/* By */}
+      <col className="w-[16%]" /> {/* Event */}
       <col className="w-[15%]" /> {/* Model name */}
-      <col className="w-[14%]" /> {/* Source */}
-      <col className="w-[6%]" /> {/* Qty */}
-      <col className="w-[13%]" /> {/* Notes */}
+      <col className="w-[12%]" /> {/* Source */}
+      <col className="w-[5%]" /> {/* Qty */}
+      <col className="w-[18%]" /> {/* Notes */}
     </colgroup>
   )
 }
