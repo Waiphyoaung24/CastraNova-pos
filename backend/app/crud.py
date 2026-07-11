@@ -1128,8 +1128,9 @@ def override_exceptions_report(
     *, session: Session, year: int, month: int
 ) -> OverrideExceptionsReport:
     """Monthly list of pricing overrides requested in [month_start, next) UTC,
-    with per-state counts (FR-010, spec §8). Grouped by created_at (request
-    date); each row carries the product SKU for readability."""
+    with per-state counts (FR-010, spec §8). Sorted by deviation size (largest
+    first); ties break by created_at ascending, then id for a total order. Each
+    row carries the product SKU for readability."""
     start = datetime(year, month, 1, tzinfo=timezone.utc)
     if month == 12:
         end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
@@ -1143,7 +1144,11 @@ def override_exceptions_report(
             col(PricingOverrideRequest.created_at) >= start,
             col(PricingOverrideRequest.created_at) < end,
         )
-        .order_by(col(PricingOverrideRequest.created_at))
+        .order_by(
+            col(PricingOverrideRequest.deviation_pct).desc(),
+            col(PricingOverrideRequest.created_at).asc(),
+            col(PricingOverrideRequest.id),
+        )
     ).all()
 
     counts: dict[OverrideState, int] = dict.fromkeys(OverrideState, 0)
