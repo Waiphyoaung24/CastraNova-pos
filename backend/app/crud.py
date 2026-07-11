@@ -3042,16 +3042,14 @@ def _product_rows(
     acc: dict[uuid.UUID, list[Decimal]] = {}
 
     if channel in (None, Channel.SALE):
-        # SALE product = COALESCE(SaleLine.product_id, Unit.product_id).
+        # SALE revenue: no rounding drift, product = COALESCE(SaleLine.product_id,
+        # Unit.product_id).
         pid = func.coalesce(SaleLine.product_id, Unit.product_id)
-        for product_id, rev, cogs in session.exec(
+        for product_id, rev in session.exec(
             select(
                 pid,
                 func.coalesce(
                     func.sum(SaleLine.quantity * SaleLine.unit_price_thb), Decimal("0")
-                ),
-                func.coalesce(
-                    func.sum(SaleLine.quantity * SaleLine.unit_cost_thb), Decimal("0")
                 ),
             )
             .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
@@ -3059,7 +3057,41 @@ def _product_rows(
             .where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
             .group_by(pid)
         ).all():
-            _merge(acc, product_id, rev, cogs)
+            _merge(acc, product_id, rev, Decimal("0"))
+        # SALE COGS: exact sources (mirrors MAINTENANCE/PROJECT), not the rounded
+        # SaleLine.unit_cost_thb snapshot -- see create_sale's per-unit-average
+        # rounding comment (crud.py ~2244-2246).
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(Sale, col(PartMovement.sale_id) == col(Sale.id))
+            .where(
+                PartMovement.event_type == MovementType.SOLD,
+                col(Sale.sold_at) >= start,
+                col(Sale.sold_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+        for product_id, cogs in session.exec(
+            select(
+                Unit.product_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(Sale, col(UnitMovement.sale_id) == col(Sale.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.SOLD,
+                col(Sale.sold_at) >= start,
+                col(Sale.sold_at) < end,
+            )
+            .group_by(col(Unit.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
 
     if channel in (None, Channel.MAINTENANCE):
         # revenue by ServiceTicketPart.product_id
@@ -3158,17 +3190,15 @@ def _customer_rows(
     acc: dict[uuid.UUID, list[Decimal]] = {}
 
     if channel in (None, Channel.SALE):
+        # Sale-level authoritative totals: both revenue and COGS are exact
+        # here (no per-line rounding drift), unlike the PRODUCT grouping's
+        # SaleLine-based reconstruction.
         for cust_id, rev, cogs in session.exec(
             select(
                 Sale.customer_id,
-                func.coalesce(
-                    func.sum(SaleLine.quantity * SaleLine.unit_price_thb), Decimal("0")
-                ),
-                func.coalesce(
-                    func.sum(SaleLine.quantity * SaleLine.unit_cost_thb), Decimal("0")
-                ),
+                func.coalesce(func.sum(Sale.total_thb), Decimal("0")),
+                func.coalesce(func.sum(Sale.total_cogs_thb), Decimal("0")),
             )
-            .join(SaleLine, col(SaleLine.sale_id) == col(Sale.id))
             .where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
             .group_by(col(Sale.customer_id))
         ).all():
@@ -3391,7 +3421,7 @@ def get_customer_dashboard(
 ) -> dict[str, Any]:
     """Admin-superset dashboard for one customer: transactions, projects, and
     lifetime SALE / MAINTENANCE revenue·COGS·margin + PROJECT COGS. Mirrors the
-    join shapes of channel_margin_report() but scoped by customer (no date
+    join shapes of margin_report() but scoped by customer (no date
     window). The route picks the staff or admin schema by role; redacted fields
     are physically absent from the staff JSON."""
     customer = session.get(Customer, customer_id)

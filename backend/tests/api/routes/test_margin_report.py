@@ -6,7 +6,13 @@ from typing import Any
 from sqlmodel import Session
 
 from app import crud
-from app.models import Channel, MarginBreakdownReport, MarginDimension
+from app.models import (
+    Channel,
+    MarginBreakdownReport,
+    MarginDimension,
+    SaleLineInput,
+    SaleLineKind,
+)
 from tests.api.routes.test_reports import (  # noqa: F401  (seed is a pytest fixture)
     TARGET,
     _pin_pull,
@@ -234,6 +240,53 @@ def test_product_grouping_scoped_to_sale_channel(db: Session, seed: dict[str, An
     assert _totals(sale_only) == _totals(by_channel)
     # SALE has exactly two products: the serialized unit + the quantity part.
     assert len(sale_only.rows) == 2
+
+
+def test_sale_cogs_reconciles_for_non_cent_divisible_part_line(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """Regression: a PART sale line whose FIFO cost doesn't divide evenly by
+    quantity snapshots a ROUNDED SaleLine.unit_cost_thb, while Sale.total_cogs_thb
+    stays exact. PRODUCT/CUSTOMER groupings must derive SALE COGS from the exact
+    sources (CostLine/Unit), not by reconstructing quantity * unit_cost_thb, or
+    they diverge from the CHANNEL grouping by a cent.
+
+    Batches [(1, "10.00"), (2, "10.01")] -> FIFO cost for qty=3 is exactly
+    10.00 + 20.02 = 30.02. 30.02 / 3 = 10.006666... rounds to 10.01, so the
+    (buggy) reconstruction 3 * 10.01 = 30.03 != 30.02.
+    """
+    # Dedicated month (2027-03): distinct from every other month pinned in
+    # this session-scoped db (2026-03/04/05/06/10/11/12, 2027-01/02).
+    when = datetime(2027, 3, 15, 12, 0, tzinfo=timezone.utc)
+    admin, customer = seed["admin"], seed["customer"]
+    part = seed["make_part"]("100.00", "20.00", [(1, "10.00"), (2, "10.01")])
+    sale = crud.create_sale(
+        session=db, customer_id=customer.id, created_by_user_id=admin.id,
+        idempotency_key=uuid.uuid4(),
+        lines=[
+            SaleLineInput(line_kind=SaleLineKind.PART, sku=part.sku, quantity=3),
+        ],
+    )
+    _pin_sale(db, sale.id, when)
+
+    refreshed = db.get(type(sale), sale.id)
+    assert refreshed is not None
+    assert refreshed.total_cogs_thb == Decimal("30.02")
+
+    by_channel = crud.margin_report(
+        session=db, year=2027, month=3,
+        group_by=MarginDimension.CHANNEL, channel=Channel.SALE,
+    )
+    by_product = crud.margin_report(
+        session=db, year=2027, month=3,
+        group_by=MarginDimension.PRODUCT, channel=Channel.SALE,
+    )
+    by_customer = crud.margin_report(
+        session=db, year=2027, month=3,
+        group_by=MarginDimension.CUSTOMER, channel=Channel.SALE,
+    )
+    assert _totals(by_product) == _totals(by_channel)
+    assert _totals(by_customer) == _totals(by_channel)
 
 
 def test_per_channel_amounts_reconcile_against_channel_filtered_products(
