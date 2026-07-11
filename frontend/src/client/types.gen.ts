@@ -1023,6 +1023,8 @@ export type ProductsCreateProductResponse = (ProductPublic);
 
 export type ProductsReadPurchaseCostsResponse = (Array<ProductPurchaseCost>);
 
+export type ProductsReadSkusResponse = (Array<(string)>);
+
 export type ProductsReadSkuLabelData = {
     productId: string;
     qty?: number;

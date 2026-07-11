@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { ChevronsUpDown } from "lucide-react"
 import { type KeyboardEvent, useId, useMemo, useState } from "react"
 
 import {
@@ -13,8 +14,22 @@ import { AuditDetailSheet } from "@/components/audit/AuditDetailSheet"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -104,9 +119,9 @@ function Audit() {
     queryFn: () => UsersService.readUsers(),
     staleTime: 5 * 60 * 1000,
   })
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
+  const { data: skus } = useQuery({
+    queryKey: ["products", "skus"],
+    queryFn: () => ProductsService.readSkus(),
     staleTime: 5 * 60 * 1000,
   })
 
@@ -115,10 +130,6 @@ function Audit() {
     () => new Map(userList.map((u) => [u.id, u.full_name || u.email])),
     [userList],
   )
-  const skuById = useMemo(
-    () => new Map((products ?? []).map((p) => [p.id, p.sku])),
-    [products],
-  )
 
   const rows = data ?? []
   const summary = useMemo(() => summarizeAudit(rows), [rows])
@@ -126,7 +137,7 @@ function Audit() {
 
   const actorName = (id: string) => userNames.get(id) ?? "Unknown user"
   const itemRef = (e: AuditEntryPublic) => {
-    if (e.product_id) return skuById.get(e.product_id) ?? "Part"
+    if (e.product_id) return e.product_sku ?? "Part"
     if (e.unit_id) return `Unit ·${e.unit_id.slice(0, 8)}`
     return "—"
   }
@@ -221,24 +232,12 @@ function Audit() {
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={skuSelectId}>SKU</Label>
-          <Select
-            value={filter.sku || ALL}
-            onValueChange={(v) =>
-              setFilter((f) => ({ ...f, sku: v === ALL ? "" : v }))
-            }
-          >
-            <SelectTrigger id={skuSelectId} className="w-full sm:w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All SKUs</SelectItem>
-              {(products ?? []).map((p) => (
-                <SelectItem key={p.id} value={p.sku}>
-                  {p.sku}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SkuCombobox
+            skuSelectId={skuSelectId}
+            skus={skus ?? []}
+            value={filter.sku}
+            onChange={(v) => setFilter((f) => ({ ...f, sku: v }))}
+          />
         </div>
       </div>
 
@@ -393,5 +392,71 @@ function Audit() {
 
       <AuditDetailSheet entry={selected} onClose={() => setSelected(null)} />
     </div>
+  )
+}
+
+// Single-use searchable SKU filter (Command + Popover). Matches and displays
+// SKU only — the Model column already shows the model name.
+function SkuCombobox({
+  skuSelectId,
+  skus,
+  value,
+  onChange,
+}: {
+  skuSelectId: string
+  skus: string[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={skuSelectId}
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between sm:w-48"
+        >
+          <span className="truncate">{value || "All SKUs"}</span>
+          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[--radix-popover-trigger-width] p-0"
+      >
+        <Command>
+          <CommandInput placeholder="Search SKU…" />
+          <CommandList>
+            <CommandEmpty>No SKU found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                onSelect={() => {
+                  onChange("")
+                  setOpen(false)
+                }}
+              >
+                All SKUs
+              </CommandItem>
+              {skus.map((sku) => (
+                <CommandItem
+                  key={sku}
+                  value={sku}
+                  onSelect={() => {
+                    onChange(sku)
+                    setOpen(false)
+                  }}
+                >
+                  {sku}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }
