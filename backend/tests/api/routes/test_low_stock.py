@@ -409,27 +409,16 @@ def test_ticket_close_crossing_threshold_fires_alert(
     _stock_quantity(db, product, 6)
     customer_id = _make_customer(db)
 
-    user = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
-    assert user is not None
-    ticket = crud.open_service_ticket(
-        session=db,
-        customer_id=customer_id,
-        issue="fix",
-        notes=None,
-        idempotency_key=uuid.uuid4(),
-        created_by_user_id=user.id,
-    )
-    crud.add_service_ticket_part(
-        session=db,
-        ticket_id=ticket.id,
-        sku=product.sku,
-        quantity=2,  # 6 -> 4 at close, crosses below 5
-    )
-
     r = client.post(
-        f"{PREFIX}/service-tickets/{ticket.id}/close",
+        f"{PREFIX}/service-tickets/record",
         headers=staff_token_headers,
-        json={"resolution": "done"},
+        json={
+            "customer_id": str(customer_id),
+            "issue": "fix",
+            "idempotency_key": str(uuid.uuid4()),
+            "resolution": "done",
+            "parts": [{"sku": product.sku, "quantity": 2}],  # 6 -> 4, crosses below 5
+        },
     )
     assert r.status_code == 200, r.text
 

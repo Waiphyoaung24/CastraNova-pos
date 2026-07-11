@@ -1310,13 +1310,6 @@ class ServiceTicketPublic(SQLModel):
     parts: list[ServiceTicketPartPublic]
 
 
-class ServiceTicketCreate(SQLModel):
-    customer_id: uuid.UUID
-    issue: str = Field(min_length=1, max_length=512)
-    notes: str | None = Field(default=None, max_length=512)
-    idempotency_key: uuid.UUID
-
-
 class ServiceTicketPartCreate(SQLModel):
     sku: str = Field(max_length=64)
     quantity: int = Field(gt=0, le=1_000_000)
@@ -1325,8 +1318,16 @@ class ServiceTicketPartCreate(SQLModel):
     pricing_override_request_id: uuid.UUID | None = None
 
 
-class ServiceTicketClose(SQLModel):
+class ServiceTicketRecordRequest(SQLModel):
+    # One atomic submission: open + parts + FIFO-consume + close in a single
+    # transaction, idempotent on idempotency_key. There is no persistent
+    # open-ticket state (FR-008: opened and closed at the warehouse).
+    customer_id: uuid.UUID
+    issue: str = Field(min_length=1, max_length=512)
+    notes: str | None = Field(default=None, max_length=512)
     resolution: str | None = Field(default=None, max_length=512)
+    idempotency_key: uuid.UUID
+    parts: list[ServiceTicketPartCreate] = Field(default_factory=list)
 
 
 # --- Project pull (FR-009; M012) ----------------------------------------------

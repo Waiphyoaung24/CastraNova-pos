@@ -68,6 +68,7 @@ from app.models import (
     SerialSearchResult,
     ServiceTicket,
     ServiceTicketPart,
+    ServiceTicketPartCreate,
     SkuBatchAdminPublic,
     SkuBatchPublic,
     SkuConsumptionDrawAdminPublic,
@@ -2350,177 +2351,179 @@ def list_service_ticket_parts(
     )
 
 
-def open_service_ticket(
+def record_service_ticket(
     *,
     session: Session,
     customer_id: uuid.UUID,
     issue: str,
+    parts: list[ServiceTicketPartCreate],
     idempotency_key: uuid.UUID,
-    created_by_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
     notes: str | None = None,
+    resolution: str | None = None,
 ) -> ServiceTicket:
-    """Open a maintenance ticket. Idempotent on idempotency_key — replaying an
-    offline ticket-open returns the existing ticket without re-validating (FR-008,
-    S6). Customer existence is only checked on a genuine create."""
-    existing = session.exec(
+    """Record a maintenance ticket in one transaction (FR-008, Flow C): create the
+    ticket, add its parts, FIFO-consume each from stock (one
+    part_movement(MAINTENANCE_OUT) + cost_line[] per line), and stamp closed_at —
+    it is created already closed. Idempotent on idempotency_key: an offline replay
+    returns the existing ticket without re-consuming (S6). There is no persistent
+    open-ticket state.
+
+    Price defaults to the product's repair_price_thb; a different price requires an
+    approved SERVICE_TICKET_PART override (FR-010 / Flow C.3) — no free-form price
+    bypass. Insufficient stock on any line 409s and commits nothing. Mirrors
+    create_sale's atomic-idempotent shape."""
+    replay = session.exec(
         select(ServiceTicket).where(
             ServiceTicket.idempotency_key == idempotency_key
         )
     ).first()
-    if existing is not None:
+    if replay is not None:
         _assert_replay_actor(
-            stored_user_id=existing.created_by_user_id,
-            caller_user_id=created_by_user_id,
+            stored_user_id=replay.created_by_user_id,
+            caller_user_id=actor_user_id,
         )
-        return existing
+        return replay
+
     if not session.get(Customer, customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
-    ticket, replayed = get_or_replay(
-        session=session,
-        statement=select(ServiceTicket).where(
-            ServiceTicket.idempotency_key == idempotency_key
-        ),
-        build=lambda: ServiceTicket(
-            customer_id=customer_id,
-            issue=issue,
-            notes=notes,
-            created_by_user_id=created_by_user_id,
-            idempotency_key=idempotency_key,
-        ),
+
+    # Validate every line up front (fail fast, no orphan ticket). Each SKU
+    # resolves to a QUANTITY product; duplicate SKUs are rejected (the UI merges
+    # by SKU); an override may be cited on at most one line.
+    part_reqs: list[tuple[Product, int, uuid.UUID | None]] = []
+    seen_skus: set[str] = set()
+    seen_override_ids: set[uuid.UUID] = set()
+    for line in parts:
+        if line.sku in seen_skus:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Duplicate part line for SKU {line.sku}; merge into one",
+            )
+        seen_skus.add(line.sku)
+        oid = line.pricing_override_request_id
+        if oid is not None and oid in seen_override_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="An override may be applied to at most one line",
+            )
+        product = session.exec(
+            select(Product).where(Product.sku == line.sku)
+        ).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        if product.tracking_mode != TrackingMode.QUANTITY:
+            raise HTTPException(
+                status_code=400,
+                detail="Service part requires a QUANTITY-tracked product",
+            )
+        part_reqs.append((product, line.quantity, oid))
+        if oid is not None:
+            seen_override_ids.add(oid)
+
+    # Lock cited overrides FOR UPDATE in id order BEFORE consuming batches (lock
+    # order: overrides -> batches), matching create_sale / the old close path, so
+    # concurrent consumers cannot deadlock and a single-use override is serialized.
+    locked_overrides: dict[uuid.UUID, PricingOverrideRequest] = {
+        oid: _lock_override(session=session, override_id=oid)
+        for oid in sorted(seen_override_ids, key=str)
+    }
+
+    ygn_loc = None
+    customer_loc = None
+    if part_reqs:
+        ygn_loc = session.exec(
+            select(Location).where(Location.code == "YGN_WH")
+        ).first()
+        customer_loc = session.exec(
+            select(Location).where(Location.code == "CUSTOMER")
+        ).first()
+        if not ygn_loc or not customer_loc:
+            raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    ticket = ServiceTicket(
+        customer_id=customer_id,
+        issue=issue,
+        notes=notes,
+        resolution=resolution,
+        created_by_user_id=actor_user_id,
+        idempotency_key=idempotency_key,
+        closed_at=get_datetime_utc(),
     )
-    if replayed:
-        # Concurrent same-key writer won the UNIQUE race — still bind the actor.
-        _assert_replay_actor(
-            stored_user_id=ticket.created_by_user_id,
-            caller_user_id=created_by_user_id,
-        )
-    return ticket
+    session.add(ticket)
+    session.flush()
 
-
-def add_service_ticket_part(
-    *,
-    session: Session,
-    ticket_id: uuid.UUID,
-    sku: str,
-    quantity: int,
-    pricing_override_request_id: uuid.UUID | None = None,
-) -> ServiceTicketPart:
-    """Add a part line to an open ticket. Price defaults to the product's
-    repair_price_thb; a different price requires an approved pricing override
-    (FR-010 / Flow C.3) — there is no free-form price bypass. Rejected once the
-    ticket is closed (its parts are immutable then). The ticket row is locked FOR
-    UPDATE so this serializes against a concurrent close — a part can never be
-    inserted into a ticket that close has already consumed.
-
-    Lock order: ticket -> override. This path never locks units/batches (FIFO
-    consumption happens at close), so it cannot form a cycle with create_sale
-    (override -> units -> batches) or close (ticket -> batches). A future change
-    that adds batch consumption here must re-check that ordering."""
-    ticket = session.exec(
-        select(ServiceTicket)
-        .where(ServiceTicket.id == ticket_id)
-        .with_for_update()
-    ).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Service ticket not found")
-    if ticket.closed_at is not None:
-        raise HTTPException(status_code=409, detail="Service ticket is closed")
-    product = session.exec(select(Product).where(Product.sku == sku)).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    if product.tracking_mode != TrackingMode.QUANTITY:
-        raise HTTPException(
-            status_code=400, detail="Service part requires a QUANTITY-tracked product"
-        )
-    unit_price = product.repair_price_thb
-    if pricing_override_request_id is not None:
-        override = _lock_override(
-            session=session, override_id=pricing_override_request_id
-        )
-        unit_price = _apply_override_price(
-            session=session,
-            override=override,
-            target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
-            product_id=product.id,
-        )
-    part = ServiceTicketPart(
-        service_ticket_id=ticket.id,
-        product_id=product.id,
-        quantity=quantity,
-        unit_price_thb=unit_price,
-        pricing_override_request_id=pricing_override_request_id,
-    )
-    session.add(part)
-    session.commit()
-    session.refresh(part)
-    return part
-
-
-def close_service_ticket(
-    *,
-    session: Session,
-    ticket_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-    resolution: str | None = None,
-) -> ServiceTicket:
-    """Close a ticket: FIFO-consume each part line, writing one
-    part_movement(MAINTENANCE_OUT) + cost_line[] per line, and stamp closed_at —
-    all in one transaction (Flow C.4). The ticket row is locked FOR UPDATE and a
-    re-close is idempotent (already-closed tickets return unchanged, never
-    re-consume). 409 on insufficient stock leaves the ticket open."""
-    ticket = session.exec(
-        select(ServiceTicket)
-        .where(ServiceTicket.id == ticket_id)
-        .with_for_update()
-    ).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Service ticket not found")
-    if ticket.closed_at is not None:
-        return ticket  # idempotent: already closed, do not re-consume
-
-    customer_loc = session.exec(
-        select(Location).where(Location.code == "CUSTOMER")
-    ).first()
-    ygn_loc = session.exec(
-        select(Location).where(Location.code == "YGN_WH")
-    ).first()
-    if not customer_loc or not ygn_loc:
-        raise HTTPException(status_code=500, detail="Locations not seeded")
-
-    parts = session.exec(
-        select(ServiceTicketPart).where(
-            ServiceTicketPart.service_ticket_id == ticket_id
-        )
-    ).all()
     # Consume in deterministic product order so concurrent consumption (across
     # tickets/sales) acquires batch locks in the same order and cannot deadlock.
-    for part in sorted(parts, key=lambda p: str(p.product_id)):
+    for idx, (product, qty, oid) in enumerate(
+        sorted(part_reqs, key=lambda pr: str(pr[0].id))
+    ):
         cost_lines = consume_quantity_fifo(
-            session=session,
-            product_id=part.product_id,
-            quantity_needed=part.quantity,
+            session=session, product_id=product.id, quantity_needed=qty
         )
+        assert ygn_loc is not None and customer_loc is not None
         movement = PartMovement(
-            product_id=part.product_id,
+            product_id=product.id,
             event_type=MovementType.MAINTENANCE_OUT,
-            quantity=part.quantity,
+            quantity=qty,
             from_location_id=ygn_loc.id,
             to_location_id=customer_loc.id,
             service_ticket_id=ticket.id,
             actor_user_id=actor_user_id,
-            idempotency_key=uuid.uuid5(ticket.id, f"maint:{part.id}"),
+            idempotency_key=uuid.uuid5(
+                idempotency_key, f"maint:{idx}:{product.id}"
+            ),
         )
         session.add(movement)
         session.flush()
         for cost_line in cost_lines:
             cost_line.part_movement_id = movement.id
             session.add(cost_line)
+        unit_price = product.repair_price_thb
+        if oid is not None:
+            unit_price = _apply_override_price(
+                session=session,
+                override=locked_overrides[oid],
+                target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
+                product_id=product.id,
+            )
+        session.add(
+            ServiceTicketPart(
+                service_ticket_id=ticket.id,
+                product_id=product.id,
+                quantity=qty,
+                unit_price_thb=unit_price,
+                pricing_override_request_id=oid,
+            )
+        )
 
-    ticket.closed_at = get_datetime_utc()
-    if resolution is not None:
-        ticket.resolution = resolution
-    session.add(ticket)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        # session.info is NOT transactional: discard low-stock crossings recorded
+        # during the rolled-back consume so the route does not dispatch a
+        # duplicate alert (the winning request already alerts).
+        session.info["low_stock_crossed"] = set()
+        # A single-use-override unique violation is not an idempotency race —
+        # surface a clean 409 (the FOR UPDATE pre-lock normally prevents this).
+        if "pricing_override_request_id" in str(exc.orig):
+            raise HTTPException(
+                status_code=409, detail="Override already applied to a line"
+            ) from exc
+        # Otherwise: lost the idempotency race — return the winner's ticket.
+        winner = session.exec(
+            select(ServiceTicket).where(
+                ServiceTicket.idempotency_key == idempotency_key
+            )
+        ).first()
+        if winner is None:
+            raise
+        _assert_replay_actor(
+            stored_user_id=winner.created_by_user_id,
+            caller_user_id=actor_user_id,
+        )
+        return winner
     session.refresh(ticket)
     return ticket
 

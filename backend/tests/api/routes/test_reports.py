@@ -26,6 +26,7 @@ from app.models import (
     SaleLineInput,
     SaleLineKind,
     ServiceTicket,
+    ServiceTicketPartCreate,
     SupplierCreate,
     TrackingMode,
 )
@@ -177,17 +178,14 @@ def test_mixed_channel_hand_calc(
 
     # --- MAINTENANCE: ticket, one part qty 2 @ repair 20, FIFO over 3@10+4@12.
     maint_part = seed["make_part"]("100.00", "20.00", [(3, "10.00"), (4, "12.00")])
-    ticket = crud.open_service_ticket(
+    ticket = crud.record_service_ticket(
         session=db,
         customer_id=customer.id,
         issue="noisy",
+        parts=[ServiceTicketPartCreate(sku=maint_part.sku, quantity=2)],
         idempotency_key=uuid.uuid4(),
-        created_by_user_id=admin.id,
+        actor_user_id=admin.id,
     )
-    crud.add_service_ticket_part(
-        session=db, ticket_id=ticket.id, sku=maint_part.sku, quantity=2
-    )
-    crud.close_service_ticket(session=db, ticket_id=ticket.id, actor_user_id=admin.id)
     _pin_ticket(db, ticket.id, TARGET)
     # revenue = 2 * 20 = 40 ; cogs = 2 @ 10 (oldest batch) = 20
     maint_rev = Decimal("40.00")
