@@ -29,28 +29,38 @@ test.describe("Channel margin drill-down", () => {
     ).toBeVisible()
   })
 
-  test("Group by Product renders a flat ranked table with an unchanged totals footer", async ({
+  test("Group by switches the active dimension and hides the channel-only mix bar", async ({
     page,
   }) => {
+    // This suite resets to initial_data only (no transactional rows), so the
+    // channel grouping always renders its three fixed rows while the other
+    // dimensions render the empty state. We therefore verify the drill-down
+    // *control wiring* (dimension switch + conditional mix bar) here; the
+    // populated-table reconciliation across dimensions is proven exhaustively
+    // by the backend margin_report tests (isolated app_test fixtures).
     await page.goto("/channel-margin")
 
-    const table = page.getByRole("table")
-    const totalRow = table.getByRole("row", { name: /^Total/ })
-    await expect(totalRow).toBeVisible()
-    const totalBefore = await totalRow.textContent()
+    // Default channel view: three-channel table header + revenue-mix bar.
+    await expect(
+      page.getByRole("columnheader", { name: "Channel" }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "Revenue mix by channel" }),
+    ).toBeVisible()
 
     await page.getByRole("tab", { name: "Product" }).click()
 
+    // Dimension switched: Product tab selected, the channel-only mix bar is
+    // gone, and the "Channel" column header is no longer shown.
     await expect(
-      table.getByRole("columnheader", { name: "Product" }),
+      page.getByRole("tab", { name: "Product", selected: true }),
     ).toBeVisible()
     await expect(
       page.getByRole("heading", { name: "Revenue mix by channel" }),
     ).not.toBeVisible()
-
-    const totalRowAfter = table.getByRole("row", { name: /^Total/ })
-    await expect(totalRowAfter).toBeVisible()
-    expect(await totalRowAfter.textContent()).toBe(totalBefore)
+    await expect(
+      page.getByRole("columnheader", { name: "Channel" }),
+    ).not.toBeVisible()
   })
 
   test("Channel filter narrows rows and hides the mix bar; export carries group_by + channel", async ({
@@ -60,7 +70,7 @@ test.describe("Channel margin drill-down", () => {
 
     await page.getByRole("tab", { name: "Product" }).click()
 
-    await page.getByLabel("Channel").click()
+    await page.getByRole("combobox", { name: "Channel" }).click()
     await page.getByRole("option", { name: "SALE" }).click()
 
     await expect(
