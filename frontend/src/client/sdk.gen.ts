@@ -895,11 +895,13 @@ export class ReceiptsService {
 export class ReportsService {
     /**
      * Channel Margin
-     * Monthly revenue/COGS/margin by derived channel for ``month`` (YYYY-MM),
-     * admin-only (FR-013, spec §8).
+     * Monthly revenue/COGS/margin grouped by ``group_by`` (channel default),
+     * optionally scoped to one ``channel``; admin-only (FR-013, spec §8).
      * @param data The data for the request.
      * @param data.month Reporting month in YYYY-MM (year 2000-2099)
-     * @returns ChannelMarginReport Successful Response
+     * @param data.groupBy
+     * @param data.channel
+     * @returns MarginBreakdownReport Successful Response
      * @throws ApiError
      */
     public static channelMargin(data: ReportsChannelMarginData): CancelablePromise<ReportsChannelMarginResponse> {
@@ -907,7 +909,9 @@ export class ReportsService {
             method: 'GET',
             url: '/api/v1/reports/channel-margin',
             query: {
-                month: data.month
+                month: data.month,
+                group_by: data.groupBy,
+                channel: data.channel
             },
             errors: {
                 422: 'Validation Error'
@@ -919,6 +923,8 @@ export class ReportsService {
      * Channel Margin Pdf
      * @param data The data for the request.
      * @param data.month Reporting month in YYYY-MM (year 2000-2099)
+     * @param data.groupBy
+     * @param data.channel
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -927,7 +933,9 @@ export class ReportsService {
             method: 'GET',
             url: '/api/v1/reports/channel-margin.pdf',
             query: {
-                month: data.month
+                month: data.month,
+                group_by: data.groupBy,
+                channel: data.channel
             },
             errors: {
                 422: 'Validation Error'
@@ -939,6 +947,8 @@ export class ReportsService {
      * Channel Margin Xlsx
      * @param data The data for the request.
      * @param data.month Reporting month in YYYY-MM (year 2000-2099)
+     * @param data.groupBy
+     * @param data.channel
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -947,7 +957,9 @@ export class ReportsService {
             method: 'GET',
             url: '/api/v1/reports/channel-margin.xlsx',
             query: {
-                month: data.month
+                month: data.month,
+                group_by: data.groupBy,
+                channel: data.channel
             },
             errors: {
                 422: 'Validation Error'

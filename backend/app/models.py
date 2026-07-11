@@ -1543,16 +1543,26 @@ class NotificationPreferencesUpdate(SQLModel):
 MoneyTHB = Annotated[Decimal, Field(decimal_places=2, max_digits=14)]
 
 
-class ChannelMarginRow(SQLModel):
-    channel: Channel
+class MarginDimension(str, enum.Enum):
+    CHANNEL = "channel"
+    PRODUCT = "product"
+    CUSTOMER = "customer"
+    PROJECT = "project"
+
+
+class MarginBreakdownRow(SQLModel):
+    key: str  # channel name, entity UUID as str, or "" for the (none) bucket
+    label: str
     revenue_thb: MoneyTHB
     cogs_thb: MoneyTHB
     margin_thb: MoneyTHB
 
 
-class ChannelMarginReport(SQLModel):
+class MarginBreakdownReport(SQLModel):
     month: str  # "YYYY-MM"
-    channels: list[ChannelMarginRow]  # always 3 rows: SALE, MAINTENANCE, PROJECT
+    group_by: MarginDimension
+    channel: Channel | None  # filter applied; None = all channels
+    rows: list[MarginBreakdownRow]
     total_revenue_thb: MoneyTHB
     total_cogs_thb: MoneyTHB
     total_margin_thb: MoneyTHB

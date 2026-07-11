@@ -59,14 +59,14 @@ test("previousMonth steps back one month, rolling the year in January", () => {
 
 // --- channelMarginExport ----------------------------------------------------
 
-test("channelMarginExport builds the authed path + filename per format", () => {
-  expect(channelMarginExport("2026-06", "pdf")).toEqual({
-    path: "/api/v1/reports/channel-margin.pdf?month=2026-06",
-    filename: "channel-margin-2026-06.pdf",
+test("channelMarginExport encodes group_by and optional channel", () => {
+  expect(channelMarginExport("2026-03", "pdf", "channel")).toEqual({
+    path: "/api/v1/reports/channel-margin.pdf?month=2026-03&group_by=channel",
+    filename: "channel-margin-2026-03-by-channel.pdf",
   })
-  expect(channelMarginExport("2026-06", "xlsx")).toEqual({
-    path: "/api/v1/reports/channel-margin.xlsx?month=2026-06",
-    filename: "channel-margin-2026-06.xlsx",
+  expect(channelMarginExport("2026-03", "xlsx", "product", "SALE")).toEqual({
+    path: "/api/v1/reports/channel-margin.xlsx?month=2026-03&group_by=product&channel=SALE",
+    filename: "channel-margin-2026-03-by-product-SALE.xlsx",
   })
 })
 

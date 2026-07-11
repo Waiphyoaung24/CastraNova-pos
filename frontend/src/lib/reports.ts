@@ -39,14 +39,21 @@ interface ReportExport {
   filename: string
 }
 
+export type MarginGroupBy = "channel" | "product" | "customer" | "project"
+export type MarginChannel = "SALE" | "MAINTENANCE" | "PROJECT"
+
 /** Authed-download path + filename for the channel-margin export. */
 export function channelMarginExport(
   month: string,
   fmt: ReportFormat,
+  groupBy: MarginGroupBy,
+  channel?: MarginChannel,
 ): ReportExport {
+  const q = `month=${month}&group_by=${groupBy}${channel ? `&channel=${channel}` : ""}`
+  const suffix = `-by-${groupBy}${channel ? `-${channel}` : ""}`
   return {
-    path: `/api/v1/reports/channel-margin.${fmt}?month=${month}`,
-    filename: `channel-margin-${month}.${fmt}`,
+    path: `/api/v1/reports/channel-margin.${fmt}?${q}`,
+    filename: `channel-margin-${month}${suffix}.${fmt}`,
   }
 }
 

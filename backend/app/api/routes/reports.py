@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends, Query, Response
 from app import crud
 from app.api.deps import SessionDep, get_admin
 from app.models import (
-    ChannelMarginReport,
+    Channel,
     HoldingPeriodReport,
+    MarginBreakdownReport,
+    MarginDimension,
     OverrideExceptionsReport,
 )
 from app.services import export
@@ -46,13 +48,22 @@ def _download(
 # --- Channel margin (FR-013) --------------------------------------------------
 
 
+_DIM_HEADER = {
+    MarginDimension.CHANNEL: "Channel",
+    MarginDimension.PRODUCT: "Product",
+    MarginDimension.CUSTOMER: "Customer",
+    MarginDimension.PROJECT: "Project",
+}
+
+
 def _channel_margin_table(
-    report: ChannelMarginReport,
+    report: MarginBreakdownReport,
 ) -> tuple[str, list[str], list[list[str]]]:
-    headers = ["Channel", "Revenue (THB)", "COGS (THB)", "Margin (THB)"]
+    first = _DIM_HEADER[report.group_by]
+    headers = [first, "Revenue (THB)", "COGS (THB)", "Margin (THB)"]
     rows = [
-        [c.channel.value, str(c.revenue_thb), str(c.cogs_thb), str(c.margin_thb)]
-        for c in report.channels
+        [r.label, str(r.revenue_thb), str(r.cogs_thb), str(r.margin_thb)]
+        for r in report.rows
     ]
     rows.append(
         [
@@ -62,38 +73,64 @@ def _channel_margin_table(
             str(report.total_margin_thb),
         ]
     )
-    return f"Channel Margin — {report.month}", headers, rows
+    scope = f" — {report.channel.value}" if report.channel else ""
+    title = f"Channel Margin — {report.month} — by {first}{scope}"
+    return title, headers, rows
 
 
-@router.get("/channel-margin", response_model=ChannelMarginReport)
-def channel_margin(*, session: SessionDep, month: _Month) -> ChannelMarginReport:
-    """Monthly revenue/COGS/margin by derived channel for ``month`` (YYYY-MM),
-    admin-only (FR-013, spec §8)."""
-    year, mon = int(month[:4]), int(month[5:7])
-    return crud.channel_margin_report(session=session, year=year, month=mon)
+@router.get("/channel-margin", response_model=MarginBreakdownReport)
+def channel_margin(
+    *,
+    session: SessionDep,
+    month: _Month,
+    group_by: MarginDimension = MarginDimension.CHANNEL,
+    channel: Channel | None = None,
+) -> MarginBreakdownReport:
+    """Monthly revenue/COGS/margin grouped by ``group_by`` (channel default),
+    optionally scoped to one ``channel``; admin-only (FR-013, spec §8)."""
+    return crud.margin_report(
+        session=session, year=int(month[:4]), month=int(month[5:7]),
+        group_by=group_by, channel=channel,
+    )
 
 
 @router.get("/channel-margin.pdf")
-def channel_margin_pdf(*, session: SessionDep, month: _Month) -> Response:
-    report = crud.channel_margin_report(
-        session=session, year=int(month[:4]), month=int(month[5:7])
+def channel_margin_pdf(
+    *,
+    session: SessionDep,
+    month: _Month,
+    group_by: MarginDimension = MarginDimension.CHANNEL,
+    channel: Channel | None = None,
+) -> Response:
+    report = crud.margin_report(
+        session=session, year=int(month[:4]), month=int(month[5:7]),
+        group_by=group_by, channel=channel,
     )
     title, headers, rows = _channel_margin_table(report)
+    suffix = f"-by-{group_by.value}" + (f"-{channel.value}" if channel else "")
     return _download(
         fmt="pdf", title=title, headers=headers, rows=rows,
-        filename=f"channel-margin-{month}",
+        filename=f"channel-margin-{month}{suffix}",
     )
 
 
 @router.get("/channel-margin.xlsx")
-def channel_margin_xlsx(*, session: SessionDep, month: _Month) -> Response:
-    report = crud.channel_margin_report(
-        session=session, year=int(month[:4]), month=int(month[5:7])
+def channel_margin_xlsx(
+    *,
+    session: SessionDep,
+    month: _Month,
+    group_by: MarginDimension = MarginDimension.CHANNEL,
+    channel: Channel | None = None,
+) -> Response:
+    report = crud.margin_report(
+        session=session, year=int(month[:4]), month=int(month[5:7]),
+        group_by=group_by, channel=channel,
     )
     title, headers, rows = _channel_margin_table(report)
+    suffix = f"-by-{group_by.value}" + (f"-{channel.value}" if channel else "")
     return _download(
         fmt="xlsx", title=title, headers=headers, rows=rows,
-        filename=f"channel-margin-{month}",
+        filename=f"channel-margin-{month}{suffix}",
     )
 
 

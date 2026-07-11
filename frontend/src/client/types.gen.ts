@@ -52,21 +52,6 @@ export type BulkMinStockUpdate = {
 
 export type Channel = 'SALE' | 'MAINTENANCE' | 'PROJECT';
 
-export type ChannelMarginReport = {
-    month: string;
-    channels: Array<ChannelMarginRow>;
-    total_revenue_thb: string;
-    total_cogs_thb: string;
-    total_margin_thb: string;
-};
-
-export type ChannelMarginRow = {
-    channel: Channel;
-    revenue_thb: string;
-    cogs_thb: string;
-    margin_thb: string;
-};
-
 export type CustomerCreate = {
     name: string;
     country?: (string | null);
@@ -146,6 +131,26 @@ export type LowStockItemPublic = {
     on_hand: number;
     min_stock_level: number;
 };
+
+export type MarginBreakdownReport = {
+    month: string;
+    group_by: MarginDimension;
+    channel: (Channel | null);
+    rows: Array<MarginBreakdownRow>;
+    total_revenue_thb: string;
+    total_cogs_thb: string;
+    total_margin_thb: string;
+};
+
+export type MarginBreakdownRow = {
+    key: string;
+    label: string;
+    revenue_thb: string;
+    cogs_thb: string;
+    margin_thb: string;
+};
+
+export type MarginDimension = 'channel' | 'product' | 'customer' | 'project';
 
 export type Message = {
     message: string;
@@ -1130,15 +1135,19 @@ export type ReceiptsReadUnitLabelData = {
 export type ReceiptsReadUnitLabelResponse = (unknown);
 
 export type ReportsChannelMarginData = {
+    channel?: (Channel | null);
+    groupBy?: MarginDimension;
     /**
      * Reporting month in YYYY-MM (year 2000-2099)
      */
     month: string;
 };
 
-export type ReportsChannelMarginResponse = (ChannelMarginReport);
+export type ReportsChannelMarginResponse = (MarginBreakdownReport);
 
 export type ReportsChannelMarginPdfData = {
+    channel?: (Channel | null);
+    groupBy?: MarginDimension;
     /**
      * Reporting month in YYYY-MM (year 2000-2099)
      */
@@ -1148,6 +1157,8 @@ export type ReportsChannelMarginPdfData = {
 export type ReportsChannelMarginPdfResponse = (unknown);
 
 export type ReportsChannelMarginXlsxData = {
+    channel?: (Channel | null);
+    groupBy?: MarginDimension;
     /**
      * Reporting month in YYYY-MM (year 2000-2099)
      */

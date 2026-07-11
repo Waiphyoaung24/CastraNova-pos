@@ -11,6 +11,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -19,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { downloadReport } from "@/lib/report-download"
@@ -29,6 +37,8 @@ import {
   formatThb,
   isValidMonth,
   marginPct,
+  type MarginChannel,
+  type MarginGroupBy,
   momChange,
   pointChange,
   previousMonth,
@@ -36,6 +46,15 @@ import {
   sharePct,
 } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
+
+const GROUP_BY_LABELS: Record<MarginGroupBy, string> = {
+  channel: "Channel",
+  product: "Product",
+  customer: "Customer",
+  project: "Project",
+}
+
+const ALL_CHANNELS = "all"
 
 // Admin-only: revenue/COGS/margin are financial fields redacted from staff.
 export const Route = createFileRoute("/_layout/channel-margin")({
@@ -50,32 +69,41 @@ function ChannelMargin() {
   const { showErrorToast } = useCustomToast()
   const isMobile = useIsMobile()
   const [month, setMonth] = useState(currentMonth())
+  const [groupBy, setGroupBy] = useState<MarginGroupBy>("channel")
+  const [channel, setChannel] = useState<MarginChannel | undefined>(undefined)
   const validMonth = isValidMonth(month)
   const prevMonth = previousMonth(month)
 
   const { data, isPending, isError } = useQuery({
-    queryKey: ["channel-margin", month],
-    queryFn: () => ReportsService.channelMargin({ month }),
+    queryKey: ["channel-margin", month, groupBy, channel ?? "all"],
+    queryFn: () => ReportsService.channelMargin({ month, groupBy, channel }),
     enabled: validMonth,
   })
   // Prior month, fetched only to power the month-over-month deltas. If it has no
   // data the deltas simply don't render — they're never required for the report.
   const { data: prevData } = useQuery({
-    queryKey: ["channel-margin", prevMonth],
-    queryFn: () => ReportsService.channelMargin({ month: prevMonth }),
+    queryKey: ["channel-margin", prevMonth, groupBy, channel ?? "all"],
+    queryFn: () =>
+      ReportsService.channelMargin({ month: prevMonth, groupBy, channel }),
     enabled: validMonth,
   })
 
   async function handleExport(fmt: ReportFormat) {
     try {
-      const { path, filename } = channelMarginExport(month, fmt)
+      const { path, filename } = channelMarginExport(
+        month,
+        fmt,
+        groupBy,
+        channel,
+      )
       await downloadReport(path, filename)
     } catch (e) {
       showErrorToast(e instanceof Error ? e.message : "Export failed.")
     }
   }
 
-  const rows = data?.channels ?? []
+  const rows = data?.rows ?? []
+  const firstColumnLabel = GROUP_BY_LABELS[groupBy]
 
   // Headline deltas vs. the prior month. COGS inverts — a rise is unfavourable.
   const revenueDelta =
@@ -120,6 +148,39 @@ function ChannelMargin() {
             onChange={(e) => setMonth(e.target.value)}
             className="w-full sm:w-48"
           />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Group by</Label>
+          <Tabs
+            value={groupBy}
+            onValueChange={(v) => setGroupBy(v as MarginGroupBy)}
+          >
+            <TabsList>
+              <TabsTrigger value="channel">Channel</TabsTrigger>
+              <TabsTrigger value="product">Product</TabsTrigger>
+              <TabsTrigger value="customer">Customer</TabsTrigger>
+              <TabsTrigger value="project">Project</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="channel-filter">Channel</Label>
+          <Select
+            value={channel ?? ALL_CHANNELS}
+            onValueChange={(v) =>
+              setChannel(v === ALL_CHANNELS ? undefined : (v as MarginChannel))
+            }
+          >
+            <SelectTrigger id="channel-filter" className="w-full sm:w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_CHANNELS}>All</SelectItem>
+              <SelectItem value="SALE">SALE</SelectItem>
+              <SelectItem value="MAINTENANCE">MAINTENANCE</SelectItem>
+              <SelectItem value="PROJECT">PROJECT</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <Button
           type="button"
@@ -172,20 +233,22 @@ function ChannelMargin() {
             />
           </div>
 
-          <div className="space-y-3 rounded-lg border p-4">
-            <h2 className="text-sm font-semibold">Revenue mix by channel</h2>
-            {rows.map((r) => {
-              const share = sharePct(r.revenue_thb, data.total_revenue_thb)
-              return (
-                <MetricBar
-                  key={r.channel}
-                  label={r.channel}
-                  pct={share}
-                  value={`${formatThb(r.revenue_thb)} · ${formatPct(share)}`}
-                />
-              )
-            })}
-          </div>
+          {groupBy === "channel" ? (
+            <div className="space-y-3 rounded-lg border p-4">
+              <h2 className="text-sm font-semibold">Revenue mix by channel</h2>
+              {rows.map((r) => {
+                const share = sharePct(r.revenue_thb, data.total_revenue_thb)
+                return (
+                  <MetricBar
+                    key={r.key}
+                    label={r.label}
+                    pct={share}
+                    value={`${formatThb(r.revenue_thb)} · ${formatPct(share)}`}
+                  />
+                )
+              })}
+            </div>
+          ) : null}
         </>
       ) : null}
 
@@ -210,9 +273,9 @@ function ChannelMargin() {
           {rows.map((r) => {
             const mPct = marginPct(r.margin_thb, r.revenue_thb)
             return (
-              <div key={r.channel} className="bg-card rounded-lg border p-4">
+              <div key={r.key} className="bg-card rounded-lg border p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">{r.channel}</span>
+                  <span className="font-medium">{r.label}</span>
                   <span className="num text-lg font-semibold">
                     {formatThb(r.margin_thb)}
                   </span>
@@ -239,7 +302,7 @@ function ChannelMargin() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Channel</TableHead>
+              <TableHead>{firstColumnLabel}</TableHead>
               <TableHead className="text-right">Revenue</TableHead>
               <TableHead className="text-right">COGS</TableHead>
               <TableHead className="text-right">Margin</TableHead>
@@ -250,8 +313,8 @@ function ChannelMargin() {
             {rows.map((r) => {
               const mPct = marginPct(r.margin_thb, r.revenue_thb)
               return (
-                <TableRow key={r.channel}>
-                  <TableCell className="font-medium">{r.channel}</TableCell>
+                <TableRow key={r.key}>
+                  <TableCell className="font-medium">{r.label}</TableCell>
                   <TableCell className="num text-right">
                     {formatThb(r.revenue_thb)}
                   </TableCell>
