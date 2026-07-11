@@ -12,6 +12,7 @@ from app.models import (
     MarginDimension,
     SaleLineInput,
     SaleLineKind,
+    ServiceTicketPartCreate,
 )
 from tests.api.routes.test_reports import (  # noqa: F401  (seed is a pytest fixture)
     TARGET,
@@ -93,17 +94,14 @@ def _seed_full_month(db: Session, seed: dict[str, Any], when: datetime = TARGET)
 
     # --- MAINTENANCE ---
     maint_part = seed["make_part"]("100.00", "20.00", [(3, "10.00"), (4, "12.00")])
-    ticket = crud.open_service_ticket(
+    ticket = crud.record_service_ticket(
         session=db,
         customer_id=customer.id,
         issue="noisy",
+        parts=[ServiceTicketPartCreate(sku=maint_part.sku, quantity=2)],
         idempotency_key=uuid.uuid4(),
-        created_by_user_id=admin.id,
+        actor_user_id=admin.id,
     )
-    crud.add_service_ticket_part(
-        session=db, ticket_id=ticket.id, sku=maint_part.sku, quantity=2
-    )
-    crud.close_service_ticket(session=db, ticket_id=ticket.id, actor_user_id=admin.id)
     _pin_ticket(db, ticket.id, when)
 
     # --- PROJECT ---
