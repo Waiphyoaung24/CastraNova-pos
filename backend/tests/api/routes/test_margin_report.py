@@ -234,3 +234,35 @@ def test_product_grouping_scoped_to_sale_channel(db: Session, seed: dict[str, An
     assert _totals(sale_only) == _totals(by_channel)
     # SALE has exactly two products: the serialized unit + the quantity part.
     assert len(sale_only.rows) == 2
+
+
+def test_per_channel_amounts_reconcile_against_channel_filtered_products(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """The other reconciliation tests only compare grand TOTALs across
+    groupings, so a bug that shifts revenue/COGS BETWEEN channels while
+    preserving the grand total would go undetected. Here we tie each
+    individual channel row to an independently-filtered PRODUCT-dimension
+    aggregation for that same channel, which catches cross-channel shifts."""
+    # Dedicated month (2027-02): distinct from every other month pinned in
+    # this session-scoped db (2026-03/04/05/06/10/11/12, 2027-01).
+    when = datetime(2027, 2, 15, 12, 0, tzinfo=timezone.utc)
+    _seed_full_month(db, seed, when=when)
+    by_channel = crud.margin_report(
+        session=db, year=2027, month=2, group_by=MarginDimension.CHANNEL
+    )
+    # The seed produced nonzero money somewhere, so the reconciliation below
+    # can't pass vacuously on all-zeros.
+    assert by_channel.total_revenue_thb > 0
+
+    for row in by_channel.rows:
+        by_product_for_channel = crud.margin_report(
+            session=db,
+            year=2027,
+            month=2,
+            group_by=MarginDimension.PRODUCT,
+            channel=Channel(row.key),
+        )
+        assert by_product_for_channel.total_revenue_thb == row.revenue_thb
+        assert by_product_for_channel.total_cogs_thb == row.cogs_thb
+        assert by_product_for_channel.total_margin_thb == row.margin_thb
