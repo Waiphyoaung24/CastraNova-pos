@@ -1541,6 +1541,31 @@ class ChannelMarginReport(SQLModel):
     total_margin_thb: MoneyTHB
 
 
+class MarginDimension(str, enum.Enum):
+    CHANNEL = "channel"
+    PRODUCT = "product"
+    CUSTOMER = "customer"
+    PROJECT = "project"
+
+
+class MarginBreakdownRow(SQLModel):
+    key: str  # channel name, entity UUID as str, or "" for the (none) bucket
+    label: str
+    revenue_thb: MoneyTHB
+    cogs_thb: MoneyTHB
+    margin_thb: MoneyTHB
+
+
+class MarginBreakdownReport(SQLModel):
+    month: str  # "YYYY-MM"
+    group_by: MarginDimension
+    channel: Channel | None  # filter applied; None = all channels
+    rows: list[MarginBreakdownRow]
+    total_revenue_thb: MoneyTHB
+    total_cogs_thb: MoneyTHB
+    total_margin_thb: MoneyTHB
+
+
 # --- Stock-on-hand dashboard (FR-012; both roles, no cost fields) -------------
 
 

@@ -34,6 +34,9 @@ from app.models import (
     LineState,
     Location,
     LowStockItemPublic,
+    MarginBreakdownReport,
+    MarginBreakdownRow,
+    MarginDimension,
     MovementType,
     NotificationPreference,
     NotificationPreferenceUpdate,
@@ -2925,6 +2928,133 @@ _CENT = Decimal("0.01")
 def _q(value: Decimal | int) -> Decimal:
     """Quantize a money sum to cents."""
     return Decimal(value).quantize(_CENT, rounding=ROUND_HALF_UP)
+
+
+def _month_window(year: int, month: int) -> tuple[datetime, datetime]:
+    """[start, next-month-start) in UTC for a reporting month."""
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    if month == 12:
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    return start, end
+
+
+def _channel_rows(
+    session: Session,
+    start: datetime,
+    end: datetime,
+    channel: Channel | None,
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per channel (SALE, MAINTENANCE, PROJECT), fixed order.
+    A channel filter narrows to that single channel; otherwise all three are
+    returned even when zero (parity with the legacy report)."""
+    # --- SALE: sales sold_at in window. ---
+    sale_rev, sale_cogs = session.exec(
+        select(
+            func.coalesce(func.sum(Sale.total_thb), Decimal("0")),
+            func.coalesce(func.sum(Sale.total_cogs_thb), Decimal("0")),
+        ).where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
+    ).one()
+
+    # --- MAINTENANCE: parts of tickets closed in window. ---
+    maint_rev = session.exec(
+        select(
+            func.coalesce(
+                func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                Decimal("0"),
+            )
+        )
+        .join(
+            ServiceTicket,
+            col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+        )
+        .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
+    ).one()
+    maint_cogs = session.exec(
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(
+            ServiceTicket,
+            col(PartMovement.service_ticket_id) == col(ServiceTicket.id),
+        )
+        .where(
+            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+            col(ServiceTicket.closed_at) >= start,
+            col(ServiceTicket.closed_at) < end,
+        )
+    ).one()
+
+    # --- PROJECT (cost-only): pulls fulfilled in window. ---
+    proj_part_cogs = session.exec(
+        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+        .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+        .where(
+            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.fulfilled_at) >= start,
+            col(ProjectPull.fulfilled_at) < end,
+        )
+    ).one()
+    proj_unit_cogs = session.exec(
+        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        .select_from(UnitMovement)
+        .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.fulfilled_at) >= start,
+            col(ProjectPull.fulfilled_at) < end,
+        )
+    ).one()
+
+    totals = {
+        Channel.SALE: (_q(sale_rev), _q(sale_cogs)),
+        Channel.MAINTENANCE: (_q(maint_rev), _q(maint_cogs)),
+        Channel.PROJECT: (_q(0), _q(proj_part_cogs + proj_unit_cogs)),
+    }
+    wanted = [channel] if channel is not None else list(totals)
+    return [
+        MarginBreakdownRow(
+            key=ch.value,
+            label=ch.value,
+            revenue_thb=rev,
+            cogs_thb=cogs,
+            margin_thb=rev - cogs,
+        )
+        for ch in wanted
+        for rev, cogs in [totals[ch]]
+    ]
+
+
+def margin_report(
+    *,
+    session: Session,
+    year: int,
+    month: int,
+    group_by: MarginDimension = MarginDimension.CHANNEL,
+    channel: Channel | None = None,
+) -> MarginBreakdownReport:
+    """Monthly revenue/COGS/margin, grouped by ``group_by`` and optionally
+    scoped to one ``channel`` (FR-013 drill-down, spec §8). Read-only; all sums
+    set-based and cent-quantized. For any fixed (month, channel) the row sums
+    reconcile across every grouping."""
+    start, end = _month_window(year, month)
+    if group_by == MarginDimension.CHANNEL:
+        rows = _channel_rows(session, start, end, channel)
+    else:  # dimensions added in later tasks
+        raise NotImplementedError(group_by)
+    total_rev = sum((r.revenue_thb for r in rows), Decimal("0.00"))
+    total_cogs = sum((r.cogs_thb for r in rows), Decimal("0.00"))
+    return MarginBreakdownReport(
+        month=f"{year:04d}-{month:02d}",
+        group_by=group_by,
+        channel=channel,
+        rows=rows,
+        total_revenue_thb=total_rev,
+        total_cogs_thb=total_cogs,
+        total_margin_thb=total_rev - total_cogs,
+    )
 
 
 def channel_margin_report(
