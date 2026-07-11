@@ -92,7 +92,7 @@ def seed_audit(db: Session) -> Iterator[dict[str, object]]:
             repair_price_thb="20.00",
         ),
     )
-    crud.receive_quantity(
+    batch = crud.receive_quantity(
         session=db,
         product_id=qty.id,
         supplier_id=supplier.id,
@@ -118,6 +118,8 @@ def seed_audit(db: Session) -> Iterator[dict[str, object]]:
         "unit_id": unit.id,
         "part_product_id": qty.id,
         "serial_product_id": ser.id,
+        "serial_sku": ser.sku,
+        "batch_no": batch.batch_no,
         "customer_name": customer.name,
         "actor_full_name": user.full_name or user.email,
         "part_model_name": qty.model_name,
@@ -304,3 +306,94 @@ def test_audit_enriches_unit_rows(
     assert sold, "expected a SOLD unit row"
     for row in sold:
         assert row["customer_name"] == seed_audit["customer_name"]
+
+
+def test_audit_filter_sku_quantity_product(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_audit: dict[str, object],
+) -> None:
+    sku = seed_audit["part_sku"]
+    pid = seed_audit["part_product_id"]
+    r = client.get(
+        f"{PREFIX}/audit", params={"sku": sku}, headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert rows
+    for row in rows:
+        assert row["ledger"] == "PART"
+        assert row["product_id"] == str(pid)
+        assert row["unit_id"] is None
+
+
+def test_audit_filter_sku_serialized_product_reaches_unit_ledger(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_audit: dict[str, object],
+) -> None:
+    sku = seed_audit["serial_sku"]
+    uid = seed_audit["unit_id"]
+    r = client.get(
+        f"{PREFIX}/audit", params={"sku": sku}, headers=superuser_token_headers
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert rows, "SKU filter must reach the UNIT ledger for a serialized product"
+    for row in rows:
+        assert row["ledger"] == "UNIT"
+        assert row["unit_id"] == str(uid)
+
+
+def test_audit_filter_sku_unknown_returns_empty(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    r = client.get(
+        f"{PREFIX}/audit",
+        params={"sku": "NO-SUCH-SKU-zzz"},
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_audit_filter_batch_no_spans_receive_and_consumption(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_audit: dict[str, object],
+) -> None:
+    batch_no = seed_audit["batch_no"]
+    pid = seed_audit["part_product_id"]
+    r = client.get(
+        f"{PREFIX}/audit",
+        params={"batch_no": batch_no},
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert rows
+    for row in rows:
+        assert row["ledger"] == "PART"
+        assert row["product_id"] == str(pid)
+    events = {row["event_type"] for row in rows}
+    # RECEIVED matches via part_movement.part_batch_id; SOLD via cost_line draw.
+    assert {"RECEIVED", "SOLD"} <= events
+
+
+def test_audit_filter_batch_no_excludes_unit_ledger(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_audit: dict[str, object],
+) -> None:
+    batch_no = seed_audit["batch_no"]
+    r = client.get(
+        f"{PREFIX}/audit",
+        params={"batch_no": batch_no},
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200
+    rows = r.json()
+    assert rows
+    assert all(row["ledger"] == "PART" for row in rows)
+    assert all(row["unit_id"] is None for row in rows)

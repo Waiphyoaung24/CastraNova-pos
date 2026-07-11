@@ -859,6 +859,10 @@ export type AuditListAuditData = {
      * Restrict to a single acting user
      */
     actorUserId?: (string | null);
+    /**
+     * Restrict to PART entries that created or drew from a batch
+     */
+    batchNo?: (string | null);
     eventType?: (MovementType | null);
     /**
      * ISO-8601 lower bound, inclusive
@@ -870,6 +874,10 @@ export type AuditListAuditData = {
      */
     productId?: (string | null);
     skip?: number;
+    /**
+     * Restrict to a product's SKU (spans UNIT + PART ledgers)
+     */
+    sku?: (string | null);
     /**
      * ISO-8601 upper bound, exclusive
      */

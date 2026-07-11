@@ -6,7 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypeVar, cast
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, case, func
+from sqlalchemy import ColumnElement, case, func, or_
 from sqlalchemy import select as sa_select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, col, select
@@ -3277,6 +3277,8 @@ def list_audit(
     actor_user_id: uuid.UUID | None = None,
     product_id: uuid.UUID | None = None,
     unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
+    batch_no: str | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[AuditEntryPublic]:
@@ -3285,8 +3287,14 @@ def list_audit(
 
     Filter semantics: ``product_id`` only ever matches PART rows and ``unit_id``
     only ever matches UNIT rows, so supplying one restricts the result to that
-    ledger (supplying both yields nothing, since no row is in both). The shared
-    filters (event_type, [from_date, to_date), actor_user_id) apply to both.
+    ledger (supplying both yields nothing, since no row is in both). ``sku``
+    resolves to a product and spans whichever ledger it uses (a product is one
+    tracking mode, so exactly one ledger yields rows); an unknown SKU returns no
+    rows. ``batch_no`` is PART-only: it matches the RECEIVED movement that
+    created the batch (``part_movement.part_batch_id``) and any consumption
+    movement that drew from it (via ``cost_line``), so it excludes the UNIT
+    ledger outright. The shared filters (event_type, [from_date, to_date),
+    actor_user_id) apply to both.
 
     Implementation: each ledger is queried filtered + ordered DESC and bounded
     to ``skip + limit`` rows, the two bounded sets are merge-sorted in Python,
@@ -3294,7 +3302,15 @@ def list_audit(
     """
     bound = skip + limit
 
-    audit_unit = product_id is None
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return []  # unknown SKU matches nothing
+
+    audit_unit = product_id is None and batch_no is None
     audit_part = unit_id is None
 
     rows: list[AuditEntryPublic] = []
@@ -3311,6 +3327,14 @@ def list_audit(
             u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
         if unit_id is not None:
             u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
         u_stmt = u_stmt.order_by(
             col(UnitMovement.occurred_at).desc(), col(UnitMovement.id).desc()
         ).limit(bound)
@@ -3345,6 +3369,24 @@ def list_audit(
             p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
         if product_id is not None:
             p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
+        if batch_no is not None:
+            batch_ids = select(col(PartBatch.id)).where(
+                col(PartBatch.batch_no) == batch_no
+            )
+            p_stmt = p_stmt.where(
+                or_(
+                    col(PartMovement.part_batch_id).in_(batch_ids),
+                    col(PartMovement.id).in_(
+                        select(col(CostLine.part_movement_id)).where(
+                            col(CostLine.part_batch_id).in_(batch_ids)
+                        )
+                    ),
+                )
+            )
         p_stmt = p_stmt.order_by(
             col(PartMovement.occurred_at).desc(), col(PartMovement.id).desc()
         ).limit(bound)
