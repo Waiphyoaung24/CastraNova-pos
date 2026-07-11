@@ -170,6 +170,23 @@ def test_product_grouping_reconciles_to_channel(db: Session, seed: dict[str, Any
     assert revs == sorted(revs, reverse=True)
 
 
+def test_customer_grouping_reconciles_and_labels(db: Session, seed: dict[str, Any]) -> None:  # noqa: F811
+    # Dedicated month (2026-06): distinct from every other month pinned in
+    # this session-scoped db (2026-03/04/05), per the isolation convention.
+    when = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    _seed_full_month(db, seed, when=when)
+    by_customer = crud.margin_report(
+        session=db, year=2026, month=6, group_by=MarginDimension.CUSTOMER
+    )
+    by_channel = crud.margin_report(
+        session=db, year=2026, month=6, group_by=MarginDimension.CHANNEL
+    )
+    assert _totals(by_customer) == _totals(by_channel)
+    # All activity in the seed belongs to the one seeded customer.
+    assert len(by_customer.rows) == 1
+    assert by_customer.rows[0].label == "Report Cust"
+
+
 def test_product_grouping_scoped_to_sale_channel(db: Session, seed: dict[str, Any]) -> None:  # noqa: F811
     # Dedicated month (2026-04) so the session-scoped db's other SALE activity
     # (test_product_grouping_reconciles_to_channel pins to March) doesn't float
