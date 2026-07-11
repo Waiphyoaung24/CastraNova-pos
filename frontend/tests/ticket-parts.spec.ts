@@ -126,7 +126,7 @@ test("ticketPartsSubtotalThb sums price × quantity", () => {
 
 // --- buildTicketSubmission -------------------------------------------------
 
-test("buildTicketSubmission shapes open/parts/close payloads", () => {
+test("buildTicketSubmission shapes the atomic record payload", () => {
   let lines = addScanToTicketParts([], partScan("SKU-CABLE"), PART_LOOKUP)
   lines = setPartQuantity(lines, "SKU-CABLE", 3)
   const out = buildTicketSubmission(
@@ -138,14 +138,12 @@ test("buildTicketSubmission shapes open/parts/close payloads", () => {
     "idem-123",
   )
   expect(out).toEqual({
-    open: {
-      customer_id: "cust-1",
-      issue: "Won't power on",
-      notes: null,
-      idempotency_key: "idem-123",
-    },
+    customer_id: "cust-1",
+    issue: "Won't power on",
+    notes: null,
+    resolution: "Replaced cable",
+    idempotency_key: "idem-123",
     parts: [{ sku: "SKU-CABLE", quantity: 3 }],
-    close: { resolution: "Replaced cable" },
   })
 })
 
@@ -159,6 +157,6 @@ test("buildTicketSubmission nullifies blank resolution, keeps notes", () => {
     "k",
   )
   expect(out.parts).toEqual([])
-  expect(out.open.notes).toBe("Dropped off")
-  expect(out.close.resolution).toBeNull()
+  expect(out.notes).toBe("Dropped off")
+  expect(out.resolution).toBeNull()
 })

@@ -558,17 +558,6 @@ export type SerialSearchResult = {
     movements: Array<SerialMovementPublic>;
 };
 
-export type ServiceTicketClose = {
-    resolution?: (string | null);
-};
-
-export type ServiceTicketCreate = {
-    customer_id: string;
-    issue: string;
-    notes?: (string | null);
-    idempotency_key: string;
-};
-
 export type ServiceTicketPartCreate = {
     sku: string;
     quantity: number;
@@ -591,6 +580,15 @@ export type ServiceTicketPublic = {
     opened_at: string;
     closed_at: (string | null);
     parts: Array<ServiceTicketPartPublic>;
+};
+
+export type ServiceTicketRecordRequest = {
+    customer_id: string;
+    issue: string;
+    notes?: (string | null);
+    resolution?: (string | null);
+    idempotency_key: string;
+    parts?: Array<ServiceTicketPartCreate>;
 };
 
 export type SkuBatchAdminPublic = {
@@ -1236,31 +1234,17 @@ export type SearchSearchSkuData = {
 
 export type SearchSearchSkuResponse = ((SkuSearchAdminResult | SkuSearchResult));
 
-export type ServiceTicketsOpenServiceTicketData = {
-    requestBody: ServiceTicketCreate;
+export type ServiceTicketsRecordServiceTicketData = {
+    requestBody: ServiceTicketRecordRequest;
 };
 
-export type ServiceTicketsOpenServiceTicketResponse = (ServiceTicketPublic);
+export type ServiceTicketsRecordServiceTicketResponse = (ServiceTicketPublic);
 
 export type ServiceTicketsReadServiceTicketData = {
     ticketId: string;
 };
 
 export type ServiceTicketsReadServiceTicketResponse = (ServiceTicketPublic);
-
-export type ServiceTicketsAddServiceTicketPartData = {
-    requestBody: ServiceTicketPartCreate;
-    ticketId: string;
-};
-
-export type ServiceTicketsAddServiceTicketPartResponse = (ServiceTicketPartPublic);
-
-export type ServiceTicketsCloseServiceTicketData = {
-    requestBody: ServiceTicketClose;
-    ticketId: string;
-};
-
-export type ServiceTicketsCloseServiceTicketResponse = (ServiceTicketPublic);
 
 export type StockAdjustmentsCreateStockAdjustmentData = {
     requestBody: StockAdjustmentCreate;

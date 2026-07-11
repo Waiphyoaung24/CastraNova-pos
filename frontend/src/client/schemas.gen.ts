@@ -2970,61 +2970,6 @@ export const SerialSearchResultSchema = {
     title: 'SerialSearchResult'
 } as const;
 
-export const ServiceTicketCloseSchema = {
-    properties: {
-        resolution: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 512
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Resolution'
-        }
-    },
-    type: 'object',
-    title: 'ServiceTicketClose'
-} as const;
-
-export const ServiceTicketCreateSchema = {
-    properties: {
-        customer_id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Customer Id'
-        },
-        issue: {
-            type: 'string',
-            maxLength: 512,
-            minLength: 1,
-            title: 'Issue'
-        },
-        notes: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 512
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Notes'
-        },
-        idempotency_key: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Idempotency Key'
-        }
-    },
-    type: 'object',
-    required: ['customer_id', 'issue', 'idempotency_key'],
-    title: 'ServiceTicketCreate'
-} as const;
-
 export const ServiceTicketPartCreateSchema = {
     properties: {
         sku: {
@@ -3149,6 +3094,61 @@ export const ServiceTicketPublicSchema = {
     type: 'object',
     required: ['id', 'customer_id', 'issue', 'resolution', 'notes', 'opened_at', 'closed_at', 'parts'],
     title: 'ServiceTicketPublic'
+} as const;
+
+export const ServiceTicketRecordRequestSchema = {
+    properties: {
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        issue: {
+            type: 'string',
+            maxLength: 512,
+            minLength: 1,
+            title: 'Issue'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        resolution: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolution'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        parts: {
+            items: {
+                '$ref': '#/components/schemas/ServiceTicketPartCreate'
+            },
+            type: 'array',
+            title: 'Parts'
+        }
+    },
+    type: 'object',
+    required: ['customer_id', 'issue', 'idempotency_key'],
+    title: 'ServiceTicketRecordRequest'
 } as const;
 
 export const SkuBatchAdminPublicSchema = {

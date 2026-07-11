@@ -14,6 +14,8 @@ import {
   type ReceiveSerializedRequest,
   type SaleCreateRequest,
   SalesService,
+  type ServiceTicketRecordRequest,
+  ServiceTicketsService,
   SyncReviewService,
 } from "@/client"
 import { endSession } from "./auth-session"
@@ -147,4 +149,8 @@ queryClient.setMutationDefaults(["pull-fulfill"], {
       pullId: body.pullId,
       requestBody: body.requestBody,
     }),
+})
+queryClient.setMutationDefaults(["tickets"], {
+  mutationFn: ({ body }: Queued<ServiceTicketRecordRequest>) =>
+    ServiceTicketsService.recordServiceTicket({ requestBody: body }),
 })

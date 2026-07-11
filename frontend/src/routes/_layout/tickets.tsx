@@ -8,7 +8,6 @@ import {
   CustomersService,
   ProductsService,
   type ServiceTicketPublic,
-  ServiceTicketsService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
@@ -31,7 +30,9 @@ import {
 } from "@/components/ui/select"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useScanLookup } from "@/hooks/useScanLookup"
+import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
+import type { Queued } from "@/lib/sync-producer"
 import {
   addScanToTicketParts,
   buildTicketSubmission,
@@ -49,7 +50,6 @@ export const Route = createFileRoute("/_layout/tickets")({
     meta: [{ title: "Tickets - CastraNova POS" }],
   }),
 })
-
 
 interface CustomerPickerProps {
   customers: CustomerPublic[]
@@ -96,48 +96,6 @@ function CustomerPicker({
   )
 }
 
-/**
- * Run the full ticket lifecycle online: open -> add parts -> close.
- *
- * The idempotency key is reused across retries (see idempotencyKeyRef), so a
- * retry resumes the SAME ticket via the idempotent openServiceTicket — no
- * duplicate ticket shell. Known residual: addServiceTicketPart is NOT
- * idempotent (the backend appends a row per call), so if a multi-part
- * submission fails AFTER some parts were already added, a retry re-adds those
- * parts and duplicates part lines on the resumed ticket. Fully fixing this
- * needs an idempotent backend part-add (or client-side tracking of confirmed
- * parts) — deferred per the remediation spec. On any post-open failure we
- * surface a clear message instead of silently leaving the ticket inconsistent.
- */
-async function submitTicket(s: TicketSubmission): Promise<ServiceTicketPublic> {
-  const ticket = await ServiceTicketsService.openServiceTicket({
-    requestBody: s.open,
-  })
-  // The ticket is now open server-side. There is no cancel/void endpoint, so a
-  // failure here cannot be rolled back — surface a clear message and let the
-  // user retry. The retry reuses the same idempotency key (see handleClose), so
-  // openServiceTicket dedupes onto this same ticket instead of orphaning it.
-  try {
-    for (const part of s.parts) {
-      await ServiceTicketsService.addServiceTicketPart({
-        ticketId: ticket.id,
-        requestBody: part,
-      })
-    }
-    return await ServiceTicketsService.closeServiceTicket({
-      ticketId: ticket.id,
-      requestBody: s.close,
-    })
-  } catch {
-    // No cancel/void endpoint exists to roll the opened ticket back, so surface
-    // a clear retry message; the retry reuses the same idempotency key and
-    // resumes this ticket rather than opening a duplicate.
-    throw new Error(
-      "Ticket opened but could not be completed. Retry to resume it.",
-    )
-  }
-}
-
 function Tickets() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -153,9 +111,9 @@ function Tickets() {
   // so it needs its own message slot, cleared on the next successful PART add.
   const [scanNotice, setScanNotice] = useState<string>("")
   const scanRef = useRef<ScanFieldHandle>(null)
-  // One idempotency key per logical submission. Reused across retries so a retry
-  // after a partial failure resumes the same ticket instead of opening a duplicate.
-  // Rotated only after a ticket successfully closes.
+  // One idempotency key per logical submission. Reused across an offline replay
+  // so record_service_ticket dedupes onto the same ticket. Rotated only after a
+  // ticket successfully closes.
   const idempotencyKeyRef = useRef<string>(crypto.randomUUID())
 
   const customerSelectId = useId()
@@ -208,8 +166,15 @@ function Tickets() {
     reset()
   }, [result, partLookup, reset])
 
-  const mutation = useMutation<ServiceTicketPublic, Error, TicketSubmission>({
-    mutationFn: submitTicket,
+  const mutation = useMutation<
+    ServiceTicketPublic,
+    Error,
+    Queued<TicketSubmission>
+  >({
+    // No mutationFn here on purpose: inherit the persisted ["tickets"] default
+    // from query-client.ts so an offline close is queued and replayed by key
+    // (the whole-ticket idempotency_key makes the replay safe).
+    mutationKey: ["tickets"],
     onSuccess: (ticket) => {
       const total = ticket.parts.reduce(
         (sum, p) => sum + Number(p.unit_price_thb) * p.quantity,
@@ -224,10 +189,8 @@ function Tickets() {
       showSuccessToast("Ticket closed.")
       scanRef.current?.focus()
     },
-    onError: (err) => {
-      showErrorToast(
-        err.message || "Could not close the ticket. Please try again.",
-      )
+    onError: () => {
+      showErrorToast("Could not close the ticket. Please try again.")
     },
   })
 
@@ -244,7 +207,9 @@ function Tickets() {
       resolution,
       idempotencyKeyRef.current,
     )
-    mutation.mutate(submission)
+    // One idempotency key per attempt, reused across an offline replay so the
+    // backend dedupes (record_service_ticket is idempotent on it).
+    mutation.mutate(queued(submission, idempotencyKeyRef.current))
   }, [canClose, parts, customerId, issue, notes, resolution, mutation])
 
   const closeButton = (
