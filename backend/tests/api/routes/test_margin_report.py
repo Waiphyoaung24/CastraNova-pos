@@ -23,9 +23,10 @@ def _totals(
     return (report.total_revenue_thb, report.total_cogs_thb, report.total_margin_thb)
 
 
-def test_channel_grouping_matches_legacy_report(db: Session, seed) -> None:  # noqa: ARG001, F811
-    """margin_report(group_by=CHANNEL) equals the legacy channel_margin_report."""
-    legacy = crud.channel_margin_report(session=db, year=2099, month=2)  # empty month
+def test_channel_grouping_empty_month_all_zero(db: Session, seed) -> None:  # noqa: ARG001, F811
+    """margin_report(group_by=CHANNEL) for an empty month: always three fixed
+    rows, all zero. (Legacy crud.channel_margin_report was deleted in FR-013
+    Task 5; this test used to assert parity against it.)"""
     new = crud.margin_report(
         session=db, year=2099, month=2, group_by=MarginDimension.CHANNEL
     )
@@ -35,16 +36,11 @@ def test_channel_grouping_matches_legacy_report(db: Session, seed) -> None:  # n
         Channel.MAINTENANCE.value,
         Channel.PROJECT.value,
     ]
-    assert _totals(new) == (
-        legacy.total_revenue_thb,
-        legacy.total_cogs_thb,
-        legacy.total_margin_thb,
-    )
-    for legacy_row, new_row in zip(legacy.channels, new.rows, strict=True):
-        assert new_row.label == legacy_row.channel.value
-        assert new_row.revenue_thb == legacy_row.revenue_thb
-        assert new_row.cogs_thb == legacy_row.cogs_thb
-        assert new_row.margin_thb == legacy_row.margin_thb
+    assert _totals(new) == (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+    for row in new.rows:
+        assert row.revenue_thb == Decimal("0.00")
+        assert row.cogs_thb == Decimal("0.00")
+        assert row.margin_thb == Decimal("0.00")
 
 
 def test_channel_filter_returns_single_channel(db: Session, seed) -> None:  # noqa: ARG001, F811

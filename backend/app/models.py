@@ -1526,21 +1526,6 @@ class NotificationPreferencesUpdate(SQLModel):
 MoneyTHB = Annotated[Decimal, Field(decimal_places=2, max_digits=14)]
 
 
-class ChannelMarginRow(SQLModel):
-    channel: Channel
-    revenue_thb: MoneyTHB
-    cogs_thb: MoneyTHB
-    margin_thb: MoneyTHB
-
-
-class ChannelMarginReport(SQLModel):
-    month: str  # "YYYY-MM"
-    channels: list[ChannelMarginRow]  # always 3 rows: SALE, MAINTENANCE, PROJECT
-    total_revenue_thb: MoneyTHB
-    total_cogs_thb: MoneyTHB
-    total_margin_thb: MoneyTHB
-
-
 class MarginDimension(str, enum.Enum):
     CHANNEL = "channel"
     PRODUCT = "product"
