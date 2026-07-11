@@ -322,8 +322,8 @@ function Audit() {
           })}
         </div>
       ) : (
-        <Table>
-          <TableHeader>
+        <Table containerClassName="max-h-[60vh] overflow-y-auto">
+          <TableHeader className="bg-muted sticky top-0 z-10">
             <TableRow>
               <TableHead>When</TableHead>
               <TableHead>By</TableHead>
