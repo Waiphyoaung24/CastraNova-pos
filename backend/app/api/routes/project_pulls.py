@@ -109,11 +109,14 @@ def fulfill_project_pull(
         fulfill_lines=payload.lines,
         actor_user_id=current_user.id,
     )
-    # FR-018: notify BKK admins on a SHORT settlement. Dispatched to a background
-    # task (its own session, swallows errors) so outbound HTTP + retries never
-    # block the request or turn a successful fulfill into a 500.
+    # FR-018: notify BKK admins on settlement. Dispatched to a background task
+    # (its own session, swallows errors) so outbound HTTP + retries never block
+    # the request or turn a successful fulfill into a 500. SHORT and FULFILLED are
+    # mutually exclusive terminal states, so at most one event fires.
     if pull.state == ProjectPullState.SHORT:
         background_tasks.add_task(notify.notify_pull_short_bg, pull_id=pull.id)
+    elif pull.state == ProjectPullState.FULFILLED:
+        background_tasks.add_task(notify.notify_pull_fulfilled_bg, pull_id=pull.id)
     # FR-016: alert when fulfillment dropped a SKU below its low-stock threshold.
     crossed = crud.pop_low_stock_crossed(session)
     if crossed:

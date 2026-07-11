@@ -28,6 +28,7 @@ from app.models import (
     UnitMovement,
     UnitState,
 )
+from app.services import notify
 from tests.utils.utils import assert_no_financial_keys
 
 PREFIX = settings.API_V1_STR
@@ -210,6 +211,75 @@ def test_fulfill_absent_lines_default_to_requested(
     assert out["state"] == "FULFILLED"
     part_line = next(ln for ln in out["lines"] if ln["line_kind"] == "PART")
     assert part_line["fulfilled_qty"] == 2
+
+
+def test_full_fulfill_schedules_fulfilled_notification(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # FR-018: a fully-fulfilled pull schedules the FULFILLED notification and not
+    # the SHORT one. TestClient runs background tasks after the response.
+    calls: dict[str, list[uuid.UUID]] = {"fulfilled": [], "short": []}
+    monkeypatch.setattr(
+        notify,
+        "notify_pull_fulfilled_bg",
+        lambda *, pull_id: calls["fulfilled"].append(pull_id),
+    )
+    monkeypatch.setattr(
+        notify,
+        "notify_pull_short_bg",
+        lambda *, pull_id: calls["short"].append(pull_id),
+    )
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=2)
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/fulfill",
+        headers=staff_token_headers,
+        json={"lines": []},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "FULFILLED"
+    assert calls["fulfilled"] == [uuid.UUID(pull["id"])]
+    assert calls["short"] == []
+
+
+def test_short_fulfill_does_not_schedule_fulfilled_notification(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # FR-018: a short pull keeps firing SHORT only — never the FULFILLED event.
+    calls: dict[str, list[uuid.UUID]] = {"fulfilled": [], "short": []}
+    monkeypatch.setattr(
+        notify,
+        "notify_pull_fulfilled_bg",
+        lambda *, pull_id: calls["fulfilled"].append(pull_id),
+    )
+    monkeypatch.setattr(
+        notify,
+        "notify_pull_short_bg",
+        lambda *, pull_id: calls["short"].append(pull_id),
+    )
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=5)
+    line_ids = {ln["line_kind"]: ln["id"] for ln in pull["lines"]}
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/fulfill",
+        headers=staff_token_headers,
+        json={
+            "lines": [
+                {"line_id": line_ids["UNIT"], "fulfilled_qty": 1},
+                {"line_id": line_ids["PART"], "fulfilled_qty": 3},  # < 5 requested
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "SHORT"
+    assert calls["short"] == [uuid.UUID(pull["id"])]
+    assert calls["fulfilled"] == []
 
 
 def test_staff_queue_lists_pending(
