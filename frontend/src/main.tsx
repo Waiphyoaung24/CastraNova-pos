@@ -13,7 +13,11 @@ import {
   ensureValidSession,
   installAuthInterceptor,
 } from "./lib/auth-session"
-import { persister, queryClient } from "./lib/query-client"
+import {
+  divertStaleMutations,
+  persister,
+  queryClient,
+} from "./lib/query-client"
 import { routeTree } from "./routeTree.gen"
 
 OpenAPI.BASE = import.meta.env.VITE_API_URL
@@ -45,10 +49,14 @@ if (navigator.onLine && !window.location.pathname.startsWith("/login")) {
 }
 
 // Replay offline-queued mutations as soon as the network returns — but only
-// once we hold a valid session, so a replay never fires with a dead token
-// (which would error the mutation out of the queue and lose the sale).
+// once we hold a valid session (so a replay never fires with a dead token and
+// loses the sale), and after holding back anything older than the 7-day cap
+// for admin review.
 window.addEventListener("online", async () => {
-  if (await ensureValidSession()) queryClient.resumePausedMutations()
+  if (await ensureValidSession()) {
+    divertStaleMutations()
+    queryClient.resumePausedMutations()
+  }
 })
 
 const router = createRouter({ routeTree })
@@ -71,7 +79,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           // replay after the user logs back in (idempotency keys dedupe). This
           // is what prevents a >12h-offline reconnect from firing a queued sale
           // against a dead token and erroring it out of the queue (lost sale).
+          // Before resuming, hold back anything older than the 7-day cap for
+          // admin review.
           if (await ensureValidSession()) {
+            divertStaleMutations()
             queryClient.resumePausedMutations()
           }
         }}

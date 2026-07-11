@@ -42,6 +42,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
+import { queued } from "@/lib/query-client"
 import {
   addPiece,
   buildReceiveQuantityRequest,
@@ -53,6 +54,7 @@ import {
   removePiece,
 } from "@/lib/receive-form"
 import { requireAdmin } from "@/lib/route-guards"
+import type { Queued } from "@/lib/sync-producer"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/_layout/receive")({
@@ -161,7 +163,7 @@ function SerializedTab() {
   const mutation = useMutation<
     ReceiveSerializedResponse,
     Error,
-    ReceiveSerializedRequest
+    Queued<ReceiveSerializedRequest>
   >({
     mutationKey: ["receipts"],
     onSuccess: (data) => {
@@ -208,7 +210,7 @@ function SerializedTab() {
       supplierId,
       crypto.randomUUID(),
     )
-    mutation.mutate(request)
+    mutation.mutate(queued(request, request.idempotency_key))
   }
 
   const canSubmit = canSubmitSerialized(pieces, productId, supplierId)
