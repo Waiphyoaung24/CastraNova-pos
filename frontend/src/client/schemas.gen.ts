@@ -317,66 +317,6 @@ export const ChannelSchema = {
     title: 'Channel'
 } as const;
 
-export const ChannelMarginReportSchema = {
-    properties: {
-        month: {
-            type: 'string',
-            title: 'Month'
-        },
-        channels: {
-            items: {
-                '$ref': '#/components/schemas/ChannelMarginRow'
-            },
-            type: 'array',
-            title: 'Channels'
-        },
-        total_revenue_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Revenue Thb'
-        },
-        total_cogs_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Cogs Thb'
-        },
-        total_margin_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Margin Thb'
-        }
-    },
-    type: 'object',
-    required: ['month', 'channels', 'total_revenue_thb', 'total_cogs_thb', 'total_margin_thb'],
-    title: 'ChannelMarginReport'
-} as const;
-
-export const ChannelMarginRowSchema = {
-    properties: {
-        channel: {
-            '$ref': '#/components/schemas/Channel'
-        },
-        revenue_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Revenue Thb'
-        },
-        cogs_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Cogs Thb'
-        },
-        margin_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Margin Thb'
-        }
-    },
-    type: 'object',
-    required: ['channel', 'revenue_thb', 'cogs_thb', 'margin_thb'],
-    title: 'ChannelMarginRow'
-} as const;
-
 export const CustomerCreateSchema = {
     properties: {
         name: {
@@ -773,6 +713,90 @@ export const LowStockItemPublicSchema = {
     type: 'object',
     required: ['product_id', 'sku', 'model_name', 'tracking_mode', 'on_hand', 'min_stock_level'],
     title: 'LowStockItemPublic'
+} as const;
+
+export const MarginBreakdownReportSchema = {
+    properties: {
+        month: {
+            type: 'string',
+            title: 'Month'
+        },
+        group_by: {
+            '$ref': '#/components/schemas/MarginDimension'
+        },
+        channel: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/Channel'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        rows: {
+            items: {
+                '$ref': '#/components/schemas/MarginBreakdownRow'
+            },
+            type: 'array',
+            title: 'Rows'
+        },
+        total_revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Revenue Thb'
+        },
+        total_cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Cogs Thb'
+        },
+        total_margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Margin Thb'
+        }
+    },
+    type: 'object',
+    required: ['month', 'group_by', 'channel', 'rows', 'total_revenue_thb', 'total_cogs_thb', 'total_margin_thb'],
+    title: 'MarginBreakdownReport'
+} as const;
+
+export const MarginBreakdownRowSchema = {
+    properties: {
+        key: {
+            type: 'string',
+            title: 'Key'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Revenue Thb'
+        },
+        cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Cogs Thb'
+        },
+        margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Margin Thb'
+        }
+    },
+    type: 'object',
+    required: ['key', 'label', 'revenue_thb', 'cogs_thb', 'margin_thb'],
+    title: 'MarginBreakdownRow'
+} as const;
+
+export const MarginDimensionSchema = {
+    type: 'string',
+    enum: ['channel', 'product', 'customer', 'project'],
+    title: 'MarginDimension'
 } as const;
 
 export const MessageSchema = {
