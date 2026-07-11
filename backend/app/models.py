@@ -668,15 +668,11 @@ class PartBatchBase(SQLModel):
 
 class PartBatch(PartBatchBase, table=True):
     # UNIQUE(product_id, batch_no) — race-safe sequence backstop (§6.4); index
-    # (product_id, remaining_qty) drives FIFO candidate scans (§6.3); standalone
-    # batch_no index for a product_id-agnostic lookup (audit batch filter, FR-019
-    # — the UNIQUE above leads with product_id, so it doesn't serve a bare batch_no
-    # equality); CHECK keeps remaining_qty within [0, received_qty] at the DB level
-    # (§4.6 no-negative).
+    # (product_id, remaining_qty) drives FIFO candidate scans (§6.3); CHECK keeps
+    # remaining_qty within [0, received_qty] at the DB level (§4.6 no-negative).
     __table_args__ = (
         UniqueConstraint("product_id", "batch_no", name="uq_part_batch_product_no"),
         Index("ix_part_batch_product_remaining", "product_id", "remaining_qty"),
-        Index("ix_part_batch_batch_no", "batch_no"),
         CheckConstraint(
             "received_qty > 0 AND remaining_qty >= 0 "
             "AND remaining_qty <= received_qty",
@@ -763,16 +759,6 @@ class PartMovement(PartMovementBase, table=True):
             "service_ticket_id",
             unique=False,
             postgresql_where=text("service_ticket_id IS NOT NULL"),
-        ),
-        # Partial: part_batch_id is only ever set on the RECEIVED movement that
-        # created a batch (NULL on consumption rows, see the field comment above),
-        # so a partial index over the non-null subset serves the audit batch
-        # filter (FR-019) without indexing every consumption row.
-        Index(
-            "ix_partmovement_part_batch_id",
-            "part_batch_id",
-            unique=False,
-            postgresql_where=text("part_batch_id IS NOT NULL"),
         ),
         CheckConstraint("quantity > 0", name="ck_part_movement_qty_positive"),
     )
