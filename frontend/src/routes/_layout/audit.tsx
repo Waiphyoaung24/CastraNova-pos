@@ -350,7 +350,9 @@ function Audit() {
                     {actorName(e.actor_user_id)}
                   </TableCell>
                   <TableCell>{e.event_type}</TableCell>
-                  <TableCell>{e.product_model_name ?? itemRef(e)}</TableCell>
+                  <TableCell className="max-w-xs truncate">
+                    {e.product_model_name ?? itemRef(e)}
+                  </TableCell>
                   <TableCell>
                     {source ? (
                       <Badge variant="outline">{source.label}</Badge>
