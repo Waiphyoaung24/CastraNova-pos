@@ -67,13 +67,20 @@ function Audit() {
   const fromId = useId()
   const toId = useId()
   const userSelectId = useId()
+  const skuSelectId = useId()
+  const batchId = useId()
   const [filter, setFilter] = useState<AuditFilter>({
     eventType: "",
     fromDate: "",
     toDate: "",
     actorUserId: "",
+    sku: "",
+    batchNo: "",
   })
   const [selected, setSelected] = useState<AuditEntryPublic | null>(null)
+  const [batchInput, setBatchInput] = useState("")
+  const commitBatch = () =>
+    setFilter((f) => ({ ...f, batchNo: batchInput.trim() }))
 
   const { data, isPending, isError } = useQuery({
     queryKey: ["audit", filter],
@@ -199,6 +206,44 @@ function Audit() {
               setFilter((f) => ({ ...f, toDate: e.target.value }))
             }
             className="w-full sm:w-44"
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={skuSelectId}>SKU</Label>
+          <Select
+            value={filter.sku || ALL}
+            onValueChange={(v) =>
+              setFilter((f) => ({ ...f, sku: v === ALL ? "" : v }))
+            }
+          >
+            <SelectTrigger id={skuSelectId} className="w-full sm:w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All SKUs</SelectItem>
+              {(products ?? []).map((p) => (
+                <SelectItem key={p.id} value={p.sku}>
+                  {p.sku}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={batchId}>Batch #</Label>
+          <Input
+            id={batchId}
+            value={batchInput}
+            onChange={(e) => setBatchInput(e.target.value)}
+            onBlur={commitBatch}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                commitBatch()
+              }
+            }}
+            placeholder="e.g. 20260611-ABC-001"
+            className="w-full sm:w-52"
           />
         </div>
       </div>
