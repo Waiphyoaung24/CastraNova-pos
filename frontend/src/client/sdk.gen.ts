@@ -687,7 +687,7 @@ export class ProjectPullsService {
             }
         });
     }
-    
+
     /**
      * Read Project Pulls
      * @param data The data for the request.
@@ -817,7 +817,7 @@ export class ProjectsService {
             }
         });
     }
-    
+
     /**
      * Read Options
      * @returns ProjectOption Successful Response
@@ -829,7 +829,7 @@ export class ProjectsService {
             url: '/api/v1/projects/options'
         });
     }
-    
+
     /**
      * Get Project Dashboard
      * @param data The data for the request.
@@ -1347,7 +1347,7 @@ export class SuppliersService {
             url: '/api/v1/suppliers/options'
         });
     }
-    
+
     /**
      * Update Supplier
      * @param data The data for the request.
