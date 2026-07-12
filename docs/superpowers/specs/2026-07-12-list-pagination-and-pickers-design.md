@@ -297,7 +297,7 @@ Products pickers and the audit ledger are **already migrated** by
   equals the *filtered* total, not the table total. Per filtered endpoint.
 - Pagination: `skip`/`limit` return correct, disjoint slices; a page past the end returns
   empty `data` with a correct `count`.
-- **Role-tiering:** a staff user hitting `/products/picker` receives selling prices and the
+- **Role-tiering:** a staff user hitting `/products/options` receives selling prices and the
   cost key is **absent** from the payload (not null — absent).
 - Denormalized `product_sku` present on override rows and pull-line rows, **including for a
   deactivated product**.
