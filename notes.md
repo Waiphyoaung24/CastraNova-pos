@@ -281,9 +281,16 @@ Spec: `docs/superpowers/specs/2026-07-12-list-pagination-and-pickers-design.md` 
 
 | Entity | Filter applied | Effect |
 |---|---|---|
-| **Products** | `is_active = True` (`models.py:372`, indexed) | A **discontinued product disappears from the sale / receive / tickets / pulls dropdowns.** |
+| **Products** | `GET /products/options?active_only=true` (`is_active`, `models.py:372`, indexed) | A **discontinued product disappears from the sale / receive / tickets / pulls dropdowns.** |
 | **Projects** | `status = ACTIVE` (`ProjectStatus`, `models.py:105`) | A **CLOSED project can no longer be selected when creating a project pull.** |
 | Customers, Suppliers | *none — these tables have no active flag at all* | No change possible. |
+
+**Deliberately NOT filtered: the audit SKU combobox.** It shares `/products/options`, and
+`list_product_options`' own docstring notes it must include inactive products — "whose
+historical movements still appear in the append-only ledgers." Filtering them out would make
+a discontinued product's SKU unfilterable in the ledger. Hence the filter is an **opt-in
+query param** (`active_only`, default `false`), which the *pickers* pass and the *audit
+filter* does not — rather than an unconditional `WHERE` on the endpoint.
 
 **Why.** `is_active` is currently **read nowhere in the frontend** — so today, discontinued
 products still appear in every dropdown, and a closed project can still take new pulls. That
