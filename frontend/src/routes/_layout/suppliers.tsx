@@ -9,6 +9,7 @@ import {
   SuppliersService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { SupplierEditDialog } from "@/components/suppliers/SupplierEditDialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { requireAdmin } from "@/lib/route-guards"
 import { buildSupplierPayload, canCreateSupplier } from "@/lib/supplier-create"
 
@@ -50,11 +52,17 @@ function Suppliers() {
   const [country, setCountry] = useState("")
   const [contact, setContact] = useState("")
   const [editing, setEditing] = useState<SupplierPublic | null>(null)
+  const pagination = usePagination()
 
-  const { data: suppliers } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: () => SuppliersService.readSuppliers(),
+  const { data: suppliersResponse } = useQuery({
+    queryKey: ["suppliers", pagination.page],
+    queryFn: () =>
+      SuppliersService.readSuppliers({
+        skip: pagination.skip,
+        limit: pagination.limit,
+      }),
   })
+  const suppliers = suppliersResponse?.data ?? []
 
   const createMutation = useMutation<SupplierPublic, Error, SupplierCreate>({
     mutationFn: (payload) =>
@@ -137,13 +145,13 @@ function Suppliers() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Existing suppliers</h2>
-        {(suppliers ?? []).length === 0 ? (
+        {suppliers.length === 0 ? (
           <p className="text-muted-foreground py-6 text-center text-sm">
             No suppliers yet.
           </p>
         ) : isMobile ? (
           <div className="space-y-3">
-            {(suppliers ?? []).map((s) => (
+            {suppliers.map((s) => (
               <div key={s.id} className="bg-card rounded-lg border p-4">
                 <p className="font-medium">{s.name}</p>
                 <div className="mt-2 flex flex-col gap-1 text-sm">
@@ -170,7 +178,7 @@ function Suppliers() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(suppliers ?? []).map((s) => (
+            {suppliers.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell className="text-muted-foreground">
@@ -195,6 +203,12 @@ function Suppliers() {
             </TableBody>
           </Table>
         )}
+        <PaginationControls
+          total={suppliersResponse?.count ?? 0}
+          pageSize={pagination.pageSize}
+          page={pagination.page}
+          onPageChange={pagination.setPage}
+        />
       </div>
 
       {editing && (

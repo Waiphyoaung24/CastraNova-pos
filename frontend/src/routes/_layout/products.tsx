@@ -10,6 +10,7 @@ import {
   type TrackingMode,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { EmptyState } from "@/components/EmptyState"
 import { EditProductDialog } from "@/components/products/EditProductDialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -41,6 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { usePagination } from "@/hooks/usePagination"
 import { trackingModeLabel } from "@/lib/labels"
 import { buildProductPayload, canCreateProduct } from "@/lib/product-create"
 import { formatThb } from "@/lib/reports"
@@ -77,11 +79,17 @@ function Products() {
   const [retailPrice, setRetailPrice] = useState("")
   const [repairPrice, setRepairPrice] = useState("")
   const [minStock, setMinStock] = useState("")
+  const pagination = usePagination()
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
+  const { data: productsResponse } = useQuery({
+    queryKey: ["products", pagination.page],
+    queryFn: () =>
+      ProductsService.readProducts({
+        skip: pagination.skip,
+        limit: pagination.limit,
+      }),
   })
+  const products = productsResponse?.data ?? []
   const { data: purchaseCosts } = useQuery({
     queryKey: ["product-purchase-costs"],
     queryFn: () => ProductsService.readPurchaseCosts(),
@@ -243,7 +251,7 @@ function Products() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Catalog</h2>
-        {(products ?? []).length === 0 ? (
+        {products.length === 0 ? (
           <EmptyState
             icon={Package}
             title="No products yet"
@@ -265,7 +273,7 @@ function Products() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(products ?? []).map((p) => (
+              {products.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="num font-medium">{p.sku}</TableCell>
                   <TableCell>{p.model_name}</TableCell>
@@ -302,6 +310,12 @@ function Products() {
             </TableBody>
           </Table>
         )}
+        <PaginationControls
+          total={productsResponse?.count ?? 0}
+          pageSize={pagination.pageSize}
+          page={pagination.page}
+          onPageChange={pagination.setPage}
+        />
       </div>
     </div>
   )

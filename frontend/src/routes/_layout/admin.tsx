@@ -10,18 +10,20 @@ import { TierBadge } from "@/components/Admin/TierBadge"
 import { UserActionsMenu } from "@/components/Admin/UserActionsMenu"
 import { DataTable } from "@/components/Common/DataTable"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import PendingUsers from "@/components/Pending/PendingUsers"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import useAuth from "@/hooks/useAuth"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { requireSuperuser } from "@/lib/route-guards"
 import { cn } from "@/lib/utils"
 
-function getUsersQueryOptions() {
+function getUsersQueryOptions(skip: number, limit: number) {
   return {
-    queryFn: () => UsersService.readUsers({ skip: 0, limit: 100 }),
-    queryKey: ["users"],
+    queryFn: () => UsersService.readUsers({ skip, limit }),
+    queryKey: ["users", skip, limit],
   }
 }
 
@@ -84,7 +86,10 @@ function UserCard({ user }: { user: UserTableData }) {
 function UsersTableContent() {
   const isMobile = useIsMobile()
   const { user: currentUser } = useAuth()
-  const { data: users } = useSuspenseQuery(getUsersQueryOptions())
+  const pagination = usePagination()
+  const { data: users } = useSuspenseQuery(
+    getUsersQueryOptions(pagination.skip, pagination.limit),
+  )
 
   const tableData: UserTableData[] = users.data.map((user: UserPublic) => ({
     ...user,
@@ -92,20 +97,42 @@ function UsersTableContent() {
   }))
 
   if (isMobile) {
-    return tableData.length === 0 ? (
-      <p className="text-muted-foreground py-6 text-center text-sm">
-        No results found.
-      </p>
-    ) : (
-      <div className="space-y-3">
-        {tableData.map((user) => (
-          <UserCard key={user.id} user={user} />
-        ))}
-      </div>
+    return (
+      <>
+        {tableData.length === 0 ? (
+          <p className="text-muted-foreground py-6 text-center text-sm">
+            No results found.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {tableData.map((user) => (
+              <UserCard key={user.id} user={user} />
+            ))}
+          </div>
+        )}
+        <PaginationControls
+          total={users.count}
+          pageSize={pagination.pageSize}
+          page={pagination.page}
+          onPageChange={pagination.setPage}
+        />
+      </>
     )
   }
 
-  return <DataTable columns={columns} data={tableData} />
+  return (
+    <DataTable
+      columns={columns}
+      data={tableData}
+      manualPagination={{
+        pageCount: pagination.pageCount(users.count),
+        pageIndex: pagination.page - 1,
+        pageSize: pagination.pageSize,
+        total: users.count,
+        onPageChange: (pageIndex) => pagination.setPage(pageIndex + 1),
+      }}
+    />
+  )
 }
 
 function UsersTable() {

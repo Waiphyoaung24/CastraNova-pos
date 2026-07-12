@@ -9,6 +9,7 @@ import {
   type CustomerType,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { buildCustomerPayload, canCreateCustomer } from "@/lib/customer-create"
 import { requireAdmin } from "@/lib/route-guards"
 
@@ -218,11 +220,17 @@ function Customers() {
   const isMobile = useIsMobile()
   const [draft, setDraft] = useState<CustomerDraft>(EMPTY_DRAFT)
   const [editing, setEditing] = useState<CustomerPublic | null>(null)
+  const pagination = usePagination()
 
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
+  const { data: customersResponse } = useQuery({
+    queryKey: ["customers", pagination.page],
+    queryFn: () =>
+      CustomersService.readCustomers({
+        skip: pagination.skip,
+        limit: pagination.limit,
+      }),
   })
+  const customers = customersResponse?.data ?? []
 
   const createMutation = useMutation<CustomerPublic, Error, void>({
     mutationFn: () =>
@@ -278,13 +286,13 @@ function Customers() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Existing customers</h2>
-        {(customers ?? []).length === 0 ? (
+        {customers.length === 0 ? (
           <p className="text-muted-foreground py-6 text-center text-sm">
             No customers yet.
           </p>
         ) : isMobile ? (
           <div className="space-y-3">
-            {(customers ?? []).map((c) => (
+            {customers.map((c) => (
               <div key={c.id} className="bg-card rounded-lg border p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -327,7 +335,7 @@ function Customers() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(customers ?? []).map((c) => (
+            {customers.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell>
@@ -356,6 +364,12 @@ function Customers() {
             </TableBody>
           </Table>
         )}
+        <PaginationControls
+          total={customersResponse?.count ?? 0}
+          pageSize={pagination.pageSize}
+          page={pagination.page}
+          onPageChange={pagination.setPage}
+        />
       </div>
 
       {editing && (
