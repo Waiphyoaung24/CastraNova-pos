@@ -6,6 +6,7 @@ import {
   type NotificationPreferenceUpdate,
   NotificationsService,
 } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -42,10 +43,11 @@ function Notifications() {
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["notification-preferences"],
     queryFn: () => NotificationsService.readNotificationPreferences(),
   })
+  const listLoading = isPlaceholderData || isFetching
 
   const updateMutation = useMutation({
     mutationFn: (pref: NotificationPreferenceUpdate) =>
@@ -91,67 +93,71 @@ function Notifications() {
           No notification channels configured.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((p) => (
-            <div
-              key={p.id}
-              className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4"
-            >
-              <div className="min-w-0">
-                <Badge variant="secondary">{channelLabel(p.channel)}</Badge>
-                <p className="mt-1 truncate text-sm">
-                  {humanize(p.event_type)}
-                </p>
-              </div>
-              <Checkbox
-                checked={p.enabled}
-                disabled={updateMutation.isPending}
-                aria-label={`${channelLabel(p.channel)} ${humanize(p.event_type)}`}
-                onCheckedChange={(checked) =>
-                  updateMutation.mutate({
-                    channel: p.channel,
-                    event_type: p.event_type,
-                    enabled: checked === true,
-                  })
-                }
-              />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Send to</TableHead>
-              <TableHead>Event</TableHead>
-              <TableHead className="text-right">Enabled</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
             {rows.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell>
+              <div
+                key={p.id}
+                className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4"
+              >
+                <div className="min-w-0">
                   <Badge variant="secondary">{channelLabel(p.channel)}</Badge>
-                </TableCell>
-                <TableCell>{humanize(p.event_type)}</TableCell>
-                <TableCell className="text-right">
-                  <Checkbox
-                    checked={p.enabled}
-                    disabled={updateMutation.isPending}
-                    aria-label={`${channelLabel(p.channel)} ${humanize(p.event_type)}`}
-                    onCheckedChange={(checked) =>
-                      updateMutation.mutate({
-                        channel: p.channel,
-                        event_type: p.event_type,
-                        enabled: checked === true,
-                      })
-                    }
-                  />
-                </TableCell>
-              </TableRow>
+                  <p className="mt-1 truncate text-sm">
+                    {humanize(p.event_type)}
+                  </p>
+                </div>
+                <Checkbox
+                  checked={p.enabled}
+                  disabled={updateMutation.isPending}
+                  aria-label={`${channelLabel(p.channel)} ${humanize(p.event_type)}`}
+                  onCheckedChange={(checked) =>
+                    updateMutation.mutate({
+                      channel: p.channel,
+                      event_type: p.event_type,
+                      enabled: checked === true,
+                    })
+                  }
+                />
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={listLoading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead>Send to</TableHead>
+                <TableHead>Event</TableHead>
+                <TableHead className="text-right">Enabled</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <Badge variant="secondary">{channelLabel(p.channel)}</Badge>
+                  </TableCell>
+                  <TableCell>{humanize(p.event_type)}</TableCell>
+                  <TableCell className="text-right">
+                    <Checkbox
+                      checked={p.enabled}
+                      disabled={updateMutation.isPending}
+                      aria-label={`${channelLabel(p.channel)} ${humanize(p.event_type)}`}
+                      onCheckedChange={(checked) =>
+                        updateMutation.mutate({
+                          channel: p.channel,
+                          event_type: p.event_type,
+                          enabled: checked === true,
+                        })
+                      }
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ListShell>
       )}
     </div>
   )

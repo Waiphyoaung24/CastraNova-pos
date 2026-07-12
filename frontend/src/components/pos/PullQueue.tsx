@@ -1,6 +1,7 @@
 import { ClipboardList } from "lucide-react"
 
 import type { ProjectPullPublic, ProjectPullState } from "@/client/types.gen"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,6 +32,8 @@ interface PullQueueProps {
   onNew: () => void
   /** Disables actions while a cancel is in flight. */
   isCancelling: boolean
+  /** A page/filter fetch is in flight while the current rows stay on screen. */
+  loading?: boolean
 }
 
 const STATE_VARIANT: Record<
@@ -100,6 +103,7 @@ export function PullQueue({
   onCancel,
   onNew,
   isCancelling,
+  loading = false,
 }: PullQueueProps) {
   const isMobile = useIsMobile()
   return (
@@ -141,76 +145,33 @@ export function PullQueue({
           No requests to show.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {pulls.map((pull) => (
-            <div key={pull.id} className="bg-card rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">
-                    {projectLabels.get(pull.project_id) ?? pull.project_id}
-                  </p>
-                  <p className="text-muted-foreground truncate text-sm">
-                    {customerLabels.get(pull.customer_id) ?? pull.customer_id}
-                  </p>
-                </div>
-                <Badge variant={STATE_VARIANT[pull.state]}>
-                  {STATE_LABEL[pull.state]}
-                </Badge>
-              </div>
-              <div className="text-muted-foreground mt-2 flex items-center gap-3 text-xs">
-                <span className="num">
-                  {new Date(pull.created_at).toLocaleDateString()}
-                </span>
-                <span>
-                  {pull.lines.length}{" "}
-                  {pull.lines.length === 1 ? "item" : "items"} needed
-                </span>
-              </div>
-              <div className="mt-3 border-t pt-3">
-                <PullActions
-                  pull={pull}
-                  isAdmin={isAdmin}
-                  isCancelling={isCancelling}
-                  onSelect={onSelect}
-                  onCancel={onCancel}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Project</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead className="text-center">Items</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={loading}>
+          <div className="space-y-3">
             {pulls.map((pull) => (
-              <TableRow key={pull.id}>
-                <TableCell className="font-medium">
-                  {projectLabels.get(pull.project_id) ?? pull.project_id}
-                </TableCell>
-                <TableCell>
-                  {customerLabels.get(pull.customer_id) ?? pull.customer_id}
-                </TableCell>
-                <TableCell className="num text-xs">
-                  {new Date(pull.created_at).toLocaleDateString()}
-                </TableCell>
-                <TableCell className="num text-center">
-                  {pull.lines.length}
-                </TableCell>
-                <TableCell>
+              <div key={pull.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">
+                      {projectLabels.get(pull.project_id) ?? pull.project_id}
+                    </p>
+                    <p className="text-muted-foreground truncate text-sm">
+                      {customerLabels.get(pull.customer_id) ?? pull.customer_id}
+                    </p>
+                  </div>
                   <Badge variant={STATE_VARIANT[pull.state]}>
                     {STATE_LABEL[pull.state]}
                   </Badge>
-                </TableCell>
-                <TableCell className="text-right">
+                </div>
+                <div className="text-muted-foreground mt-2 flex items-center gap-3 text-xs">
+                  <span className="num">
+                    {new Date(pull.created_at).toLocaleDateString()}
+                  </span>
+                  <span>
+                    {pull.lines.length}{" "}
+                    {pull.lines.length === 1 ? "item" : "items"} needed
+                  </span>
+                </div>
+                <div className="mt-3 border-t pt-3">
                   <PullActions
                     pull={pull}
                     isAdmin={isAdmin}
@@ -218,11 +179,58 @@ export function PullQueue({
                     onSelect={onSelect}
                     onCancel={onCancel}
                   />
-                </TableCell>
-              </TableRow>
+                </div>
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={loading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead>Project</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="text-center">Items</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pulls.map((pull) => (
+                <TableRow key={pull.id}>
+                  <TableCell className="font-medium">
+                    {projectLabels.get(pull.project_id) ?? pull.project_id}
+                  </TableCell>
+                  <TableCell>
+                    {customerLabels.get(pull.customer_id) ?? pull.customer_id}
+                  </TableCell>
+                  <TableCell className="num text-xs">
+                    {new Date(pull.created_at).toLocaleDateString()}
+                  </TableCell>
+                  <TableCell className="num text-center">
+                    {pull.lines.length}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={STATE_VARIANT[pull.state]}>
+                      {STATE_LABEL[pull.state]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <PullActions
+                      pull={pull}
+                      isAdmin={isAdmin}
+                      isCancelling={isCancelling}
+                      onSelect={onSelect}
+                      onCancel={onCancel}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ListShell>
       )}
     </div>
   )

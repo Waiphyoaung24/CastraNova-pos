@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Pencil, Truck } from "lucide-react"
 import { useId, useState } from "react"
@@ -8,6 +13,7 @@ import {
   type SupplierPublic,
   SuppliersService,
 } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { SupplierEditDialog } from "@/components/suppliers/SupplierEditDialog"
@@ -54,15 +60,21 @@ function Suppliers() {
   const [editing, setEditing] = useState<SupplierPublic | null>(null)
   const pagination = usePagination()
 
-  const { data: suppliersResponse } = useQuery({
+  const {
+    data: suppliersResponse,
+    isPlaceholderData,
+    isFetching,
+  } = useQuery({
     queryKey: ["suppliers", pagination.page],
     queryFn: () =>
       SuppliersService.readSuppliers({
         skip: pagination.skip,
         limit: pagination.limit,
       }),
+    placeholderData: keepPreviousData,
   })
   const suppliers = suppliersResponse?.data ?? []
+  const listLoading = isPlaceholderData || isFetching
 
   const createMutation = useMutation<SupplierPublic, Error, SupplierCreate>({
     mutationFn: (payload) =>
@@ -145,64 +157,66 @@ function Suppliers() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Existing suppliers</h2>
-        {suppliers.length === 0 ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            No suppliers yet.
-          </p>
-        ) : isMobile ? (
-          <div className="space-y-3">
-            {suppliers.map((s) => (
-              <div key={s.id} className="bg-card rounded-lg border p-4">
-                <p className="font-medium">{s.name}</p>
-                <div className="mt-2 flex flex-col gap-1 text-sm">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Country</span>
-                    <span>{s.country ?? "—"}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Contact</span>
-                    <span>{s.contact ?? "—"}</span>
+        <ListShell loading={listLoading}>
+          {suppliers.length === 0 ? (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              {suppliersResponse ? "No suppliers yet." : "Loading…"}
+            </p>
+          ) : isMobile ? (
+            <div className="space-y-3">
+              {suppliers.map((s) => (
+                <div key={s.id} className="bg-card rounded-lg border p-4">
+                  <p className="font-medium">{s.name}</p>
+                  <div className="mt-2 flex flex-col gap-1 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Country</span>
+                      <span>{s.country ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Contact</span>
+                      <span>{s.contact ?? "—"}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Country</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead className="text-right" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-            {suppliers.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {s.country ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {s.contact ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditing(s)}
-                    >
-                      <Pencil className="mr-1 size-4" />
-                      Edit
-                    </Button>
-                  </TableCell>
-                </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        )}
+            </div>
+          ) : (
+            <Table containerClassName={LIST_SCROLL}>
+              <TableHeader className="bg-background sticky top-0 z-10">
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Country</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead className="text-right" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {suppliers.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell className="font-medium">{s.name}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {s.country ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {s.contact ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditing(s)}
+                      >
+                        <Pencil className="mr-1 size-4" />
+                        Edit
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </ListShell>
         <PaginationControls
           total={suppliersResponse?.count ?? 0}
           pageSize={pagination.pageSize}

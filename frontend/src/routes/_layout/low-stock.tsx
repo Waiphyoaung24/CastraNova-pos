@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react"
 import { useState } from "react"
 
 import { type BulkMinStockUpdate, LowStockService } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -42,10 +43,11 @@ function LowStock() {
   const queryClient = useQueryClient()
   const [edits, setEdits] = useState<Record<string, string>>({})
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["low-stock"],
     queryFn: () => LowStockService.readLowStock(),
   })
+  const listLoading = isPlaceholderData || isFetching
 
   const saveMutation = useMutation({
     mutationFn: (body: BulkMinStockUpdate) =>
@@ -116,87 +118,40 @@ function LowStock() {
           Nothing below threshold. 🎉
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((r) => (
-            <div key={r.product_id} className="bg-card rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="num font-medium">{r.sku}</span>
-                    <Badge variant="secondary">
-                      {trackingModeLabel(r.tracking_mode)}
-                    </Badge>
-                  </div>
-                  <p className="truncate text-sm">{r.model_name}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="num text-destructive text-lg leading-none font-semibold">
-                    {r.on_hand}
-                  </div>
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    in stock
-                  </div>
-                </div>
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
-                <span className="text-muted-foreground text-sm">
-                  Reorder at
-                </span>
-                {isAdmin ? (
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    aria-label={`Reorder level for ${r.sku}`}
-                    className="num w-24 text-right"
-                    placeholder="e.g. 5"
-                    value={valueFor(r.product_id, r.min_stock_level)}
-                    onChange={(e) =>
-                      setEdits((prev) => ({
-                        ...prev,
-                        [r.product_id]: e.target.value,
-                      }))
-                    }
-                  />
-                ) : (
-                  <span className="num font-medium">{r.min_stock_level}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead className="text-right">In stock</TableHead>
-              <TableHead className="text-right">Reorder at</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
             {rows.map((r) => (
-              <TableRow key={r.product_id}>
-                <TableCell className="num font-medium">{r.sku}</TableCell>
-                <TableCell>{r.model_name}</TableCell>
-                <TableCell>
-                  <Badge variant="secondary">
-                    {trackingModeLabel(r.tracking_mode)}
-                  </Badge>
-                </TableCell>
-                <TableCell className="num text-right font-semibold text-destructive">
-                  {r.on_hand}
-                </TableCell>
-                <TableCell className="text-right">
+              <div key={r.product_id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="num font-medium">{r.sku}</span>
+                      <Badge variant="secondary">
+                        {trackingModeLabel(r.tracking_mode)}
+                      </Badge>
+                    </div>
+                    <p className="truncate text-sm">{r.model_name}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="num text-destructive text-lg leading-none font-semibold">
+                      {r.on_hand}
+                    </div>
+                    <div className="text-muted-foreground mt-1 text-xs">
+                      in stock
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+                  <span className="text-muted-foreground text-sm">
+                    Reorder at
+                  </span>
                   {isAdmin ? (
                     <Input
                       type="number"
                       min={0}
                       step={1}
                       aria-label={`Reorder level for ${r.sku}`}
-                      className="num ml-auto w-24 text-right"
+                      className="num w-24 text-right"
                       placeholder="e.g. 5"
                       value={valueFor(r.product_id, r.min_stock_level)}
                       onChange={(e) =>
@@ -207,13 +162,64 @@ function LowStock() {
                       }
                     />
                   ) : (
-                    <span className="num">{r.min_stock_level}</span>
+                    <span className="num font-medium">{r.min_stock_level}</span>
                   )}
-                </TableCell>
-              </TableRow>
+                </div>
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={listLoading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">In stock</TableHead>
+                <TableHead className="text-right">Reorder at</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.product_id}>
+                  <TableCell className="num font-medium">{r.sku}</TableCell>
+                  <TableCell>{r.model_name}</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">
+                      {trackingModeLabel(r.tracking_mode)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="num text-right font-semibold text-destructive">
+                    {r.on_hand}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isAdmin ? (
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1}
+                        aria-label={`Reorder level for ${r.sku}`}
+                        className="num ml-auto w-24 text-right"
+                        placeholder="e.g. 5"
+                        value={valueFor(r.product_id, r.min_stock_level)}
+                        onChange={(e) =>
+                          setEdits((prev) => ({
+                            ...prev,
+                            [r.product_id]: e.target.value,
+                          }))
+                        }
+                      />
+                    ) : (
+                      <span className="num">{r.min_stock_level}</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ListShell>
       )}
     </div>
   )

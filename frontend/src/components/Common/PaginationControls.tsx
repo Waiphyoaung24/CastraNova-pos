@@ -1,3 +1,6 @@
+import { ChevronsLeft, ChevronsRight } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
 import {
   Pagination,
   PaginationContent,
@@ -24,6 +27,8 @@ export function PaginationControls({
 
   const first = (page - 1) * pageSize + 1
   const last = Math.min(page * pageSize, total)
+  const atStart = page <= 1
+  const atEnd = page >= pageCount
 
   return (
     <div className="flex flex-col items-center justify-between gap-3 pt-4 sm:flex-row">
@@ -35,12 +40,25 @@ export function PaginationControls({
       <Pagination className="mx-0 w-auto justify-end">
         <PaginationContent>
           <PaginationItem>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              aria-label="Go to first page"
+              disabled={atStart}
+              onClick={() => onPageChange(1)}
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+          </PaginationItem>
+          <PaginationItem>
             <PaginationPrevious
-              aria-disabled={page <= 1}
-              className={page <= 1 ? "pointer-events-none opacity-50" : undefined}
+              aria-disabled={atStart}
+              className={atStart ? "pointer-events-none opacity-50" : undefined}
               onClick={(event) => {
                 event.preventDefault()
-                if (page > 1) onPageChange(page - 1)
+                if (!atStart) onPageChange(page - 1)
               }}
             />
           </PaginationItem>
@@ -51,13 +69,26 @@ export function PaginationControls({
           </PaginationItem>
           <PaginationItem>
             <PaginationNext
-              aria-disabled={page >= pageCount}
-              className={page >= pageCount ? "pointer-events-none opacity-50" : undefined}
+              aria-disabled={atEnd}
+              className={atEnd ? "pointer-events-none opacity-50" : undefined}
               onClick={(event) => {
                 event.preventDefault()
-                if (page < pageCount) onPageChange(page + 1)
+                if (!atEnd) onPageChange(page + 1)
               }}
             />
+          </PaginationItem>
+          <PaginationItem>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              aria-label="Go to last page"
+              disabled={atEnd}
+              onClick={() => onPageChange(pageCount)}
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </Button>
           </PaginationItem>
         </PaginationContent>
       </Pagination>

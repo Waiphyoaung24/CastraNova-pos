@@ -10,7 +10,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { cn } from "@/lib/utils"
 
 const VISIBLE_LIMIT = 50
@@ -50,12 +55,18 @@ export function EntityCombobox<T>({
   const [query, setQuery] = useState("")
   const [shown, setShown] = useState(VISIBLE_LIMIT)
 
+  // The input stays instant; only the filter over the complete option list is
+  // deferred, so a fast typist doesn't pay for a re-filter per keystroke.
+  const debouncedQuery = useDebouncedValue(query)
+
   const matches = useMemo(() => {
-    const normalized = query.trim().toLowerCase()
+    const normalized = debouncedQuery.trim().toLowerCase()
     return normalized
-      ? items.filter((item) => getLabel(item).toLowerCase().includes(normalized))
+      ? items.filter((item) =>
+          getLabel(item).toLowerCase().includes(normalized),
+        )
       : items
-  }, [items, query, getLabel])
+  }, [items, debouncedQuery, getLabel])
   const visible = matches.slice(0, shown)
   const hidden = matches.length - visible.length
   const selectedLabel = useMemo(() => {
@@ -86,13 +97,21 @@ export function EntityCombobox<T>({
           disabled={disabled}
           className="w-full justify-between font-normal"
         >
-          <span className={cn(!selectedLabel && "text-muted-foreground", "truncate")}>
+          <span
+            className={cn(
+              !selectedLabel && "text-muted-foreground",
+              "truncate",
+            )}
+          >
             {selectedLabel ?? placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
+      <PopoverContent
+        className="w-(--radix-popover-trigger-width) p-0"
+        align="start"
+      >
         <Command shouldFilter={false}>
           <CommandInput
             placeholder={searchPlaceholder}
@@ -102,7 +121,7 @@ export function EntityCombobox<T>({
               setShown(VISIBLE_LIMIT)
             }}
           />
-          <CommandList>
+          <CommandList className="scrollbar-thin">
             <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
               {allowClear && (
@@ -113,7 +132,12 @@ export function EntityCombobox<T>({
                     close(false)
                   }}
                 >
-                  <Check className={cn("mr-2 h-4 w-4", value ? "opacity-0" : "opacity-100")} />
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value ? "opacity-0" : "opacity-100",
+                    )}
+                  />
                   <span className="text-muted-foreground">All</span>
                 </CommandItem>
               )}
@@ -128,7 +152,12 @@ export function EntityCombobox<T>({
                       close(false)
                     }}
                   >
-                    <Check className={cn("mr-2 h-4 w-4", value === key ? "opacity-100" : "opacity-0")} />
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        value === key ? "opacity-100" : "opacity-0",
+                      )}
+                    />
                     <span className="truncate">{getLabel(item)}</span>
                   </CommandItem>
                 )

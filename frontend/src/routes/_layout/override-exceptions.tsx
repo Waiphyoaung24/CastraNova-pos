@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
@@ -59,11 +60,13 @@ function OverrideExceptions() {
   const [month, setMonth] = useState(currentMonth())
   const validMonth = isValidMonth(month)
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["override-exceptions", month],
     queryFn: () => ReportsService.overrideExceptions({ month }),
     enabled: validMonth,
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
 
   async function handleExport(fmt: ReportFormat) {
     try {
@@ -157,77 +160,83 @@ function OverrideExceptions() {
           No override requests for {month}.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((r) => (
-            <div key={r.id} className="bg-card rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <span className="num font-medium">{r.sku}</span>
-                <Badge variant="secondary">{r.state}</Badge>
-              </div>
-              <div className="mt-2 flex items-baseline gap-2 text-sm">
-                <span className="num text-muted-foreground line-through">
-                  {formatThb(r.default_price_thb)}
-                </span>
-                <span className="num font-semibold">
-                  {formatThb(r.requested_price_thb)}
-                </span>
-                <span className="num text-muted-foreground">
-                  ({formatDeviationPct(r.deviation_pct)})
-                </span>
-              </div>
-              {r.reason ? (
-                <p className="text-muted-foreground mt-2 text-sm">{r.reason}</p>
-              ) : null}
-              <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
-                Raised {formatDate(r.created_at)} · Decided{" "}
-                {formatDate(r.decided_at)}
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead className="text-right">Default</TableHead>
-              <TableHead className="text-right">Requested</TableHead>
-              <TableHead className="text-right">Deviation</TableHead>
-              <TableHead>Reason</TableHead>
-              <TableHead>State</TableHead>
-              <TableHead>Raised</TableHead>
-              <TableHead>Decided</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
             {rows.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="num font-medium">{r.sku}</TableCell>
-                <TableCell className="num text-right">
-                  {formatThb(r.default_price_thb)}
-                </TableCell>
-                <TableCell className="num text-right">
-                  {formatThb(r.requested_price_thb)}
-                </TableCell>
-                <TableCell className="num text-right">
-                  {formatDeviationPct(r.deviation_pct)}
-                </TableCell>
-                <TableCell className="text-muted-foreground max-w-xs truncate">
-                  {r.reason}
-                </TableCell>
-                <TableCell>
+              <div key={r.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="num font-medium">{r.sku}</span>
                   <Badge variant="secondary">{r.state}</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground num">
-                  {formatDate(r.created_at)}
-                </TableCell>
-                <TableCell className="text-muted-foreground num">
+                </div>
+                <div className="mt-2 flex items-baseline gap-2 text-sm">
+                  <span className="num text-muted-foreground line-through">
+                    {formatThb(r.default_price_thb)}
+                  </span>
+                  <span className="num font-semibold">
+                    {formatThb(r.requested_price_thb)}
+                  </span>
+                  <span className="num text-muted-foreground">
+                    ({formatDeviationPct(r.deviation_pct)})
+                  </span>
+                </div>
+                {r.reason ? (
+                  <p className="text-muted-foreground mt-2 text-sm">
+                    {r.reason}
+                  </p>
+                ) : null}
+                <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
+                  Raised {formatDate(r.created_at)} · Decided{" "}
                   {formatDate(r.decided_at)}
-                </TableCell>
-              </TableRow>
+                </p>
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={listLoading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead className="text-right">Default</TableHead>
+                <TableHead className="text-right">Requested</TableHead>
+                <TableHead className="text-right">Deviation</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Raised</TableHead>
+                <TableHead>Decided</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="num font-medium">{r.sku}</TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(r.default_price_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(r.requested_price_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatDeviationPct(r.deviation_pct)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground max-w-xs truncate">
+                    {r.reason}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{r.state}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground num">
+                    {formatDate(r.created_at)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground num">
+                    {formatDate(r.decided_at)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ListShell>
       )}
     </div>
   )

@@ -1,4 +1,9 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -11,15 +16,15 @@ import {
   ProjectPullsService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { PullCreatePanel } from "@/components/pos/PullCreatePanel"
 import { PullFulfillPanel } from "@/components/pos/PullFulfillPanel"
 import { PullQueue, type PullStateFilter } from "@/components/pos/PullQueue"
-import { PaginationControls } from "@/components/Common/PaginationControls"
 import type { ScanFieldHandle } from "@/components/ScanField"
 import useCustomToast from "@/hooks/useCustomToast"
+import { usePagination } from "@/hooks/usePagination"
 import { useProductOptions } from "@/hooks/useProductOptions"
 import { useProjectOptions } from "@/hooks/useProjectOptions"
-import { usePagination } from "@/hooks/usePagination"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import {
@@ -64,9 +69,16 @@ function Pulls() {
   const [scanNotice, setScanNotice] = useState<string>("")
   const [isAddingItem, setIsAddingItem] = useState(false)
   const scanRef = useRef<ScanFieldHandle>(null)
-  const { page, pageSize, skip, limit, setPage, reset: resetPage } = usePagination()
+  const {
+    page,
+    pageSize,
+    skip,
+    limit,
+    setPage,
+    reset: resetPage,
+  } = usePagination()
 
-  const { data: pullPage } = useQuery({
+  const { data: pullPage, isPlaceholderData } = useQuery({
     queryKey: ["project-pulls", stateFilter, { skip, limit }],
     queryFn: () =>
       ProjectPullsService.readProjectPulls({
@@ -84,6 +96,9 @@ function Pulls() {
   const { data: projects = [] } = useProjectOptions({ enabled: isAdmin })
   const { data: products } = useProductOptions({ activeOnly: true })
   const pulls = pullPage?.data ?? []
+  // isPlaceholderData only, not isFetching: this query polls every 30s, and a
+  // background poll must not pulse the loading bar.
+  const listLoading = isPlaceholderData
 
   // Built from the pull rows (each carries its project/customer labels) so staff,
   // who can't list projects, still render names instead of raw UUIDs.
@@ -324,6 +339,7 @@ function Pulls() {
         />
       ) : (
         <PullQueue
+          loading={listLoading}
           pulls={pulls}
           projectLabels={projectLabels}
           customerLabels={customerLabels}

@@ -1,6 +1,5 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ChevronsUpDown } from "lucide-react"
 import { type KeyboardEvent, useId, useMemo, useState } from "react"
 
 import {
@@ -10,32 +9,14 @@ import {
   UsersService,
 } from "@/client"
 import { AuditDetailSheet } from "@/components/audit/AuditDetailSheet"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -52,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { useProductOptions } from "@/hooks/useProductOptions"
 import {
   type AuditFilter,
@@ -113,17 +95,26 @@ function Audit() {
     sku: "",
   })
   const [selected, setSelected] = useState<AuditEntryPublic | null>(null)
-  const [page, setPage] = useState(0)
+  const {
+    page,
+    pageSize,
+    skip,
+    limit,
+    setPage,
+    reset: resetPage,
+  } = usePagination({ pageSize: PAGE_SIZE })
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["audit", filter, page],
     queryFn: () =>
       AuditService.listAudit({
         ...buildAuditQuery(filter),
-        skip: page * PAGE_SIZE,
-        limit: PAGE_SIZE,
+        skip,
+        limit,
       }),
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
   // Reference data to resolve UUIDs -> readable names (admin-only screen, so
   // both reads are permitted). Held steady; the ledger itself is the live data.
   const { data: users } = useQuery({
@@ -131,8 +122,10 @@ function Audit() {
     queryFn: () => UsersService.readUsers(),
     staleTime: 5 * 60 * 1000,
   })
+  // No `activeOnly` — the ledger must still reach discontinued products, whose
+  // historical movements live in the append-only history forever.
   const { data: options } = useProductOptions()
-  const skus = useMemo(() => (options ?? []).map((o) => o.sku), [options])
+  const productOptions = options ?? []
 
   const userList = users?.data ?? []
   const userNames = useMemo(
@@ -179,7 +172,7 @@ function Audit() {
             value={filter.eventType || ALL}
             onValueChange={(v) => {
               setFilter((f) => ({ ...f, eventType: v === ALL ? "" : v }))
-              setPage(0)
+              resetPage()
             }}
           >
             <SelectTrigger id={eventId} className="w-full sm:w-48">
@@ -201,7 +194,7 @@ function Audit() {
             value={filter.actorUserId || ALL}
             onValueChange={(v) => {
               setFilter((f) => ({ ...f, actorUserId: v === ALL ? "" : v }))
-              setPage(0)
+              resetPage()
             }}
           >
             <SelectTrigger id={userSelectId} className="w-full sm:w-56">
@@ -225,7 +218,7 @@ function Audit() {
             value={filter.fromDate}
             onChange={(e) => {
               setFilter((f) => ({ ...f, fromDate: e.target.value }))
-              setPage(0)
+              resetPage()
             }}
             className="w-full sm:w-44"
           />
@@ -238,22 +231,31 @@ function Audit() {
             value={filter.toDate}
             onChange={(e) => {
               setFilter((f) => ({ ...f, toDate: e.target.value }))
-              setPage(0)
+              resetPage()
             }}
             className="w-full sm:w-44"
           />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={skuSelectId}>SKU</Label>
-          <SkuCombobox
-            skuSelectId={skuSelectId}
-            skus={skus ?? []}
-            value={filter.sku}
-            onChange={(v) => {
-              setFilter((f) => ({ ...f, sku: v }))
-              setPage(0)
-            }}
-          />
+          <div className="w-full sm:w-56">
+            <EntityCombobox
+              id={skuSelectId}
+              items={productOptions}
+              value={filter.sku || undefined}
+              onChange={(sku) => {
+                setFilter((f) => ({ ...f, sku: sku ?? "" }))
+                resetPage()
+              }}
+              getKey={(o) => o.sku}
+              getLabel={(o) => `${o.model_name} (${o.sku})`}
+              placeholder="All SKUs"
+              searchPlaceholder="Search SKU…"
+              emptyText="No SKU found."
+              ariaLabel="Filter by SKU"
+              allowClear
+            />
+          </div>
         </div>
       </div>
 
@@ -266,7 +268,7 @@ function Audit() {
         </div>
       ) : null}
 
-      {isPending ? (
+      {!data && listLoading ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
           Loading…
         </p>
@@ -334,183 +336,86 @@ function Audit() {
           })}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border">
-          {/* Header lives in its own non-scrolling table so the body's vertical
+        <ListShell loading={listLoading}>
+          <div className="overflow-hidden rounded-lg border">
+            {/* Header lives in its own non-scrolling table so the body's vertical
               scrollbar runs beside the rows only, not the header. */}
-          <table className="w-full table-fixed caption-bottom text-sm">
-            <AuditColGroup />
-            <TableHeader className="bg-muted">
-              <TableRow className="hover:bg-transparent">
-                <TableHead>When</TableHead>
-                <TableHead>By</TableHead>
-                <TableHead>Event</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead>Notes</TableHead>
-              </TableRow>
-            </TableHeader>
-          </table>
-          <ScrollArea type="auto" viewportClassName="max-h-[60vh]">
             <table className="w-full table-fixed caption-bottom text-sm">
               <AuditColGroup />
-              <TableBody>
-                {rows.map((e) => {
-                  const source = movementSource(e)
-                  return (
-                    <TableRow
-                      key={e.id}
-                      {...rowProps(e)}
-                      className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
-                    >
-                      <TableCell className="text-muted-foreground truncate">
-                        {new Date(e.occurred_at).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="truncate font-medium">
-                        {actorName(e.actor_user_id)}
-                      </TableCell>
-                      <TableCell className="truncate">{e.event_type}</TableCell>
-                      <TableCell className="truncate">
-                        <div className="truncate">
-                          {e.product_model_name ?? itemRef(e)}
-                        </div>
-                        {e.product_sku ? (
-                          <div className="text-muted-foreground truncate text-xs">
-                            {e.product_sku}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="overflow-hidden">
-                        {source ? (
-                          <Badge variant="outline">{source.label}</Badge>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="num text-right">
-                        {e.quantity}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground truncate">
-                        {e.notes ?? "—"}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
+              <TableHeader className="bg-muted">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>When</TableHead>
+                  <TableHead>By</TableHead>
+                  <TableHead>Event</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead>Notes</TableHead>
+                </TableRow>
+              </TableHeader>
             </table>
-          </ScrollArea>
-        </div>
+            <ScrollArea type="auto" viewportClassName="max-h-[60vh]">
+              <table className="w-full table-fixed caption-bottom text-sm">
+                <AuditColGroup />
+                <TableBody>
+                  {rows.map((e) => {
+                    const source = movementSource(e)
+                    return (
+                      <TableRow
+                        key={e.id}
+                        {...rowProps(e)}
+                        className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
+                      >
+                        <TableCell className="text-muted-foreground truncate">
+                          {new Date(e.occurred_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="truncate font-medium">
+                          {actorName(e.actor_user_id)}
+                        </TableCell>
+                        <TableCell className="truncate">
+                          {e.event_type}
+                        </TableCell>
+                        <TableCell className="truncate">
+                          <div className="truncate">
+                            {e.product_model_name ?? itemRef(e)}
+                          </div>
+                          {e.product_sku ? (
+                            <div className="text-muted-foreground truncate text-xs">
+                              {e.product_sku}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="overflow-hidden">
+                          {source ? (
+                            <Badge variant="outline">{source.label}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="num text-right">
+                          {e.quantity}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground truncate">
+                          {e.notes ?? "—"}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </table>
+            </ScrollArea>
+          </div>
+        </ListShell>
       )}
 
-      {totalCount > 0 ? (
-        <Pagination>
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious
-                href="#"
-                aria-disabled={page === 0}
-                className={
-                  page === 0 ? "pointer-events-none opacity-50" : undefined
-                }
-                onClick={(e) => {
-                  e.preventDefault()
-                  if (page > 0) setPage((p) => p - 1)
-                }}
-              />
-            </PaginationItem>
-            <PaginationItem>
-              <span className="text-muted-foreground px-2 text-sm">
-                Page {page + 1} of{" "}
-                {Math.max(1, Math.ceil(totalCount / PAGE_SIZE))}
-              </span>
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationNext
-                href="#"
-                aria-disabled={(page + 1) * PAGE_SIZE >= totalCount}
-                className={
-                  (page + 1) * PAGE_SIZE >= totalCount
-                    ? "pointer-events-none opacity-50"
-                    : undefined
-                }
-                onClick={(e) => {
-                  e.preventDefault()
-                  if ((page + 1) * PAGE_SIZE < totalCount) setPage((p) => p + 1)
-                }}
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-      ) : null}
+      <PaginationControls
+        total={totalCount}
+        pageSize={pageSize}
+        page={page}
+        onPageChange={setPage}
+      />
 
       <AuditDetailSheet entry={selected} onClose={() => setSelected(null)} />
     </div>
-  )
-}
-
-// Single-use searchable SKU filter (Command + Popover). Matches and displays
-// SKU only — the Model column already shows the model name.
-function SkuCombobox({
-  skuSelectId,
-  skus,
-  value,
-  onChange,
-}: {
-  skuSelectId: string
-  skus: string[]
-  value: string
-  onChange: (v: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          id={skuSelectId}
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="w-full justify-between sm:w-48"
-        >
-          <span className="truncate">{value || "All SKUs"}</span>
-          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-(--radix-popover-trigger-width) p-0"
-      >
-        <Command>
-          <CommandInput placeholder="Search SKU…" />
-          <CommandList>
-            <CommandEmpty>No SKU found.</CommandEmpty>
-            <CommandGroup>
-              <CommandItem
-                value={ALL}
-                onSelect={() => {
-                  onChange("")
-                  setOpen(false)
-                }}
-              >
-                All SKUs
-              </CommandItem>
-              {skus.map((sku) => (
-                <CommandItem
-                  key={sku}
-                  value={sku}
-                  onSelect={() => {
-                    onChange(sku)
-                    setOpen(false)
-                  }}
-                >
-                  {sku}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
   )
 }

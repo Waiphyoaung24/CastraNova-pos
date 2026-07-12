@@ -1,4 +1,9 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { BadgePercent } from "lucide-react"
 import { useState } from "react"
@@ -8,7 +13,9 @@ import {
   type PricingOverrideDecision,
   PricingOverridesService,
 } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,7 +38,6 @@ import {
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
-import { PaginationControls } from "@/components/Common/PaginationControls"
 import { formatDeviationPct, isPending } from "@/lib/pricing-overrides"
 import { formatThb } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
@@ -64,12 +70,16 @@ function PricingOverrides() {
   const {
     data: overridePage,
     isPending: isLoading,
+    isPlaceholderData,
+    isFetching,
     isError,
   } = useQuery({
     queryKey: ["pricing-overrides", state, { skip, limit }],
-    queryFn: () => PricingOverridesService.listPricingOverrides({ state, skip, limit }),
+    queryFn: () =>
+      PricingOverridesService.listPricingOverrides({ state, skip, limit }),
     placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
 
   const decideMutation = useMutation({
     mutationFn: ({
@@ -147,109 +157,36 @@ function PricingOverrides() {
           No {state} requests.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((o) => {
-            const deciding = decideMutation.isPending
-            return (
-              <div key={o.id} className="bg-card rounded-lg border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="num min-w-0 truncate font-medium">
-                    {o.product_sku}
-                  </p>
-                  <span className="num shrink-0 text-right text-sm">
-                    {formatThb(o.requested_price_thb)}
-                    <span className="text-muted-foreground block text-xs">
-                      was {formatThb(o.default_price_thb)} ·{" "}
-                      {formatDeviationPct(o.deviation_pct)}
-                    </span>
-                  </span>
-                </div>
-                {o.reason ? (
-                  <p className="text-muted-foreground mt-2 text-sm">
-                    {o.reason}
-                  </p>
-                ) : null}
-                <div className="mt-3 border-t pt-3">
-                  {isPending(o.state) ? (
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="flex-1"
-                        disabled={deciding}
-                        onClick={() =>
-                          decideMutation.mutate({
-                            overrideId: o.id,
-                            decision: "APPROVED",
-                          })
-                        }
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        disabled={deciding}
-                        onClick={() =>
-                          decideMutation.mutate({
-                            overrideId: o.id,
-                            decision: "REJECTED",
-                          })
-                        }
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  ) : (
-                    <Badge variant="secondary">{o.state}</Badge>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead className="text-right">Default</TableHead>
-              <TableHead className="text-right">Requested</TableHead>
-              <TableHead className="text-right">Deviation</TableHead>
-              <TableHead>Reason</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
             {rows.map((o) => {
-              // One decision at a time: disable every row's actions while any
-              // decide is in flight (a single shared mutation isn't re-entrant).
               const deciding = decideMutation.isPending
               return (
-                <TableRow key={o.id}>
-                  <TableCell className="num font-medium">
-                    {o.product_sku}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(o.default_price_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(o.requested_price_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatDeviationPct(o.deviation_pct)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground max-w-xs truncate">
-                    {o.reason}
-                  </TableCell>
-                  <TableCell className="text-right">
+                <div key={o.id} className="bg-card rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="num min-w-0 truncate font-medium">
+                      {o.product_sku}
+                    </p>
+                    <span className="num shrink-0 text-right text-sm">
+                      {formatThb(o.requested_price_thb)}
+                      <span className="text-muted-foreground block text-xs">
+                        was {formatThb(o.default_price_thb)} ·{" "}
+                        {formatDeviationPct(o.deviation_pct)}
+                      </span>
+                    </span>
+                  </div>
+                  {o.reason ? (
+                    <p className="text-muted-foreground mt-2 text-sm">
+                      {o.reason}
+                    </p>
+                  ) : null}
+                  <div className="mt-3 border-t pt-3">
                     {isPending(o.state) ? (
-                      <div className="flex justify-end gap-2">
+                      <div className="flex gap-2">
                         <Button
                           type="button"
                           size="sm"
+                          className="flex-1"
                           disabled={deciding}
                           onClick={() =>
                             decideMutation.mutate({
@@ -264,6 +201,7 @@ function PricingOverrides() {
                           type="button"
                           size="sm"
                           variant="outline"
+                          className="flex-1"
                           disabled={deciding}
                           onClick={() =>
                             decideMutation.mutate({
@@ -278,12 +216,88 @@ function PricingOverrides() {
                     ) : (
                       <Badge variant="secondary">{o.state}</Badge>
                     )}
-                  </TableCell>
-                </TableRow>
+                  </div>
+                </div>
               )
             })}
-          </TableBody>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={listLoading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead className="text-right">Default</TableHead>
+                <TableHead className="text-right">Requested</TableHead>
+                <TableHead className="text-right">Deviation</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((o) => {
+                // One decision at a time: disable every row's actions while any
+                // decide is in flight (a single shared mutation isn't re-entrant).
+                const deciding = decideMutation.isPending
+                return (
+                  <TableRow key={o.id}>
+                    <TableCell className="num font-medium">
+                      {o.product_sku}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {formatThb(o.default_price_thb)}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {formatThb(o.requested_price_thb)}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {formatDeviationPct(o.deviation_pct)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground max-w-xs truncate">
+                      {o.reason}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isPending(o.state) ? (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={deciding}
+                            onClick={() =>
+                              decideMutation.mutate({
+                                overrideId: o.id,
+                                decision: "APPROVED",
+                              })
+                            }
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={deciding}
+                            onClick={() =>
+                              decideMutation.mutate({
+                                overrideId: o.id,
+                                decision: "REJECTED",
+                              })
+                            }
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        <Badge variant="secondary">{o.state}</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </ListShell>
       )}
       <PaginationControls
         total={overridePage?.count ?? 0}
