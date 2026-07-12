@@ -69,7 +69,7 @@ export class CustomersService {
             }
         });
     }
-    
+
     /**
      * Create Customer
      * @param data The data for the request.
@@ -88,7 +88,7 @@ export class CustomersService {
             }
         });
     }
-    
+
     /**
      * Read Options
      * @returns CustomerOption Successful Response
@@ -100,7 +100,7 @@ export class CustomersService {
             url: '/api/v1/customers/options'
         });
     }
-    
+
     /**
      * Get Customer Dashboard
      * @param data The data for the request.

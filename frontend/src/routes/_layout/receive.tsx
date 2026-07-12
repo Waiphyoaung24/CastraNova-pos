@@ -227,6 +227,8 @@ function SerializedTab() {
             emptyText="No serialized products available"
             disabled={productsPending || mutation.isPending}
             ariaLabel="Product"
+            id="receive-product"
+            required
           />
         </div>
 
@@ -249,6 +251,8 @@ function SerializedTab() {
             emptyText="No suppliers available"
             disabled={suppliersPending || mutation.isPending}
             ariaLabel="Supplier"
+            id="receive-supplier"
+            required
           />
         </div>
       </div>
@@ -522,6 +526,8 @@ function QuantityTab() {
             emptyText="No quantity products available"
             disabled={productsPending || mutation.isPending}
             ariaLabel="Product"
+            id={`${fieldId}-product`}
+            required
           />
         </div>
 
@@ -544,6 +550,8 @@ function QuantityTab() {
             emptyText="No suppliers available"
             disabled={suppliersPending || mutation.isPending}
             ariaLabel="Supplier"
+            id={`${fieldId}-supplier`}
+            required
           />
         </div>
       </div>

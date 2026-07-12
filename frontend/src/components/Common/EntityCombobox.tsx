@@ -26,6 +26,8 @@ export interface EntityComboboxProps<T> {
   emptyText?: string
   allowClear?: boolean
   ariaLabel?: string
+  id?: string
+  required?: boolean
   disabled?: boolean
 }
 
@@ -40,6 +42,8 @@ export function EntityCombobox<T>({
   emptyText = "No match found.",
   allowClear = false,
   ariaLabel,
+  id,
+  required = false,
   disabled = false,
 }: EntityComboboxProps<T>) {
   const [open, setOpen] = useState(false)
@@ -72,9 +76,12 @@ export function EntityCombobox<T>({
     <Popover open={open} onOpenChange={close}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
+          id={id}
           variant="outline"
           role="combobox"
           aria-label={ariaLabel}
+          aria-required={required || undefined}
           aria-expanded={open}
           disabled={disabled}
           className="w-full justify-between font-normal"
