@@ -86,6 +86,11 @@ export type CustomerDashboardStaffPublic = {
     closed_projects: Array<ProjectSummaryStaffPublic>;
 };
 
+export type CustomerOption = {
+    id: string;
+    name: string;
+};
+
 export type CustomerPublic = {
     name: string;
     country?: (string | null);
@@ -93,6 +98,11 @@ export type CustomerPublic = {
     type?: CustomerType;
     notes?: (string | null);
     id: string;
+};
+
+export type CustomersPublic = {
+    data: Array<CustomerPublic>;
+    count: number;
 };
 
 export type CustomerType = 'DEALER' | 'END_CUSTOMER';
@@ -265,6 +275,7 @@ export type PricingOverridePublic = {
     id: string;
     target_kind: OverrideTargetKind;
     product_id: string;
+    product_sku: string;
     default_price_thb: string;
     requested_price_thb: string;
     deviation_pct: string;
@@ -274,6 +285,11 @@ export type PricingOverridePublic = {
     created_at: string;
     decided_by_user_id: (string | null);
     decided_at: (string | null);
+};
+
+export type PricingOverridesPublic = {
+    data: Array<PricingOverridePublic>;
+    count: number;
 };
 
 export type PrivateUserCreate = {
@@ -335,6 +351,11 @@ export type ProductPurchaseCost = {
     latest_purchase_cost_thb: string;
 };
 
+export type ProductsPublic = {
+    data: Array<ProductPublic>;
+    count: number;
+};
+
 export type ProductUpdate = {
     model_name?: (string | null);
     brand?: (string | null);
@@ -369,6 +390,12 @@ export type ProjectDashboardAdminPublic = {
 export type ProjectDashboardStaffPublic = {
     project: ProjectStaffPublic;
     pulls: Array<TransactionSummaryPublic>;
+};
+
+export type ProjectOption = {
+    id: string;
+    code: string;
+    name: string;
 };
 
 export type ProjectPublic = {
@@ -408,6 +435,8 @@ export type ProjectPullLinePublic = {
     id: string;
     line_kind: SaleLineKind;
     product_id: string;
+    product_sku: string;
+    model_name: string;
     unit_serial: (string | null);
     requested_qty: (number | null);
     fulfilled_qty: number;
@@ -432,7 +461,17 @@ export type ProjectPullPublic = {
     lines: Array<ProjectPullLinePublic>;
 };
 
+export type ProjectPullsPublic = {
+    data: Array<ProjectPullPublic>;
+    count: number;
+};
+
 export type ProjectPullState = 'PENDING' | 'FULFILLED' | 'SHORT' | 'CANCELLED';
+
+export type ProjectsPublic = {
+    data: Array<ProjectPublic>;
+    count: number;
+};
 
 export type ProjectStaffPublic = {
     id: string;
@@ -730,11 +769,21 @@ export type SupplierCreate = {
     contact?: (string | null);
 };
 
+export type SupplierOption = {
+    id: string;
+    name: string;
+};
+
 export type SupplierPublic = {
     name: string;
     country?: (string | null);
     contact?: (string | null);
     id: string;
+};
+
+export type SuppliersPublic = {
+    data: Array<SupplierPublic>;
+    count: number;
 };
 
 export type SupplierUpdate = {
@@ -914,13 +963,15 @@ export type CustomersReadCustomersData = {
     skip?: number;
 };
 
-export type CustomersReadCustomersResponse = (Array<CustomerPublic>);
+export type CustomersReadCustomersResponse = (CustomersPublic);
 
 export type CustomersCreateCustomerData = {
     requestBody: CustomerCreate;
 };
 
 export type CustomersCreateCustomerResponse = (CustomerPublic);
+
+export type CustomersReadOptionsResponse = (Array<CustomerOption>);
 
 export type CustomersGetCustomerDashboardData = {
     customerId: string;
@@ -1013,7 +1064,7 @@ export type PricingOverridesListPricingOverridesData = {
     state?: (OverrideState | null);
 };
 
-export type PricingOverridesListPricingOverridesResponse = (Array<PricingOverridePublic>);
+export type PricingOverridesListPricingOverridesResponse = (PricingOverridesPublic);
 
 export type PricingOverridesDecidePricingOverrideData = {
     overrideId: string;
@@ -1033,7 +1084,7 @@ export type ProductsReadProductsData = {
     skip?: number;
 };
 
-export type ProductsReadProductsResponse = (Array<ProductPublic>);
+export type ProductsReadProductsResponse = (ProductsPublic);
 
 export type ProductsCreateProductData = {
     requestBody: ProductCreate;
@@ -1042,6 +1093,10 @@ export type ProductsCreateProductData = {
 export type ProductsCreateProductResponse = (ProductPublic);
 
 export type ProductsReadPurchaseCostsResponse = (Array<ProductPurchaseCost>);
+
+export type ProductsReadOptionsData = {
+    activeOnly?: boolean;
+};
 
 export type ProductsReadOptionsResponse = (Array<ProductOption>);
 
@@ -1084,7 +1139,7 @@ export type ProjectPullsReadProjectPullsData = {
     state?: (ProjectPullState | null);
 };
 
-export type ProjectPullsReadProjectPullsResponse = (Array<ProjectPullPublic>);
+export type ProjectPullsReadProjectPullsResponse = (ProjectPullsPublic);
 
 export type ProjectPullsReadProjectPullData = {
     pullId: string;
@@ -1110,13 +1165,15 @@ export type ProjectsReadProjectsData = {
     skip?: number;
 };
 
-export type ProjectsReadProjectsResponse = (Array<ProjectPublic>);
+export type ProjectsReadProjectsResponse = (ProjectsPublic);
 
 export type ProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
 
 export type ProjectsCreateProjectResponse = (ProjectPublic);
+
+export type ProjectsReadOptionsResponse = (Array<ProjectOption>);
 
 export type ProjectsGetProjectDashboardData = {
     projectId: string;
@@ -1275,13 +1332,15 @@ export type SuppliersReadSuppliersData = {
     skip?: number;
 };
 
-export type SuppliersReadSuppliersResponse = (Array<SupplierPublic>);
+export type SuppliersReadSuppliersResponse = (SuppliersPublic);
 
 export type SuppliersCreateSupplierData = {
     requestBody: SupplierCreate;
 };
 
 export type SuppliersCreateSupplierResponse = (SupplierPublic);
+
+export type SuppliersReadOptionsResponse = (Array<SupplierOption>);
 
 export type SuppliersUpdateSupplierData = {
     requestBody: SupplierUpdate;

@@ -9,8 +9,8 @@ from app.models import (
     ProjectCreate,
     ProjectDashboardAdminPublic,
     ProjectDashboardStaffPublic,
-    ProjectPublic,
     ProjectOption,
+    ProjectPublic,
     ProjectsPublic,
     ProjectUpdate,
 )

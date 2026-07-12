@@ -156,7 +156,7 @@ async function openAndStageFulfill(page: Page, seeded: SeededPull) {
 /** Current state of a pull, by id, via the Node SDK (no get-by-id endpoint). */
 async function pullStateById(pullId: string): Promise<string | undefined> {
   const pulls = await ProjectPullsService.readProjectPulls({})
-  return pulls.find((p) => p.id === pullId)?.state
+  return pulls.data.find((p) => p.id === pullId)?.state
 }
 
 /** Whether a PENDING CONFLICT sync-review item exists for this pull. */

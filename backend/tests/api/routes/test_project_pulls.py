@@ -293,7 +293,7 @@ def test_staff_queue_lists_pending(
         f"{PREFIX}/project-pulls?state=PENDING", headers=staff_token_headers
     )
     assert r.status_code == 200, r.text
-    ids = [p["id"] for p in r.json()]
+    ids = [p["id"] for p in r.json()["data"]]
     assert pull["id"] in ids
 
 
@@ -324,7 +324,7 @@ def test_staff_pull_carries_display_labels(
         f"{PREFIX}/project-pulls?state=PENDING", headers=staff_token_headers
     )
     assert r.status_code == 200, r.text
-    row = next(p for p in r.json() if p["id"] == pull["id"])
+    row = next(p for p in r.json()["data"] if p["id"] == pull["id"])
     assert row["project_name"] == "Site A"
     assert row["project_code"].startswith("PRJ-")
     assert row["customer_name"] == "Proj Cust"

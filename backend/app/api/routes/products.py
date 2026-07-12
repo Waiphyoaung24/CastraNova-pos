@@ -11,8 +11,8 @@ from app.models import (
     ProductCreate,
     ProductOption,
     ProductPublic,
-    ProductsPublic,
     ProductPurchaseCost,
+    ProductsPublic,
     ProductUpdate,
     TrackingMode,
 )

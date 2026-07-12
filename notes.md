@@ -156,8 +156,8 @@ Recommend option 2 as the root-cause fix. Not started.
 products-only bug). **Scope widened 2026-07-12** by a full backend + frontend audit: the same
 defect affects **seven entities**, not just products.
 
-> **PARTIALLY FIXED 2026-07-12** on branch `feat/product-options-pagination` (off `dev_wth`).
-> Two of the seven surfaces are done; the rest are explicit follow-up (see "Still open" below).
+> **DONE 2026-07-12** on `dev_wth` after merging `feat/product-options-pagination` and
+> completing the remaining picker/table migrations below.
 >
 > **Products picker/lookup truncation — fixed.** New `GET /products/options`
 > (`crud.list_product_options` / `products.py:read_options`) replaces the old
@@ -182,12 +182,11 @@ defect affects **seven entities**, not just products.
 > previously-unused `components/ui/pagination.tsx`) that reset to page 1 on any filter
 > change. The cosmetic, never-backed "latest 100 shown" hint is gone.
 >
-> **Still open (explicit follow-up, not built here):** **customers** (rated highest
-> *severity* above — blocks recording a sale/ticket for customer #101+ outright),
-> suppliers, projects, pricing-overrides' own list, project-pulls' own list, `admin.tsx`'s
-> *fake* client-side-only pagination, and `products.tsx`'s admin catalog **table** (needs
-> its own `{data, count}` + page-state wiring, deliberately not bundled with the picker
-> fix per this section's own "tables are a separate, larger job" guidance below).
+> **Completed in the follow-up:** customer, supplier, and project option endpoints and
+> bounded comboboxes; server-side pagination for products, customers, suppliers, projects,
+> pricing overrides, project pulls, and users; filtered counts; and historical SKU/model
+> labels on override and pull-line responses. The audit page remains owned by its concurrent
+> branch and was not modified by the follow-up.
 
 ### Root cause (one pattern, many surfaces)
 
@@ -255,7 +254,7 @@ follow-up above.
 **Sales, service tickets, and stock adjustments have no list endpoints at all**, so they have
 no exposure — don't go looking.
 
-### Fix direction (decided, not built)
+### Fix direction (decided and implemented)
 
 Mirror the `/products/options` precedent: **lightweight unpaginated projections** per entity
 for picker consumption, not heavy objects (`ProductPublic` carries JSONB `specs`, brand,
@@ -265,9 +264,7 @@ and justified in-codebase.
 Explicitly rejected: **raising `limit` to 500** only moves the cliff from 100 → 500 while
 leaving the defect class intact.
 
-Tables are a **separate, larger job** — real server-side paging requires adding a `count` to
-each list response (backend + SDK regen + page-state wiring), so it should not be bundled with
-the picker fix.
+Tables now use the same `{data, count}` envelope with page-aware queries and filtered counts.
 
 ---
 

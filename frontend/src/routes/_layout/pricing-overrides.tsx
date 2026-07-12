@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { BadgePercent } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useState } from "react"
 
 import {
   type OverrideState,
@@ -30,7 +30,8 @@ import {
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
-import { useProductOptions } from "@/hooks/useProductOptions"
+import { usePagination } from "@/hooks/usePagination"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { formatDeviationPct, isPending } from "@/lib/pricing-overrides"
 import { formatThb } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
@@ -58,21 +59,17 @@ function PricingOverrides() {
   const queryClient = useQueryClient()
   const isMobile = useIsMobile()
   const [state, setState] = useState<OverrideState>("PENDING")
+  const { page, pageSize, skip, limit, setPage, reset } = usePagination()
 
   const {
-    data: overrides,
+    data: overridePage,
     isPending: isLoading,
     isError,
   } = useQuery({
-    queryKey: ["pricing-overrides", state],
-    queryFn: () => PricingOverridesService.listPricingOverrides({ state }),
+    queryKey: ["pricing-overrides", state, { skip, limit }],
+    queryFn: () => PricingOverridesService.listPricingOverrides({ state, skip, limit }),
+    placeholderData: keepPreviousData,
   })
-  const { data: products } = useProductOptions()
-
-  const productLabels = useMemo(
-    () => new Map((products ?? []).map((p) => [p.id, p.sku])),
-    [products],
-  )
 
   const decideMutation = useMutation({
     mutationFn: ({
@@ -96,7 +93,7 @@ function PricingOverrides() {
     onError: () => showErrorToast("Could not record the decision. Try again."),
   })
 
-  const rows = overrides ?? []
+  const rows = overridePage?.data ?? []
 
   return (
     <div className="flex flex-col gap-6">
@@ -119,7 +116,10 @@ function PricingOverrides() {
         <Label htmlFor="state">State</Label>
         <Select
           value={state}
-          onValueChange={(v) => setState(v as OverrideState)}
+          onValueChange={(v) => {
+            setState(v as OverrideState)
+            reset()
+          }}
         >
           <SelectTrigger id="state" className="w-full sm:w-56">
             <SelectValue />
@@ -154,7 +154,7 @@ function PricingOverrides() {
               <div key={o.id} className="bg-card rounded-lg border p-4">
                 <div className="flex items-start justify-between gap-3">
                   <p className="num min-w-0 truncate font-medium">
-                    {productLabels.get(o.product_id) ?? o.product_id}
+                    {o.product_sku}
                   </p>
                   <span className="num shrink-0 text-right text-sm">
                     {formatThb(o.requested_price_thb)}
@@ -230,7 +230,7 @@ function PricingOverrides() {
               return (
                 <TableRow key={o.id}>
                   <TableCell className="num font-medium">
-                    {productLabels.get(o.product_id) ?? o.product_id}
+                    {o.product_sku}
                   </TableCell>
                   <TableCell className="num text-right">
                     {formatThb(o.default_price_thb)}
@@ -285,6 +285,12 @@ function PricingOverrides() {
           </TableBody>
         </Table>
       )}
+      <PaginationControls
+        total={overridePage?.count ?? 0}
+        pageSize={pageSize}
+        page={page}
+        onPageChange={setPage}
+      />
     </div>
   )
 }

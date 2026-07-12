@@ -32,18 +32,45 @@ import {
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
+  manualPagination?: {
+    pageCount: number
+    pageIndex: number
+    pageSize: number
+    total: number
+    onPageChange: (pageIndex: number) => void
+  }
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data,
+  manualPagination,
 }: DataTableProps<TData, TValue>) {
+  const mp = manualPagination
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+    ...(mp
+      ? {
+          manualPagination: true as const,
+          pageCount: mp.pageCount,
+          state: { pagination: { pageIndex: mp.pageIndex, pageSize: mp.pageSize } },
+          onPaginationChange: (updater: unknown) => {
+            const previous = { pageIndex: mp.pageIndex, pageSize: mp.pageSize }
+            const next = typeof updater === "function"
+              ? (updater as (state: typeof previous) => typeof previous)(previous)
+              : (updater as typeof previous)
+            mp.onPageChange(next.pageIndex)
+          },
+        }
+      : { getPaginationRowModel: getPaginationRowModel() }),
   })
+  const total = mp ? mp.total : data.length
+  const pageSize = mp ? mp.pageSize : table.getState().pagination.pageSize
+  const pageIndex = mp ? mp.pageIndex : table.getState().pagination.pageIndex
+  const first = total === 0 ? 0 : pageIndex * pageSize + 1
+  const last = Math.min((pageIndex + 1) * pageSize, total)
 
   return (
     <div className="flex flex-col gap-4">
@@ -90,25 +117,15 @@ export function DataTable<TData, TValue>({
         </TableBody>
       </Table>
 
-      {table.getPageCount() > 1 && (
+      {(mp ? mp.pageCount : table.getPageCount()) > 1 && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border-t bg-muted/20">
           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="text-sm text-muted-foreground">
-              Showing{" "}
-              {table.getState().pagination.pageIndex *
-                table.getState().pagination.pageSize +
-                1}{" "}
-              to{" "}
-              {Math.min(
-                (table.getState().pagination.pageIndex + 1) *
-                  table.getState().pagination.pageSize,
-                data.length,
-              )}{" "}
-              of{" "}
-              <span className="font-medium text-foreground">{data.length}</span>{" "}
+              Showing {first} to {last} of{" "}
+              <span className="font-medium text-foreground">{total}</span>{" "}
               entries
             </div>
-            <div className="flex items-center gap-x-2">
+            {!mp && <div className="flex items-center gap-x-2">
               <p className="text-sm text-muted-foreground">Rows per page</p>
               <Select
                 value={`${table.getState().pagination.pageSize}`}
@@ -129,18 +146,18 @@ export function DataTable<TData, TValue>({
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </div>}
           </div>
 
           <div className="flex items-center gap-x-6">
             <div className="flex items-center gap-x-1 text-sm text-muted-foreground">
               <span>Page</span>
               <span className="font-medium text-foreground">
-                {table.getState().pagination.pageIndex + 1}
+                {pageIndex + 1}
               </span>
               <span>of</span>
               <span className="font-medium text-foreground">
-                {table.getPageCount()}
+                {mp ? mp.pageCount : table.getPageCount()}
               </span>
             </div>
 
@@ -149,8 +166,8 @@ export function DataTable<TData, TValue>({
                 variant="outline"
                 size="sm"
                 className="h-8 w-8 p-0"
-                onClick={() => table.setPageIndex(0)}
-                disabled={!table.getCanPreviousPage()}
+                onClick={() => (mp ? mp.onPageChange(0) : table.setPageIndex(0))}
+                disabled={mp ? pageIndex === 0 : !table.getCanPreviousPage()}
               >
                 <span className="sr-only">Go to first page</span>
                 <ChevronsLeft className="h-4 w-4" />
@@ -159,8 +176,8 @@ export function DataTable<TData, TValue>({
                 variant="outline"
                 size="sm"
                 className="h-8 w-8 p-0"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
+                onClick={() => (mp ? mp.onPageChange(pageIndex - 1) : table.previousPage())}
+                disabled={mp ? pageIndex === 0 : !table.getCanPreviousPage()}
               >
                 <span className="sr-only">Go to previous page</span>
                 <ChevronLeft className="h-4 w-4" />
@@ -169,8 +186,8 @@ export function DataTable<TData, TValue>({
                 variant="outline"
                 size="sm"
                 className="h-8 w-8 p-0"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
+                onClick={() => (mp ? mp.onPageChange(pageIndex + 1) : table.nextPage())}
+                disabled={mp ? pageIndex >= mp.pageCount - 1 : !table.getCanNextPage()}
               >
                 <span className="sr-only">Go to next page</span>
                 <ChevronRight className="h-4 w-4" />
@@ -179,8 +196,10 @@ export function DataTable<TData, TValue>({
                 variant="outline"
                 size="sm"
                 className="h-8 w-8 p-0"
-                onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-                disabled={!table.getCanNextPage()}
+                onClick={() => (mp
+                  ? mp.onPageChange(mp.pageCount - 1)
+                  : table.setPageIndex(table.getPageCount() - 1))}
+                disabled={mp ? pageIndex >= mp.pageCount - 1 : !table.getCanNextPage()}
               >
                 <span className="sr-only">Go to last page</span>
                 <ChevronsRight className="h-4 w-4" />

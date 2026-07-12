@@ -11,8 +11,8 @@ from app.models import (
     ProjectPullFulfill,
     ProjectPullLinePublic,
     ProjectPullPublic,
-    ProjectPullState,
     ProjectPullsPublic,
+    ProjectPullState,
 )
 from app.services import notify
 

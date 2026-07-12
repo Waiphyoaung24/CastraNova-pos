@@ -254,7 +254,7 @@ test.describe("Pulls screen", () => {
           const list = await ProjectPullsService.readProjectPulls({
             state: "PENDING",
           })
-          created = list.find((p) => p.project_id === project.id)
+          created = list.data.find((p) => p.project_id === project.id)
           return created ? created.lines.length : 0
         },
         { timeout: 10_000, intervals: [500, 1_000] },

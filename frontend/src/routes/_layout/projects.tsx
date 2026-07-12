@@ -1,10 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { FolderKanban, Pencil } from "lucide-react"
 import { useId, useMemo, useState } from "react"
 
 import {
-  CustomersService,
   type ProjectCreate,
   type ProjectPublic,
   ProjectsService,
@@ -17,14 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectEmpty,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import {
   Table,
   TableBody,
@@ -35,6 +27,9 @@ import {
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
+import { usePagination } from "@/hooks/usePagination"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { buildProjectPayload, canCreateProject } from "@/lib/project-create"
 import { requireAdmin } from "@/lib/route-guards"
 
@@ -52,25 +47,23 @@ function Projects() {
   const isMobile = useIsMobile()
   const codeId = useId()
   const nameId = useId()
-  const customerSelectId = useId()
 
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
   const [customerId, setCustomerId] = useState("")
   const [editing, setEditing] = useState<ProjectPublic | null>(null)
+  const { page, pageSize, skip, limit, setPage } = usePagination()
 
-  const { data: projects } = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => ProjectsService.readProjects(),
+  const { data: projectPage } = useQuery({
+    queryKey: ["projects", { skip, limit }],
+    queryFn: () => ProjectsService.readProjects({ skip, limit }),
+    placeholderData: keepPreviousData,
   })
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: customers = [] } = useCustomerOptions()
+  const projects = projectPage?.data ?? []
 
   const customerLabels = useMemo(
-    () => new Map((customers ?? []).map((c) => [c.id, c.name])),
+    () => new Map(customers.map((c) => [c.id, c.name])),
     [customers],
   )
 
@@ -134,23 +127,18 @@ function Projects() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={customerSelectId}>Customer</Label>
-            <Select value={customerId} onValueChange={setCustomerId}>
-              <SelectTrigger id={customerSelectId} className="w-full">
-                <SelectValue placeholder="Select a customer" />
-              </SelectTrigger>
-              <SelectContent>
-                {(customers ?? []).length ? (
-                  (customers ?? []).map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))
-                ) : (
-                  <SelectEmpty>No customers available</SelectEmpty>
-                )}
-              </SelectContent>
-            </Select>
+            <Label>Customer</Label>
+            <EntityCombobox
+              items={customers}
+              value={customerId}
+              onChange={(id) => setCustomerId(id ?? "")}
+              getKey={(customer) => customer.id}
+              getLabel={(customer) => customer.name}
+              placeholder="Select a customer"
+              searchPlaceholder="Search customers…"
+              emptyText="No customers available"
+              ariaLabel="Customer"
+            />
           </div>
           <Button
             type="button"
@@ -168,13 +156,13 @@ function Projects() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Existing projects</h2>
-        {(projects ?? []).length === 0 ? (
+        {projects.length === 0 ? (
           <p className="text-muted-foreground py-6 text-center text-sm">
             No projects yet.
           </p>
         ) : isMobile ? (
           <div className="space-y-3">
-            {(projects ?? []).map((p) => (
+            {projects.map((p) => (
               <div key={p.id} className="bg-card rounded-lg border p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -214,7 +202,7 @@ function Projects() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(projects ?? []).map((p) => (
+              {projects.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="num font-medium">
                     <Link
@@ -254,12 +242,18 @@ function Projects() {
             </TableBody>
           </Table>
         )}
+        <PaginationControls
+          total={projectPage?.count ?? 0}
+          pageSize={pageSize}
+          page={page}
+          onPageChange={setPage}
+        />
       </div>
 
       {editing && (
         <ProjectEditDialog
           project={editing}
-          customers={customers ?? []}
+          customers={customers}
           onClose={() => setEditing(null)}
         />
       )}

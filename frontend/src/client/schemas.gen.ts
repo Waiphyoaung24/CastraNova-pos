@@ -488,6 +488,23 @@ export const CustomerDashboardStaffPublicSchema = {
     title: 'CustomerDashboardStaffPublic'
 } as const;
 
+export const CustomerOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name'],
+    title: 'CustomerOption'
+} as const;
+
 export const CustomerPublicSchema = {
     properties: {
         name: {
@@ -615,6 +632,25 @@ export const CustomerUpdateSchema = {
     },
     type: 'object',
     title: 'CustomerUpdate'
+} as const;
+
+export const CustomersPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/CustomerPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'CustomersPublic'
 } as const;
 
 export const HTTPValidationErrorSchema = {
@@ -1284,6 +1320,10 @@ export const PricingOverridePublicSchema = {
             format: 'uuid',
             title: 'Product Id'
         },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
         default_price_thb: {
             type: 'string',
             pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
@@ -1342,8 +1382,27 @@ export const PricingOverridePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'target_kind', 'product_id', 'default_price_thb', 'requested_price_thb', 'deviation_pct', 'reason', 'state', 'created_by_user_id', 'created_at', 'decided_by_user_id', 'decided_at'],
+    required: ['id', 'target_kind', 'product_id', 'product_sku', 'default_price_thb', 'requested_price_thb', 'deviation_pct', 'reason', 'state', 'created_by_user_id', 'created_at', 'decided_by_user_id', 'decided_at'],
     title: 'PricingOverridePublic'
+} as const;
+
+export const PricingOverridesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/PricingOverridePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'PricingOverridesPublic'
 } as const;
 
 export const PrivateUserCreateSchema = {
@@ -1735,6 +1794,25 @@ export const ProductUpdateSchema = {
     title: 'ProductUpdate'
 } as const;
 
+export const ProductsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProductPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProductsPublic'
+} as const;
+
 export const ProjectCreateSchema = {
     properties: {
         code: {
@@ -1852,6 +1930,27 @@ export const ProjectDashboardStaffPublicSchema = {
     type: 'object',
     required: ['project', 'pulls'],
     title: 'ProjectDashboardStaffPublic'
+} as const;
+
+export const ProjectOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'code', 'name'],
+    title: 'ProjectOption'
 } as const;
 
 export const ProjectPublicSchema = {
@@ -2046,6 +2145,14 @@ export const ProjectPullLinePublicSchema = {
             format: 'uuid',
             title: 'Product Id'
         },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
         unit_serial: {
             anyOf: [
                 {
@@ -2077,7 +2184,7 @@ export const ProjectPullLinePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'line_kind', 'product_id', 'unit_serial', 'requested_qty', 'fulfilled_qty', 'line_state'],
+    required: ['id', 'line_kind', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'requested_qty', 'fulfilled_qty', 'line_state'],
     title: 'ProjectPullLinePublic'
 } as const;
 
@@ -2199,6 +2306,25 @@ export const ProjectPullStateSchema = {
     type: 'string',
     enum: ['PENDING', 'FULFILLED', 'SHORT', 'CANCELLED'],
     title: 'ProjectPullState'
+} as const;
+
+export const ProjectPullsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProjectPullPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProjectPullsPublic'
 } as const;
 
 export const ProjectStaffPublicSchema = {
@@ -2415,6 +2541,25 @@ export const ProjectUpdateSchema = {
     },
     type: 'object',
     title: 'ProjectUpdate'
+} as const;
+
+export const ProjectsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProjectPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProjectsPublic'
 } as const;
 
 export const ReceivePieceSchema = {
@@ -3799,6 +3944,23 @@ export const SupplierCreateSchema = {
     title: 'SupplierCreate'
 } as const;
 
+export const SupplierOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name'],
+    title: 'SupplierOption'
+} as const;
+
 export const SupplierPublicSchema = {
     properties: {
         name: {
@@ -3882,6 +4044,25 @@ export const SupplierUpdateSchema = {
     },
     type: 'object',
     title: 'SupplierUpdate'
+} as const;
+
+export const SuppliersPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/SupplierPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'SuppliersPublic'
 } as const;
 
 export const SyncReviewItemCreateSchema = {

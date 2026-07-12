@@ -9,8 +9,8 @@ from app.models import (
     CustomerCreate,
     CustomerDashboardAdminPublic,
     CustomerDashboardStaffPublic,
-    CustomerPublic,
     CustomerOption,
+    CustomerPublic,
     CustomersPublic,
     CustomerUpdate,
 )
