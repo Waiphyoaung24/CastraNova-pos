@@ -1,32 +1,25 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ShoppingCart } from "lucide-react"
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
-  type CustomerPublic,
-  CustomersService,
+  type CustomerOption,
   type SaleCreateRequest,
   type SalePublic,
   type SaleStaffPublic,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
 import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectEmpty,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useProductOptions } from "@/hooks/useProductOptions"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import { queued } from "@/lib/query-client"
@@ -49,7 +42,7 @@ export const Route = createFileRoute("/_layout/sale")({
 })
 
 interface CheckoutPanelProps {
-  customers: CustomerPublic[]
+  customers: CustomerOption[]
   customerId: string
   onCustomerChange: (value: string) => void
   canCheckout: boolean
@@ -74,28 +67,21 @@ function CheckoutPanel({
   isPaused,
   isPending,
 }: CheckoutPanelProps) {
-  const customerSelectId = useId()
-
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor={customerSelectId}>Customer</Label>
-        <Select value={customerId} onValueChange={onCustomerChange}>
-          <SelectTrigger id={customerSelectId} className="w-full">
-            <SelectValue placeholder="Select a customer" />
-          </SelectTrigger>
-          <SelectContent>
-            {customers.length ? (
-              customers.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))
-            ) : (
-              <SelectEmpty>No customers available</SelectEmpty>
-            )}
-          </SelectContent>
-        </Select>
+        <Label>Customer</Label>
+        <EntityCombobox
+          items={customers}
+          value={customerId || undefined}
+          onChange={(value) => onCustomerChange(value ?? "")}
+          getKey={(customer) => customer.id}
+          getLabel={(customer) => customer.name}
+          placeholder="Select a customer"
+          searchPlaceholder="Search customers…"
+          emptyText="No customers available"
+          ariaLabel="Customer"
+        />
         <CustomerCreateDialog onCreated={(c) => onCustomerChange(c.id)} />
       </div>
 
@@ -125,13 +111,8 @@ function Sale() {
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
   const scanRef = useRef<ScanFieldHandle>(null)
 
-  const { data: products } = useProductOptions()
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
-    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions({ activeOnly: true })
+  const { data: customers } = useCustomerOptions()
 
   const priceMap = useMemo(
     () =>

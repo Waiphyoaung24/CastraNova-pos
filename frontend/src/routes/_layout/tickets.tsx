@@ -1,14 +1,14 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Wrench } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
-  type CustomerPublic,
-  CustomersService,
+  type CustomerOption,
   type ServiceTicketPublic,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import {
   TicketPartsList,
@@ -19,16 +19,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectEmpty,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useProductOptions } from "@/hooks/useProductOptions"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
@@ -52,11 +45,9 @@ export const Route = createFileRoute("/_layout/tickets")({
 })
 
 interface CustomerPickerProps {
-  customers: CustomerPublic[]
+  customers: CustomerOption[]
   value: string
   onChange: (value: string) => void
-  /** Set on desktop where an external <Label htmlFor> binds to it. */
-  triggerId?: string
   /** Set on mobile where there is no visible label. */
   ariaLabel?: string
 }
@@ -70,27 +61,21 @@ function CustomerPicker({
   customers,
   value,
   onChange,
-  triggerId,
   ariaLabel,
 }: CustomerPickerProps) {
   return (
     <div className="space-y-2">
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger id={triggerId} aria-label={ariaLabel} className="w-full">
-          <SelectValue placeholder="Select a customer" />
-        </SelectTrigger>
-        <SelectContent>
-          {customers.length ? (
-            customers.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))
-          ) : (
-            <SelectEmpty>No customers available</SelectEmpty>
-          )}
-        </SelectContent>
-      </Select>
+      <EntityCombobox
+        items={customers}
+        value={value || undefined}
+        onChange={(next) => onChange(next ?? "")}
+        getKey={(customer) => customer.id}
+        getLabel={(customer) => customer.name}
+        placeholder="Select a customer"
+        searchPlaceholder="Search customers…"
+        emptyText="No customers available"
+        ariaLabel={ariaLabel}
+      />
       <CustomerCreateDialog onCreated={(c) => onChange(c.id)} />
     </div>
   )
@@ -116,17 +101,12 @@ function Tickets() {
   // ticket successfully closes.
   const idempotencyKeyRef = useRef<string>(crypto.randomUUID())
 
-  const customerSelectId = useId()
   const issueId = useId()
   const notesId = useId()
   const resolutionId = useId()
 
-  const { data: products } = useProductOptions()
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions({ activeOnly: true })
+  const { data: customers } = useCustomerOptions()
 
   // sku → catalog entry, restricted to QUANTITY products (the only valid parts).
   const partLookup = useMemo(() => {
@@ -302,12 +282,12 @@ function Tickets() {
         {/* Right pane (desktop): customer + resolution + close */}
         <div className="hidden space-y-4 md:block">
           <div className="space-y-2">
-            <Label htmlFor={customerSelectId}>Customer</Label>
+            <Label>Customer</Label>
             <CustomerPicker
               customers={customers ?? []}
               value={customerId}
               onChange={setCustomerId}
-              triggerId={customerSelectId}
+              ariaLabel="Customer"
             />
           </div>
           <div className="space-y-2">

@@ -3,8 +3,9 @@ import { createFileRoute } from "@tanstack/react-router"
 import { ChevronDown, ChevronRight, Warehouse } from "lucide-react"
 import { useMemo, useState } from "react"
 
-import { DashboardsService, SuppliersService } from "@/client"
+import { DashboardsService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/table"
 import { useIsMobile } from "@/hooks/useMobile"
 import { useRole } from "@/hooks/useRole"
+import { useSupplierOptions } from "@/hooks/useSupplierOptions"
 import { trackingModeLabel, unitStatusLabel } from "@/lib/labels"
 import { requireAuth } from "@/lib/route-guards"
 import { deriveCategories, filterStockRows } from "@/lib/stock-on-hand"
@@ -58,12 +60,7 @@ function StockOnHand() {
       }),
   })
   // Suppliers list is admin-gated; only fetch it for the admin supplier filter.
-  const { data: suppliers } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: () => SuppliersService.readSuppliers(),
-    enabled: isAdmin,
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: suppliers } = useSupplierOptions({ enabled: isAdmin })
 
   const allRows = stock?.rows ?? []
   const categories = useMemo(() => deriveCategories(allRows), [allRows])
@@ -113,22 +110,20 @@ function StockOnHand() {
           </SelectContent>
         </Select>
         {isAdmin ? (
-          <Select
-            value={supplierId === "" ? ALL : supplierId}
-            onValueChange={(v) => setSupplierId(v === ALL ? "" : v)}
-          >
-            <SelectTrigger className="w-full sm:w-48">
-              <SelectValue placeholder="All suppliers" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All suppliers</SelectItem>
-              {(suppliers ?? []).map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="w-full sm:w-48">
+            <EntityCombobox
+              items={suppliers ?? []}
+              value={supplierId || undefined}
+              onChange={(value) => setSupplierId(value ?? "")}
+              getKey={(supplier) => supplier.id}
+              getLabel={(supplier) => supplier.name}
+              placeholder="All suppliers"
+              searchPlaceholder="Search suppliers…"
+              emptyText="No suppliers available"
+              allowClear
+              ariaLabel="Supplier filter"
+            />
+          </div>
         ) : null}
       </div>
 
