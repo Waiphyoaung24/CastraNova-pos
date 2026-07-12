@@ -373,6 +373,70 @@ reformat them on whichever branch next edits them.
   so the primary thing (the list) is pushed below the fold by a form that is used rarely.
   Move it into a dialog behind a "New …" button (the pattern `AddUser` on `admin.tsx`
   already uses) or a tab, and let the list own the page.
+- **`EntityCombobox` doesn't look good on mobile (2026-07-13, owner-reported).**
+  `PopoverContent` is pinned to `w-(--radix-popover-trigger-width)` (`EntityCombobox.tsx:112`)
+  — a floating panel exactly as wide as its trigger, positioned relative to it. On a phone
+  that's a cramped surface for a search input + up to 50 rows + "Show more", and a
+  Radix `Popover` doesn't reflow around the on-screen keyboard the way a bottom sheet does
+  — the panel can end up partially hidden behind the keyboard instead of resizing to sit
+  above it. This affects every picker (`sale`/`tickets`/`projects` customer pickers,
+  `receive` product/supplier pickers, `PullCreatePanel` project picker, the `stock` supplier
+  filter, the `audit` SKU filter) and the same issue applies to the filter *row* triggers
+  (`Select`) sitting next to them.
+  **Suggested direction:** on mobile (`useIsMobile()`, already used everywhere else for the
+  card-vs-table split), swap the `Popover` for a bottom sheet — either the `Sheet` primitive
+  already in the app (`components/ui/sheet.tsx`, used by `AuditDetailSheet`) with
+  `side="bottom"`, or add `vaul`'s `Drawer` (shadcn's usual mobile-combobox pattern; not yet
+  a dependency here) for swipe-to-dismiss. Either way the search input + list keep their
+  desktop behavior — only the container becomes a fixed, full-width, keyboard-aware sheet
+  instead of a `Popover` anchored to the trigger. **Not built — recorded for later.**
+
+---
+
+## List tables: split-header + flush-left pickers + sidebar scrollbar (2026-07-13)
+
+> **DONE 2026-07-13** on branch `feat/list-table-split-header`, merged to `dev_wth`
+> (`8352e3d`). Frontend only. Fixes the header-tint inconsistency this same UI-polish pass
+> introduced above (`bg-background` had overridden shadcn's `bg-muted` tint on 13 of 14
+> lists — only `audit.tsx` kept the tint, which is why it "looked different").
+
+**Shared `ListTable` component** (`components/Common/ListTable.tsx`): a frozen, tinted
+header band above a scrolling row area, so the scrollbar runs beside the rows only — audit's
+original structure, generalized to all 15 list tables (admin, products, customers,
+suppliers, projects, pricing-overrides, override-exceptions, holding-period,
+channel-margin, low-stock, notifications, sync-review, stock, PullQueue, audit itself).
+Uses `table-fixed` + a per-list `<colgroup>` so the header table and body table stay
+aligned, native `overflow-auto` + `scrollbar-gutter: stable` (not Radix `ScrollArea` —
+dropped as a dependency) so the reserved scrollbar gutter is identical on both tables, and
+a `minWidth` prop for the tables that can't survive a narrow desktop viewport (`products`
+at 9 columns, `stock` at 8, `override-exceptions` at 8) — those get a horizontal scrollbar
+on the body with the header/footer mirroring `scrollLeft`. `channel-margin`'s totals row
+became a third pinned table via a `footer` prop.
+
+**Bug caught and fixed before shipping:** `ListTable`'s truncation rule
+(`[&_td]:overflow-hidden`) is a descendant selector (CSS specificity 0,1,1), which beats a
+plain `overflow-visible` utility placed directly on a `<TableCell>` (specificity 0,1,0). The
+"escape hatch" for action-button cells (Edit, Approve/Reject pairs) was silently doing
+nothing until switched to Tailwind's important-modifier syntax, `overflow-visible!`, across
+all ~10 affected cells (`products`, `pricing-overrides`, `sync-review`, `stock`, etc.).
+Worth remembering for any future addition to a `ListTable` row: a plain `overflow-visible`
+on a cell will not override the table-level rule.
+
+**Also shipped:** `EntityCombobox` — the checkmark moved to the trailing edge so labels sit
+flush left (was indented behind a leading check slot); the sidebar (`AppSidebar.tsx`) got
+the same `scrollbar-thin` treatment as every list/picker.
+
+**Orphaned and removed:** `Table`'s `containerClassName` prop (`ui/table.tsx`),
+`ui/scroll-area.tsx` and its `@radix-ui/react-scroll-area` dependency (`bun.lock` +
+`package.json` updated via `bun install`) — audit's old bespoke two-table hack was the only
+consumer.
+
+**Not verified — no browser click-through was done.** `tsc`/biome/production build are
+clean and the built CSS was confirmed to contain `.gutter-stable`/`.scrollbar-thin`, but
+column alignment between a frozen header table and its independently-scrolling body table
+is the one thing that's easy to get subtly wrong and hard to catch from reading code alone.
+Check `products` and `stock` specifically (tightest column counts) at a normal desktop
+width and near the 768px mobile cutoff where `minWidth` triggers horizontal scroll.
 
 ---
 
