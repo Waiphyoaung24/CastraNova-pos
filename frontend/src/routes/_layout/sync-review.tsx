@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { RefreshCw } from "lucide-react"
 import { useState } from "react"
@@ -8,6 +13,7 @@ import {
   SyncReviewService,
   type SyncReviewState,
 } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -54,12 +60,16 @@ function SyncReview() {
   const {
     data,
     isPending: isLoading,
+    isPlaceholderData,
+    isFetching,
     isError,
   } = useQuery({
     queryKey: ["sync-review", state],
     // Review queue reads the full bounded window (backend caps at 500) — no pagination UI yet.
     queryFn: () => SyncReviewService.listSyncReviewItems({ state, limit: 500 }),
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
 
   const resolveMutation = useMutation({
     mutationFn: ({
@@ -133,88 +143,28 @@ function SyncReview() {
           No {state} items.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((item) => (
-            <div key={item.id} className="bg-card rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{item.mutation_kind}</p>
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {new Date(item.created_at).toLocaleString()}
-                  </p>
-                </div>
-                <Badge variant="secondary" className="shrink-0">
-                  {item.reason}
-                </Badge>
-              </div>
-              <div className="mt-3 border-t pt-3">
-                {isResolvable(item.state) ? (
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="flex-1"
-                      disabled={resolveMutation.isPending}
-                      onClick={() =>
-                        resolveMutation.mutate({
-                          itemId: item.id,
-                          decision: "RESOLVED",
-                        })
-                      }
-                    >
-                      Keep
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="flex-1"
-                      disabled={resolveMutation.isPending}
-                      onClick={() =>
-                        resolveMutation.mutate({
-                          itemId: item.id,
-                          decision: "DISCARDED",
-                        })
-                      }
-                    >
-                      Discard
-                    </Button>
-                  </div>
-                ) : (
-                  <Badge variant="secondary">{item.state}</Badge>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>When</TableHead>
-              <TableHead>Mutation</TableHead>
-              <TableHead>Reason</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
             {rows.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell className="text-muted-foreground">
-                  {new Date(item.created_at).toLocaleString()}
-                </TableCell>
-                <TableCell className="font-medium">
-                  {item.mutation_kind}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{item.reason}</Badge>
-                </TableCell>
-                <TableCell className="text-right">
+              <div key={item.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{item.mutation_kind}</p>
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      {new Date(item.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className="shrink-0">
+                    {item.reason}
+                  </Badge>
+                </div>
+                <div className="mt-3 border-t pt-3">
                   {isResolvable(item.state) ? (
-                    <div className="flex justify-end gap-2">
+                    <div className="flex gap-2">
                       <Button
                         type="button"
                         size="sm"
+                        className="flex-1"
                         disabled={resolveMutation.isPending}
                         onClick={() =>
                           resolveMutation.mutate({
@@ -229,6 +179,7 @@ function SyncReview() {
                         type="button"
                         size="sm"
                         variant="outline"
+                        className="flex-1"
                         disabled={resolveMutation.isPending}
                         onClick={() =>
                           resolveMutation.mutate({
@@ -243,11 +194,74 @@ function SyncReview() {
                   ) : (
                     <Badge variant="secondary">{item.state}</Badge>
                   )}
-                </TableCell>
-              </TableRow>
+                </div>
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={listLoading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Mutation</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell className="text-muted-foreground">
+                    {new Date(item.created_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    {item.mutation_kind}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{item.reason}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isResolvable(item.state) ? (
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={resolveMutation.isPending}
+                          onClick={() =>
+                            resolveMutation.mutate({
+                              itemId: item.id,
+                              decision: "RESOLVED",
+                            })
+                          }
+                        >
+                          Keep
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={resolveMutation.isPending}
+                          onClick={() =>
+                            resolveMutation.mutate({
+                              itemId: item.id,
+                              decision: "DISCARDED",
+                            })
+                          }
+                        >
+                          Discard
+                        </Button>
+                      </div>
+                    ) : (
+                      <Badge variant="secondary">{item.state}</Badge>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ListShell>
       )}
     </div>
   )

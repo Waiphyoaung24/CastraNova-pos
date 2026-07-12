@@ -1,11 +1,12 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ChevronDown, ChevronRight, Warehouse } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { DashboardsService } from "@/client"
-import { PageHeader } from "@/components/Common/PageHeader"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useIsMobile } from "@/hooks/useMobile"
 import { useRole } from "@/hooks/useRole"
 import { useSupplierOptions } from "@/hooks/useSupplierOptions"
@@ -52,21 +54,29 @@ function StockOnHand() {
   const [supplierId, setSupplierId] = useState("")
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const { data: stock } = useQuery({
+  const {
+    data: stock,
+    isPlaceholderData,
+    isFetching,
+  } = useQuery({
     queryKey: ["stock-on-hand", supplierId],
     queryFn: () =>
       DashboardsService.getStockOnHand({
         supplier: supplierId || undefined,
       }),
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
   // Suppliers list is admin-gated; only fetch it for the admin supplier filter.
   const { data: suppliers } = useSupplierOptions({ enabled: isAdmin })
 
   const allRows = stock?.rows ?? []
   const categories = useMemo(() => deriveCategories(allRows), [allRows])
+  // The text filter scans every row, so defer it until typing settles.
+  const debouncedQuery = useDebouncedValue(query)
   const rows = useMemo(
-    () => filterStockRows(allRows, { category, query }),
-    [allRows, category, query],
+    () => filterStockRows(allRows, { category, query: debouncedQuery }),
+    [allRows, category, debouncedQuery],
   )
 
   return (
@@ -129,50 +139,16 @@ function StockOnHand() {
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
-          No stock matches these filters.
+          {stock ? "No stock matches these filters." : "Loading…"}
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((r) => {
-            const isQuantity = r.tracking_mode === "QUANTITY"
-            const isOpen = expandedId === r.product_id
-            return (
-              <StockCard
-                key={r.product_id}
-                productId={r.product_id}
-                sku={r.sku}
-                modelName={r.model_name}
-                brand={r.brand}
-                category={r.category}
-                trackingMode={r.tracking_mode}
-                quantityOnHand={r.quantity_on_hand}
-                isQuantity={isQuantity}
-                isOpen={isOpen}
-                onToggle={() => setExpandedId(isOpen ? null : r.product_id)}
-              />
-            )
-          })}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8" />
-              <TableHead>SKU</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead>Brand</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Tracking</TableHead>
-              <TableHead className="text-right">In stock</TableHead>
-              <TableHead className="w-0" aria-label="Labels" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
             {rows.map((r) => {
               const isQuantity = r.tracking_mode === "QUANTITY"
               const isOpen = expandedId === r.product_id
               return (
-                <StockRow
+                <StockCard
                   key={r.product_id}
                   productId={r.product_id}
                   sku={r.sku}
@@ -187,8 +163,46 @@ function StockOnHand() {
                 />
               )
             })}
-          </TableBody>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={listLoading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead className="w-8" />
+                <TableHead>SKU</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Brand</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Tracking</TableHead>
+                <TableHead className="text-right">In stock</TableHead>
+                <TableHead className="w-0" aria-label="Labels" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => {
+                const isQuantity = r.tracking_mode === "QUANTITY"
+                const isOpen = expandedId === r.product_id
+                return (
+                  <StockRow
+                    key={r.product_id}
+                    productId={r.product_id}
+                    sku={r.sku}
+                    modelName={r.model_name}
+                    brand={r.brand}
+                    category={r.category}
+                    trackingMode={r.tracking_mode}
+                    quantityOnHand={r.quantity_on_hand}
+                    isQuantity={isQuantity}
+                    isOpen={isOpen}
+                    onToggle={() => setExpandedId(isOpen ? null : r.product_id)}
+                  />
+                )
+              })}
+            </TableBody>
+          </Table>
+        </ListShell>
       )}
     </div>
   )

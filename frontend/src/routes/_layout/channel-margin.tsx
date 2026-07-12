@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { MetricBar } from "@/components/reports/MetricBar"
 import { StatCard } from "@/components/reports/StatCard"
@@ -36,9 +37,9 @@ import {
   formatPct,
   formatThb,
   isValidMonth,
-  marginPct,
   type MarginChannel,
   type MarginGroupBy,
+  marginPct,
   momChange,
   pointChange,
   previousMonth,
@@ -74,11 +75,13 @@ function ChannelMargin() {
   const validMonth = isValidMonth(month)
   const prevMonth = previousMonth(month)
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["channel-margin", month, groupBy, channel ?? "all"],
     queryFn: () => ReportsService.channelMargin({ month, groupBy, channel }),
     enabled: validMonth,
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
   // Prior month, fetched only to power the month-over-month deltas. If it has no
   // data the deltas simply don't render — they're never required for the report.
   const { data: prevData } = useQuery({
@@ -269,86 +272,90 @@ function ChannelMargin() {
           No activity for {month}.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((r) => {
-            const mPct = marginPct(r.margin_thb, r.revenue_thb)
-            return (
-              <div key={r.key} className="bg-card rounded-lg border p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">{r.label}</span>
-                  <span className="num text-lg font-semibold">
-                    {formatThb(r.margin_thb)}
-                  </span>
-                </div>
-                <dl className="text-muted-foreground mt-3 grid grid-cols-2 gap-y-1 border-t pt-3 text-sm">
-                  <dt>Revenue</dt>
-                  <dd className="num text-foreground text-right">
-                    {formatThb(r.revenue_thb)}
-                  </dd>
-                  <dt>COGS</dt>
-                  <dd className="num text-foreground text-right">
-                    {formatThb(r.cogs_thb)}
-                  </dd>
-                  <dt>Margin %</dt>
-                  <dd className="num text-foreground text-right">
-                    {mPct == null ? "—" : formatPct(mPct)}
-                  </dd>
-                </dl>
-              </div>
-            )
-          })}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{firstColumnLabel}</TableHead>
-              <TableHead className="text-right">Revenue</TableHead>
-              <TableHead className="text-right">COGS</TableHead>
-              <TableHead className="text-right">Margin</TableHead>
-              <TableHead className="text-right">Margin %</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
             {rows.map((r) => {
               const mPct = marginPct(r.margin_thb, r.revenue_thb)
               return (
-                <TableRow key={r.key}>
-                  <TableCell className="font-medium">{r.label}</TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(r.revenue_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(r.cogs_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(r.margin_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {mPct == null ? "—" : formatPct(mPct)}
-                  </TableCell>
-                </TableRow>
+                <div key={r.key} className="bg-card rounded-lg border p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">{r.label}</span>
+                    <span className="num text-lg font-semibold">
+                      {formatThb(r.margin_thb)}
+                    </span>
+                  </div>
+                  <dl className="text-muted-foreground mt-3 grid grid-cols-2 gap-y-1 border-t pt-3 text-sm">
+                    <dt>Revenue</dt>
+                    <dd className="num text-foreground text-right">
+                      {formatThb(r.revenue_thb)}
+                    </dd>
+                    <dt>COGS</dt>
+                    <dd className="num text-foreground text-right">
+                      {formatThb(r.cogs_thb)}
+                    </dd>
+                    <dt>Margin %</dt>
+                    <dd className="num text-foreground text-right">
+                      {mPct == null ? "—" : formatPct(mPct)}
+                    </dd>
+                  </dl>
+                </div>
               )
             })}
-          </TableBody>
-          <TableFooter>
-            <TableRow>
-              <TableCell className="font-medium">Total</TableCell>
-              <TableCell className="num text-right">
-                {formatThb(data.total_revenue_thb)}
-              </TableCell>
-              <TableCell className="num text-right">
-                {formatThb(data.total_cogs_thb)}
-              </TableCell>
-              <TableCell className="num text-right">
-                {formatThb(data.total_margin_thb)}
-              </TableCell>
-              <TableCell className="num text-right">
-                {blendedMarginPct == null ? "—" : formatPct(blendedMarginPct)}
-              </TableCell>
-            </TableRow>
-          </TableFooter>
-        </Table>
+          </div>
+        </ListShell>
+      ) : (
+        <ListShell loading={listLoading}>
+          <Table containerClassName={LIST_SCROLL}>
+            <TableHeader className="bg-background sticky top-0 z-10">
+              <TableRow>
+                <TableHead>{firstColumnLabel}</TableHead>
+                <TableHead className="text-right">Revenue</TableHead>
+                <TableHead className="text-right">COGS</TableHead>
+                <TableHead className="text-right">Margin</TableHead>
+                <TableHead className="text-right">Margin %</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => {
+                const mPct = marginPct(r.margin_thb, r.revenue_thb)
+                return (
+                  <TableRow key={r.key}>
+                    <TableCell className="font-medium">{r.label}</TableCell>
+                    <TableCell className="num text-right">
+                      {formatThb(r.revenue_thb)}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {formatThb(r.cogs_thb)}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {formatThb(r.margin_thb)}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {mPct == null ? "—" : formatPct(mPct)}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TableCell className="font-medium">Total</TableCell>
+                <TableCell className="num text-right">
+                  {formatThb(data.total_revenue_thb)}
+                </TableCell>
+                <TableCell className="num text-right">
+                  {formatThb(data.total_cogs_thb)}
+                </TableCell>
+                <TableCell className="num text-right">
+                  {formatThb(data.total_margin_thb)}
+                </TableCell>
+                <TableCell className="num text-right">
+                  {blendedMarginPct == null ? "—" : formatPct(blendedMarginPct)}
+                </TableCell>
+              </TableRow>
+            </TableFooter>
+          </Table>
+        </ListShell>
       )}
     </div>
   )

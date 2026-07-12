@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Package } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
@@ -9,6 +14,7 @@ import {
   ProductsService,
   type TrackingMode,
 } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { EmptyState } from "@/components/EmptyState"
@@ -81,15 +87,21 @@ function Products() {
   const [minStock, setMinStock] = useState("")
   const pagination = usePagination()
 
-  const { data: productsResponse } = useQuery({
+  const {
+    data: productsResponse,
+    isPlaceholderData,
+    isFetching,
+  } = useQuery({
     queryKey: ["products", pagination.page],
     queryFn: () =>
       ProductsService.readProducts({
         skip: pagination.skip,
         limit: pagination.limit,
       }),
+    placeholderData: keepPreviousData,
   })
   const products = productsResponse?.data ?? []
+  const listLoading = isPlaceholderData || isFetching
   const { data: purchaseCosts } = useQuery({
     queryKey: ["product-purchase-costs"],
     queryFn: () => ProductsService.readPurchaseCosts(),
@@ -251,65 +263,71 @@ function Products() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Catalog</h2>
-        {products.length === 0 ? (
-          <EmptyState
-            icon={Package}
-            title="No products yet"
-            hint="Create your first product with the form above."
-          />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Brand</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Tracking</TableHead>
-                <TableHead className="text-right">Purchase</TableHead>
-                <TableHead className="text-right">Retail</TableHead>
-                <TableHead className="text-right">Repair</TableHead>
-                <TableHead className="text-right">History</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {products.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="num font-medium">{p.sku}</TableCell>
-                  <TableCell>{p.model_name}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {p.brand ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {p.category ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">
-                      {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {costByProductId.has(p.id)
-                      ? formatThb(costByProductId.get(p.id) as string)
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(p.retail_price_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(p.repair_price_thb)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <EditProductDialog product={p} />
-                      <PriceHistoryDialog productId={p.id} sku={p.sku} />
-                    </div>
-                  </TableCell>
+        <ListShell loading={listLoading}>
+          {!productsResponse ? (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              Loading…
+            </p>
+          ) : products.length === 0 ? (
+            <EmptyState
+              icon={Package}
+              title="No products yet"
+              hint="Create your first product with the form above."
+            />
+          ) : (
+            <Table containerClassName={LIST_SCROLL}>
+              <TableHeader className="bg-background sticky top-0 z-10">
+                <TableRow>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Brand</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Tracking</TableHead>
+                  <TableHead className="text-right">Purchase</TableHead>
+                  <TableHead className="text-right">Retail</TableHead>
+                  <TableHead className="text-right">Repair</TableHead>
+                  <TableHead className="text-right">History</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+              </TableHeader>
+              <TableBody>
+                {products.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="num font-medium">{p.sku}</TableCell>
+                    <TableCell>{p.model_name}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {p.brand ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {p.category ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">
+                        {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {costByProductId.has(p.id)
+                        ? formatThb(costByProductId.get(p.id) as string)
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {formatThb(p.retail_price_thb)}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {formatThb(p.repair_price_thb)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <EditProductDialog product={p} />
+                        <PriceHistoryDialog productId={p.id} sku={p.sku} />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </ListShell>
         <PaginationControls
           total={productsResponse?.count ?? 0}
           pageSize={pagination.pageSize}

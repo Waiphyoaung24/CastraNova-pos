@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Contact } from "lucide-react"
 import { useId, useState } from "react"
@@ -8,6 +13,7 @@ import {
   CustomersService,
   type CustomerType,
 } from "@/client"
+import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -222,15 +228,21 @@ function Customers() {
   const [editing, setEditing] = useState<CustomerPublic | null>(null)
   const pagination = usePagination()
 
-  const { data: customersResponse } = useQuery({
+  const {
+    data: customersResponse,
+    isPlaceholderData,
+    isFetching,
+  } = useQuery({
     queryKey: ["customers", pagination.page],
     queryFn: () =>
       CustomersService.readCustomers({
         skip: pagination.skip,
         limit: pagination.limit,
       }),
+    placeholderData: keepPreviousData,
   })
   const customers = customersResponse?.data ?? []
+  const listLoading = isPlaceholderData || isFetching
 
   const createMutation = useMutation<CustomerPublic, Error, void>({
     mutationFn: () =>
@@ -286,70 +298,22 @@ function Customers() {
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">Existing customers</h2>
-        {customers.length === 0 ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            No customers yet.
-          </p>
-        ) : isMobile ? (
-          <div className="space-y-3">
-            {customers.map((c) => (
-              <div key={c.id} className="bg-card rounded-lg border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{c.name}</p>
-                    <Badge variant="secondary" className="mt-1">
-                      {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
-                    </Badge>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setEditing(c)}
-                  >
-                    Edit
-                  </Button>
-                </div>
-                <div className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Contact</span>
-                    <span>{c.contact ?? "—"}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Country</span>
-                    <span>{c.country ?? "—"}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Country</TableHead>
-                <TableHead className="w-0" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-            {customers.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-medium">{c.name}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">
-                      {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {c.contact ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {c.country ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
+        <ListShell loading={listLoading}>
+          {customers.length === 0 ? (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              {customersResponse ? "No customers yet." : "Loading…"}
+            </p>
+          ) : isMobile ? (
+            <div className="space-y-3">
+              {customers.map((c) => (
+                <div key={c.id} className="bg-card rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{c.name}</p>
+                      <Badge variant="secondary" className="mt-1">
+                        {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
+                      </Badge>
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
@@ -358,12 +322,62 @@ function Customers() {
                     >
                       Edit
                     </Button>
-                  </TableCell>
-                </TableRow>
+                  </div>
+                  <div className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Contact</span>
+                      <span>{c.contact ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Country</span>
+                      <span>{c.country ?? "—"}</span>
+                    </div>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
-        )}
+            </div>
+          ) : (
+            <Table containerClassName={LIST_SCROLL}>
+              <TableHeader className="bg-background sticky top-0 z-10">
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Country</TableHead>
+                  <TableHead className="w-0" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {customers.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-medium">{c.name}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">
+                        {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {c.contact ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {c.country ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditing(c)}
+                      >
+                        Edit
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </ListShell>
         <PaginationControls
           total={customersResponse?.count ?? 0}
           pageSize={pagination.pageSize}

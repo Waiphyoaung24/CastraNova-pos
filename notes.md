@@ -306,6 +306,76 @@ endpoint, and the picker still works without it (just larger, and showing dead r
 
 ---
 
+## List & picker UI polish (2026-07-12)
+
+> **DONE 2026-07-12** on branch `feat/list-ui-polish`. Frontend only — no backend, schema,
+> or migration change. Shipped: a shared `ListShell` (60vh scroll box + sticky header +
+> dim-and-loading-bar overlay), a `scrollbar-thin` utility applied to every list and picker
+> scroll box, a 250 ms debounce (`useDebouncedValue`) on the pickers and the stock search,
+> one shared pager (`PaginationControls`, now with first/last) on **every** list, and
+> `placeholderData: keepPreviousData` everywhere a page or filter change re-queries.
+
+**The "loading flash" turned out to be three separate bugs, not one.** Worth recording,
+because the worst of them was invisible in the original report:
+
+1. **A misleading empty state, not a spinner.** `products.tsx`, `customers.tsx`,
+   `suppliers.tsx` and `stock.tsx` had **no loading branch at all**. On a page turn `data`
+   went `undefined` → `?? []` → the screen rendered **"No products yet." / "No customers
+   yet."** for a frame. A page turn was briefly telling the user their records did not
+   exist. That is worse than a spinner, and it is what "flashing" actually was on those
+   screens.
+2. **The table unmounting to a "Loading…" line** — `audit.tsx`, plus every filter-driven
+   report.
+3. **Re-suspending to a skeleton** — `admin.tsx` was the lone `useSuspenseQuery`; its
+   query key changed per page with no `placeholderData`, so Suspense re-fired and flashed
+   `PendingUsers`. It is now a plain `useQuery` like the other seven lists, and
+   `PendingUsers.tsx` was deleted as orphaned. (`PendingItems.tsx` was **already** dead
+   code before this change — still is; left alone.)
+
+**`projects.tsx` needed nothing** — the projects *table* was already server-paginated
+(`usePagination` + `readProjects({skip, limit})` + `PaginationControls`) and was in fact
+the only screen that already had `keepPreviousData`. The concern that it had been missed
+because "the projects *picker* doesn't need pagination" was unfounded: picker and table
+are separate surfaces and only the picker was ever unpaginated by design.
+
+**The real picker jank was not `EntityCombobox`.** `audit.tsx` carried its own hand-rolled
+`SkuCombobox` copy with cmdk's filtering left **on**, an uncontrolled input, and **no
+render cap** — it mounted a `CommandItem` for *every* product and re-scored them all on
+each keystroke. It is now the shared `EntityCombobox` (50-item cap + "Show more" +
+debounce), which deleted ~60 lines. It still calls `useProductOptions()` with **no**
+`activeOnly`, so the ledger can still filter by a discontinued SKU.
+
+**Deliberate exception:** `pulls.tsx` polls every 30 s, so its loading flag is
+`isPlaceholderData` only, never `isFetching` — otherwise a background poll would pulse the
+loading bar twice a minute.
+
+**Not fixed here (pre-existing):** `receive.tsx`, `sale.tsx`, `tickets.tsx`,
+`PullCreatePanel.tsx` and `usePagination.ts` are **not biome-clean on `dev_wth`** (format +
+import-order drift). Untouched deliberately, to keep this diff surgical — pre-commit will
+reformat them on whichever branch next edits them.
+
+### Still open — follow-ups this pass surfaced
+
+- **Audit's User filter still truncates at 100.** `audit.tsx` resolves actor names with a
+  bare `UsersService.readUsers()` (no `skip`/`limit`), so it is the one picker the
+  pagination migration never converted — user #101+ is missing from the filter dropdown
+  *and* their rows render as "Unknown user". Fixing it properly needs a lightweight
+  `GET /users/options` endpoint (a backend change), mirroring
+  `/customers|suppliers|projects|products/options`. **Not done — needs a backend endpoint.**
+- **Catalog list pages need a search filter.** With 25 rows a page and no search, finding
+  one customer/product/supplier means paging through the list by hand. Server-side
+  pagination made this *more* acute, not less: the rows you want are now genuinely not on
+  the client. Each list endpoint would need a `q`/`search` query param (name/SKU
+  substring), plus a debounced input that resets to page 1 — the debounce hook and the
+  page-reset pattern both already exist.
+- **"Create new" should move behind a tab or a modal.** `products.tsx`, `customers.tsx`,
+  `suppliers.tsx` and `projects.tsx` all stack a full create-form `Card` *above* the table,
+  so the primary thing (the list) is pushed below the fold by a form that is used rarely.
+  Move it into a dialog behind a "New …" button (the pattern `AddUser` on `admin.tsx`
+  already uses) or a tab, and let the list own the page.
+
+---
+
 # PRD conformance audit — v3.0 vs implementation
 
 **Audited:** 2026-07-10, against `docs/client/2026-06-02-castranova-pos-v3.0-prd.md`
