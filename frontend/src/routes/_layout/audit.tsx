@@ -426,7 +426,7 @@ function SkuCombobox({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-[--radix-popover-trigger-width] p-0"
+        className="w-(--radix-popover-trigger-width) p-0"
       >
         <Command>
           <CommandInput placeholder="Search SKU…" />
