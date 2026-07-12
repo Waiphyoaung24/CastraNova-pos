@@ -390,6 +390,15 @@ reformat them on whichever branch next edits them.
   a dependency here) for swipe-to-dismiss. Either way the search input + list keep their
   desktop behavior — only the container becomes a fixed, full-width, keyboard-aware sheet
   instead of a `Popover` anchored to the trigger. **Not built — recorded for later.**
+- **Catalog lists — owner's combined spec (2026-07-13):** *"make catalog lists - hide
+  register behind a pop up model or a form tab - add list filters."* This is the same pair
+  of asks as the two bullets above, restated together as one unit of work for the catalog
+  list pages (`products.tsx`, `customers.tsx`, `suppliers.tsx`, `projects.tsx`): (1) move
+  the create ("register") form behind a popup dialog or a form tab instead of sitting above
+  the table, and (2) add filters to the list itself (name/SKU search at minimum). Treat as
+  one PR — a filter row and a "New …" trigger both land in the same header area above the
+  table, so it is cheaper to lay out once than to patch the create-form move and then the
+  filter row separately. **Not built.**
 
 ---
 
