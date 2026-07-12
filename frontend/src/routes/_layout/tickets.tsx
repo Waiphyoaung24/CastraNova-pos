@@ -6,7 +6,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   type CustomerPublic,
   CustomersService,
-  ProductsService,
   type ServiceTicketPublic,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -29,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
@@ -121,11 +121,7 @@ function Tickets() {
   const notesId = useId()
   const resolutionId = useId()
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions()
   const { data: customers } = useQuery({
     queryKey: ["customers"],
     queryFn: () => CustomersService.readCustomers(),

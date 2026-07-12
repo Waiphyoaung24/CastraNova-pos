@@ -7,7 +7,6 @@ import {
   type AuditEntryPublic,
   AuditService,
   type MovementType,
-  ProductsService,
   UsersService,
 } from "@/client"
 import { AuditDetailSheet } from "@/components/audit/AuditDetailSheet"
@@ -46,6 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useIsMobile } from "@/hooks/useMobile"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import {
   type AuditFilter,
   buildAuditQuery,
@@ -119,11 +119,8 @@ function Audit() {
     queryFn: () => UsersService.readUsers(),
     staleTime: 5 * 60 * 1000,
   })
-  const { data: skus } = useQuery({
-    queryKey: ["products", "skus"],
-    queryFn: () => ProductsService.readSkus(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: options } = useProductOptions()
+  const skus = useMemo(() => (options ?? []).map((o) => o.sku), [options])
 
   const userList = users?.data ?? []
   const userNames = useMemo(
@@ -131,7 +128,7 @@ function Audit() {
     [userList],
   )
 
-  const rows = data ?? []
+  const rows = data?.data ?? []
   const summary = useMemo(() => summarizeAudit(rows), [rows])
   const capped = rows.length >= PAGE_LIMIT
 

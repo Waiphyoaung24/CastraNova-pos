@@ -6,7 +6,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   type CustomerPublic,
   CustomersService,
-  ProductsService,
   type SaleCreateRequest,
   type SalePublic,
   type SaleStaffPublic,
@@ -27,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import { queued } from "@/lib/query-client"
@@ -125,12 +125,7 @@ function Sale() {
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
   const scanRef = useRef<ScanFieldHandle>(null)
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions()
   const { data: customers } = useQuery({
     queryKey: ["customers"],
     queryFn: () => CustomersService.readCustomers(),

@@ -7,7 +7,6 @@ import {
   type OverrideState,
   type PricingOverrideDecision,
   PricingOverridesService,
-  ProductsService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -31,6 +30,7 @@ import {
 } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { formatDeviationPct, isPending } from "@/lib/pricing-overrides"
 import { formatThb } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
@@ -67,11 +67,7 @@ function PricingOverrides() {
     queryKey: ["pricing-overrides", state],
     queryFn: () => PricingOverridesService.listPricingOverrides({ state }),
   })
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions()
 
   const productLabels = useMemo(
     () => new Map((products ?? []).map((p) => [p.id, p.sku])),

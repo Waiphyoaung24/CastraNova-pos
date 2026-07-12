@@ -190,6 +190,25 @@ export const AuditEntryPublicSchema = {
     title: 'AuditEntryPublic'
 } as const;
 
+export const AuditPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AuditEntryPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AuditPublic'
+} as const;
+
 export const BatchDrillRowSchema = {
     properties: {
         batch_no: {
@@ -1452,6 +1471,44 @@ export const ProductCreateSchema = {
     type: 'object',
     required: ['sku', 'model_name', 'retail_price_thb', 'repair_price_thb'],
     title: 'ProductCreate'
+} as const;
+
+export const ProductOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sku: {
+            type: 'string',
+            title: 'Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode'
+        },
+        retail_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Retail Price Thb'
+        },
+        repair_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Repair Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sku', 'model_name', 'tracking_mode', 'retail_price_thb', 'repair_price_thb'],
+    title: 'ProductOption',
+    description: `Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+receive/tickets/pulls product selection). Omits \`specs\` (JSONB) and admin-only
+catalog fields (brand, category, default_min_stock_level); prices are included
+because GET /products already exposes them to the same authenticated audience.`
 } as const;
 
 export const ProductPublicSchema = {

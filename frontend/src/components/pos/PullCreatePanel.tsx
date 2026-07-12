@@ -1,6 +1,6 @@
 import { ArrowLeft, Minus, Plus, Trash2 } from "lucide-react"
 import { useId, useState } from "react"
-import type { ProductPublic, ProjectPublic } from "@/client/types.gen"
+import type { ProductOption, ProjectPublic } from "@/client/types.gen"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -28,7 +28,7 @@ interface PullCreatePanelProps {
   onProjectChange: (value: string) => void
   adminNotes: string
   onNotesChange: (value: string) => void
-  products: ProductPublic[]
+  products: ProductOption[]
   onAddItem: (productId: string, qty: number) => void
   addNotice: string
   isAdding: boolean
