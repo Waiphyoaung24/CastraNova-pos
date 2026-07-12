@@ -25,6 +25,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -66,8 +73,7 @@ export const Route = createFileRoute("/_layout/audit")({
 })
 
 const ALL = "ALL"
-// The endpoint's default page size; a full page means there may be older rows.
-const PAGE_LIMIT = 100
+const PAGE_SIZE = 100
 const EVENT_TYPES: MovementType[] = [
   "RECEIVED",
   "SOLD",
@@ -107,10 +113,16 @@ function Audit() {
     sku: "",
   })
   const [selected, setSelected] = useState<AuditEntryPublic | null>(null)
+  const [page, setPage] = useState(0)
 
   const { data, isPending, isError } = useQuery({
-    queryKey: ["audit", filter],
-    queryFn: () => AuditService.listAudit(buildAuditQuery(filter)),
+    queryKey: ["audit", filter, page],
+    queryFn: () =>
+      AuditService.listAudit({
+        ...buildAuditQuery(filter),
+        skip: page * PAGE_SIZE,
+        limit: PAGE_SIZE,
+      }),
   })
   // Reference data to resolve UUIDs -> readable names (admin-only screen, so
   // both reads are permitted). Held steady; the ledger itself is the live data.
@@ -129,8 +141,8 @@ function Audit() {
   )
 
   const rows = data?.data ?? []
+  const totalCount = data?.count ?? 0
   const summary = useMemo(() => summarizeAudit(rows), [rows])
-  const capped = rows.length >= PAGE_LIMIT
 
   const actorName = (id: string) => userNames.get(id) ?? "Unknown user"
   const itemRef = (e: AuditEntryPublic) => {
@@ -165,9 +177,10 @@ function Audit() {
           <Label htmlFor={eventId}>Event</Label>
           <Select
             value={filter.eventType || ALL}
-            onValueChange={(v) =>
+            onValueChange={(v) => {
               setFilter((f) => ({ ...f, eventType: v === ALL ? "" : v }))
-            }
+              setPage(0)
+            }}
           >
             <SelectTrigger id={eventId} className="w-full sm:w-48">
               <SelectValue />
@@ -186,9 +199,10 @@ function Audit() {
           <Label htmlFor={userSelectId}>User</Label>
           <Select
             value={filter.actorUserId || ALL}
-            onValueChange={(v) =>
+            onValueChange={(v) => {
               setFilter((f) => ({ ...f, actorUserId: v === ALL ? "" : v }))
-            }
+              setPage(0)
+            }}
           >
             <SelectTrigger id={userSelectId} className="w-full sm:w-56">
               <SelectValue />
@@ -209,9 +223,10 @@ function Audit() {
             id={fromId}
             type="date"
             value={filter.fromDate}
-            onChange={(e) =>
+            onChange={(e) => {
               setFilter((f) => ({ ...f, fromDate: e.target.value }))
-            }
+              setPage(0)
+            }}
             className="w-full sm:w-44"
           />
         </div>
@@ -221,9 +236,10 @@ function Audit() {
             id={toId}
             type="date"
             value={filter.toDate}
-            onChange={(e) =>
+            onChange={(e) => {
               setFilter((f) => ({ ...f, toDate: e.target.value }))
-            }
+              setPage(0)
+            }}
             className="w-full sm:w-44"
           />
         </div>
@@ -233,18 +249,17 @@ function Audit() {
             skuSelectId={skuSelectId}
             skus={skus ?? []}
             value={filter.sku}
-            onChange={(v) => setFilter((f) => ({ ...f, sku: v }))}
+            onChange={(v) => {
+              setFilter((f) => ({ ...f, sku: v }))
+              setPage(0)
+            }}
           />
         </div>
       </div>
 
-      {rows.length > 0 ? (
+      {totalCount > 0 ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard
-            label="Movements"
-            value={summary.total}
-            hint={capped ? "latest 100 shown" : undefined}
-          />
+          <StatCard label="Movements" value={totalCount} />
           <StatCard label="Distinct users" value={summary.distinctActors} />
           <StatCard label="Receipts" value={summary.received} />
           <StatCard label="Outflows" value={summary.outflow} />
@@ -386,6 +401,47 @@ function Audit() {
           </ScrollArea>
         </div>
       )}
+
+      {totalCount > 0 ? (
+        <Pagination>
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                href="#"
+                aria-disabled={page === 0}
+                className={
+                  page === 0 ? "pointer-events-none opacity-50" : undefined
+                }
+                onClick={(e) => {
+                  e.preventDefault()
+                  if (page > 0) setPage((p) => p - 1)
+                }}
+              />
+            </PaginationItem>
+            <PaginationItem>
+              <span className="text-muted-foreground px-2 text-sm">
+                Page {page + 1} of{" "}
+                {Math.max(1, Math.ceil(totalCount / PAGE_SIZE))}
+              </span>
+            </PaginationItem>
+            <PaginationItem>
+              <PaginationNext
+                href="#"
+                aria-disabled={(page + 1) * PAGE_SIZE >= totalCount}
+                className={
+                  (page + 1) * PAGE_SIZE >= totalCount
+                    ? "pointer-events-none opacity-50"
+                    : undefined
+                }
+                onClick={(e) => {
+                  e.preventDefault()
+                  if ((page + 1) * PAGE_SIZE < totalCount) setPage((p) => p + 1)
+                }}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      ) : null}
 
       <AuditDetailSheet entry={selected} onClose={() => setSelected(null)} />
     </div>
