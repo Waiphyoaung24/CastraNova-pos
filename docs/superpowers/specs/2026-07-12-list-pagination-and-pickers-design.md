@@ -6,6 +6,31 @@
 must add `ecc:database-reviewer` + `ecc:security-reviewer`.
 **Migration:** none required. Every change is read-side (response models + queries). No
 table schema changes.
+**Base branch:** `dev_wth`, **after** `feat/product-options-pagination` merges (see §0).
+
+---
+
+## 0. Prior art — what is ALREADY built (do not rebuild)
+
+A concurrent branch, **`feat/product-options-pagination`** (4 commits, merging into
+`dev_wth` imminently), already delivers two mechanisms this spec originally proposed:
+
+| Commit | Delivers | Effect on this spec |
+|---|---|---|
+| `c83d200` | **`GET /products/options`** — replaces `GET /products/skus` with an unpaginated `{id, sku, model_name, tracking_mode, retail_price_thb, repair_price_thb}` projection | **This IS the products picker endpoint.** Do not create `/products/picker`. |
+| `de3652d` | **`useProductOptions`** hook, migrated across `sale.tsx`, `receive.tsx`, `tickets.tsx`, `pulls.tsx`, `PullCreatePanel.tsx`, `pricing-overrides.tsx` | **The products picker call sites are DONE.** |
+| `3e8eac2` + `f3c8403` | **`GET /audit` → `AuditPublic {data, count}`** + real Previous/Next in `audit.tsx` | Audit ledger is DONE. `audit.tsx` stays out of scope. |
+
+**Consequences for this spec:**
+
+- The **naming convention is `/options`, not `/picker`.** New picker endpoints follow it:
+  `/customers/options`, `/suppliers/options`, `/projects/options`.
+- The **hook convention is `use<Entity>Options`** (`frontend/src/hooks/useProductOptions.ts`).
+- `AuditPublic {data, count}` is the **precedent for the envelope** — match its shape and its
+  `crud.count_*` mirroring discipline (see §4).
+- The **products picker is done except for the active-only filter** (§3), which must be added
+  to the *existing* `/products/options`, not to a new endpoint.
+- Remaining picker work is therefore **customers, suppliers, projects only**.
 
 ---
 
@@ -75,18 +100,21 @@ offline.
 
 ## 3. Mechanism 1 — Picker endpoints (fetch complete)
 
-Four new routes, each mirroring the proven `crud.list_skus` pattern (`crud.py:423`):
-unpaginated, ordered, projection-only.
+Unpaginated, ordered, projection-only — the pattern `GET /products/options` already
+establishes. **Naming follows `/options`, matching the shipped convention.**
 
-| Route | Row model | Filter | Order |
-|---|---|---|---|
-| `GET /products/picker` | `{id, sku, model_name, tracking_mode, retail_price_thb, repair_price_thb}` | `is_active = True` | `sku` |
-| `GET /customers/picker` | `{id, name}` | — (no active flag exists) | `name` |
-| `GET /suppliers/picker` | `{id, name}` | — (no active flag exists) | `name` |
-| `GET /projects/picker` | `{id, code, name}` | `status = ACTIVE` | `code` |
+| Route | Row model | Filter | Order | Status |
+|---|---|---|---|---|
+| `GET /products/options` | `{id, sku, model_name, tracking_mode, retail_price_thb, repair_price_thb}` | **add `is_active = True`** | `sku` | **EXISTS** — add filter only |
+| `GET /customers/options` | `{id, name}` | — (no active flag exists) | `name` | new |
+| `GET /suppliers/options` | `{id, name}` | — (no active flag exists) | `name` | new |
+| `GET /projects/options` | `{id, code, name}` | `status = ACTIVE` | `code` | new |
 
-**Each picker route inherits the exact auth dependencies of its parent list route.** No new
+**Each options route inherits the exact auth dependencies of its parent list route.** No new
 access surface is created.
+
+Frontend hooks mirror `useProductOptions`: `useCustomerOptions`, `useSupplierOptions`,
+`useProjectOptions` (`frontend/src/hooks/`).
 
 ### Field sets are driven by actual consumption (traced, not guessed)
 
@@ -126,9 +154,14 @@ the cost key is **absent** from the payload — not merely null.
 
 ## 4. Mechanism 2 — Server-side pagination (lists)
 
-Adopt the **existing** `UsersPublic {data, count}` envelope (`models.py:188`) for all six
-list responses: `ProductsPublic`, `CustomersPublic`, `SuppliersPublic`, `ProjectsPublic`,
-`PricingOverridesPublic`, `ProjectPullsPublic`.
+Adopt the `{data, count}` envelope for all six remaining list responses: `ProductsPublic`,
+`CustomersPublic`, `SuppliersPublic`, `ProjectsPublic`, `PricingOverridesPublic`,
+`ProjectPullsPublic`.
+
+Two precedents already exist — **follow `AuditPublic`** (from `feat/product-options-pagination`,
+§0), which pairs a `crud.count_audit` that mirrors `list_audit`'s filter construction
+clause-for-clause. `UsersPublic` (`models.py:188`) is the older, simpler precedent but its
+count is unfiltered (safe only because it has no filters — see the invariant below).
 
 This is a **breaking response change** (bare array → object). Every consumer is ours; the
 SDK is regenerated (`bun run generate-client`).
@@ -221,20 +254,23 @@ layouts are **not** rewritten (`CLAUDE.md` §3 — surgical changes). Tables set
 
 ## 7. Call-site migration
 
+Products pickers and the audit ledger are **already migrated** by
+`feat/product-options-pagination` (§0) and are therefore struck from this table.
+
 | Screen | Picker → complete | Table → server-paginated |
 |---|---|---|
-| `sale.tsx` | products :130, customers :136 | — |
-| `tickets.tsx` | products :126, customers :131 | — |
-| `receive.tsx` | products :147/:482, suppliers :152/:487 | — |
-| `pulls.tsx` | products :86, projects :80 | pull queue :69 |
-| `pricing-overrides.tsx` | ~~products :72~~ — **deleted** (denormalized) | overrides :68 |
-| `stock.tsx` | suppliers :63 | — |
-| `projects.tsx` | customers :68 | projects :64 |
-| `products.tsx` | — | :83 |
-| `customers.tsx` | — | :224 |
-| `suppliers.tsx` | — | :56 |
-| `admin.tsx` | — | :23 (rewire the fake pager) |
-| **`audit.tsx`** | **untouched** (other dev) | **untouched** (other dev) |
+| `sale.tsx` | ~~products~~ *(done)* · **customers** | — |
+| `tickets.tsx` | ~~products~~ *(done)* · **customers** | — |
+| `receive.tsx` | ~~products~~ *(done)* · **suppliers** ×2 | — |
+| `pulls.tsx` / `PullCreatePanel.tsx` | ~~products~~ *(done)* · **projects** | pull queue |
+| `pricing-overrides.tsx` | ~~products~~ *(done — and the label map dies entirely, §5)* | overrides list |
+| `stock.tsx` | **suppliers** | — |
+| `projects.tsx` | **customers** | projects table |
+| `products.tsx` | — | catalog table |
+| `customers.tsx` | — | customers table |
+| `suppliers.tsx` | — | suppliers table |
+| `admin.tsx` | — | rewire the fake pager (count already exists) |
+| **`audit.tsx`** | **untouched** — done by the other branch | **untouched** |
 
 ---
 
