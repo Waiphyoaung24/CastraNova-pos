@@ -248,8 +248,17 @@ def test_read_skus_returns_all_ascending(
     skus = r.json()
     assert sku_a in skus
     assert sku_z in skus
+    # Relative order only: asserting the whole list equals sorted(list) would
+    # compare Postgres' collation against Python's codepoint sort, which diverge
+    # on punctuation, over every SKU any test in the session happens to seed.
     assert skus.index(sku_a) < skus.index(sku_z)
-    assert skus == sorted(skus)
+
+
+def test_staff_can_read_skus(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
+    r = client.get(f"{PREFIX}/products/skus", headers=staff_token_headers)
+    assert r.status_code == 200
 
 
 def test_read_skus_includes_inactive_product(

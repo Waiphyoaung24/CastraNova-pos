@@ -434,6 +434,7 @@ function SkuCombobox({
             <CommandEmpty>No SKU found.</CommandEmpty>
             <CommandGroup>
               <CommandItem
+                value={ALL}
                 onSelect={() => {
                   onChange("")
                   setOpen(false)
