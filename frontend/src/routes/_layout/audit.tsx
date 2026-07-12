@@ -11,13 +11,13 @@ import {
 import { AuditDetailSheet } from "@/components/audit/AuditDetailSheet"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -25,13 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
 import { useProductOptions } from "@/hooks/useProductOptions"
@@ -64,21 +58,9 @@ const EVENT_TYPES: MovementType[] = [
   "ADJUSTED_OUT",
 ]
 
-// Shared fixed-layout column widths so the header table and the scrolling body
-// table stay aligned (sum to 100%; long text columns absorb the slack + truncate).
-function AuditColGroup() {
-  return (
-    <colgroup>
-      <col className="w-[17%]" /> {/* When */}
-      <col className="w-[17%]" /> {/* By */}
-      <col className="w-[16%]" /> {/* Event */}
-      <col className="w-[15%]" /> {/* Model */}
-      <col className="w-[12%]" /> {/* Source */}
-      <col className="w-[5%]" /> {/* Qty */}
-      <col className="w-[18%]" /> {/* Notes */}
-    </colgroup>
-  )
-}
+// Column widths in header order (When, By, Event, Model, Source, Qty, Notes);
+// sum to 100%. Long text columns (Model, Notes) absorb the slack + truncate.
+const AUDIT_WIDTHS = ["17%", "17%", "16%", "15%", "12%", "5%", "18%"]
 
 function Audit() {
   const isMobile = useIsMobile()
@@ -337,74 +319,61 @@ function Audit() {
         </div>
       ) : (
         <ListShell loading={listLoading}>
-          <div className="overflow-hidden rounded-lg border">
-            {/* Header lives in its own non-scrolling table so the body's vertical
-              scrollbar runs beside the rows only, not the header. */}
-            <table className="w-full table-fixed caption-bottom text-sm">
-              <AuditColGroup />
-              <TableHeader className="bg-muted">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>When</TableHead>
-                  <TableHead>By</TableHead>
-                  <TableHead>Event</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Notes</TableHead>
+          <ListTable
+            widths={AUDIT_WIDTHS}
+            minWidth={940}
+            head={
+              <TableRow className="hover:bg-transparent">
+                <TableHead>When</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>Event</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead>Notes</TableHead>
+              </TableRow>
+            }
+          >
+            {rows.map((e) => {
+              const source = movementSource(e)
+              return (
+                <TableRow
+                  key={e.id}
+                  {...rowProps(e)}
+                  className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
+                >
+                  <TableCell className="text-muted-foreground">
+                    {new Date(e.occurred_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    {actorName(e.actor_user_id)}
+                  </TableCell>
+                  <TableCell>{e.event_type}</TableCell>
+                  <TableCell>
+                    <div className="truncate">
+                      {e.product_model_name ?? itemRef(e)}
+                    </div>
+                    {e.product_sku ? (
+                      <div className="text-muted-foreground truncate text-xs">
+                        {e.product_sku}
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>
+                    {source ? (
+                      <Badge variant="outline">{source.label}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="num text-right">{e.quantity}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {e.notes ?? "—"}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-            </table>
-            <ScrollArea type="auto" viewportClassName="max-h-[60vh]">
-              <table className="w-full table-fixed caption-bottom text-sm">
-                <AuditColGroup />
-                <TableBody>
-                  {rows.map((e) => {
-                    const source = movementSource(e)
-                    return (
-                      <TableRow
-                        key={e.id}
-                        {...rowProps(e)}
-                        className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
-                      >
-                        <TableCell className="text-muted-foreground truncate">
-                          {new Date(e.occurred_at).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="truncate font-medium">
-                          {actorName(e.actor_user_id)}
-                        </TableCell>
-                        <TableCell className="truncate">
-                          {e.event_type}
-                        </TableCell>
-                        <TableCell className="truncate">
-                          <div className="truncate">
-                            {e.product_model_name ?? itemRef(e)}
-                          </div>
-                          {e.product_sku ? (
-                            <div className="text-muted-foreground truncate text-xs">
-                              {e.product_sku}
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="overflow-hidden">
-                          {source ? (
-                            <Badge variant="outline">{source.label}</Badge>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="num text-right">
-                          {e.quantity}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground truncate">
-                          {e.notes ?? "—"}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </table>
-            </ScrollArea>
-          </div>
+              )
+            })}
+          </ListTable>
         </ListShell>
       )}
 

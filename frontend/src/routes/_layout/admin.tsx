@@ -4,7 +4,11 @@ import { Users } from "lucide-react"
 
 import { type UserPublic, UsersService } from "@/client"
 import AddUser from "@/components/Admin/AddUser"
-import { columns, type UserTableData } from "@/components/Admin/columns"
+import {
+  columns,
+  USER_COLUMN_WIDTHS,
+  type UserTableData,
+} from "@/components/Admin/columns"
 import { TierBadge } from "@/components/Admin/TierBadge"
 import { UserActionsMenu } from "@/components/Admin/UserActionsMenu"
 import { DataTable } from "@/components/Common/DataTable"
@@ -131,6 +135,8 @@ function UsersTable() {
     <DataTable
       columns={columns}
       data={tableData}
+      widths={USER_COLUMN_WIDTHS}
+      minWidth={820}
       loading={loading}
       pagination={{
         page: pagination.page,

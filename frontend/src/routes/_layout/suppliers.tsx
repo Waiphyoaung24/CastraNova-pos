@@ -13,7 +13,8 @@ import {
   type SupplierPublic,
   SuppliersService,
 } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { SupplierEditDialog } from "@/components/suppliers/SupplierEditDialog"
@@ -22,19 +23,15 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
 import { requireAdmin } from "@/lib/route-guards"
 import { buildSupplierPayload, canCreateSupplier } from "@/lib/supplier-create"
+
+// Column widths in header order (Name, Country, Contact, edit); sum to 100%.
+const SUPPLIER_WIDTHS = ["34%", "18%", "34%", "14%"]
 
 // Admin-only supplier management (FR-003). Create + list, mirroring the
 // Projects screen.
@@ -181,40 +178,41 @@ function Suppliers() {
               ))}
             </div>
           ) : (
-            <Table containerClassName={LIST_SCROLL}>
-              <TableHeader className="bg-background sticky top-0 z-10">
+            <ListTable
+              widths={SUPPLIER_WIDTHS}
+              minWidth={700}
+              head={
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Country</TableHead>
                   <TableHead>Contact</TableHead>
                   <TableHead className="text-right" />
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {suppliers.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell className="font-medium">{s.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {s.country ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {s.contact ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setEditing(s)}
-                      >
-                        <Pencil className="mr-1 size-4" />
-                        Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+              }
+            >
+              {suppliers.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell className="font-medium">{s.name}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {s.country ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {s.contact ?? "—"}
+                  </TableCell>
+                  <TableCell className="overflow-visible! text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditing(s)}
+                    >
+                      <Pencil className="mr-1 size-4" />
+                      Edit
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </ListTable>
           )}
         </ListShell>
         <PaginationControls

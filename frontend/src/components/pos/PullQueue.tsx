@@ -1,18 +1,12 @@
 import { ClipboardList } from "lucide-react"
 
 import type { ProjectPullPublic, ProjectPullState } from "@/client/types.gen"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { useIsMobile } from "@/hooks/useMobile"
 
 /** State filter value: a concrete state, or ALL for the unfiltered queue. */
@@ -52,6 +46,10 @@ const STATE_LABEL: Record<ProjectPullState, string> = {
   SHORT: "Short",
   CANCELLED: "Cancelled",
 }
+
+// Column widths in header order (Project, Customer, Created, Items, Status,
+// Actions); sum to 100%.
+const PULL_WIDTHS = ["20%", "18%", "12%", "8%", "12%", "30%"]
 
 /** Open / Cancel buttons for one pull, shared by the desktop row and mobile card. */
 function PullActions({
@@ -186,8 +184,10 @@ export function PullQueue({
         </ListShell>
       ) : (
         <ListShell loading={loading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={PULL_WIDTHS}
+            minWidth={940}
+            head={
               <TableRow>
                 <TableHead>Project</TableHead>
                 <TableHead>Customer</TableHead>
@@ -196,40 +196,39 @@ export function PullQueue({
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pulls.map((pull) => (
-                <TableRow key={pull.id}>
-                  <TableCell className="font-medium">
-                    {projectLabels.get(pull.project_id) ?? pull.project_id}
-                  </TableCell>
-                  <TableCell>
-                    {customerLabels.get(pull.customer_id) ?? pull.customer_id}
-                  </TableCell>
-                  <TableCell className="num text-xs">
-                    {new Date(pull.created_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell className="num text-center">
-                    {pull.lines.length}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={STATE_VARIANT[pull.state]}>
-                      {STATE_LABEL[pull.state]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <PullActions
-                      pull={pull}
-                      isAdmin={isAdmin}
-                      isCancelling={isCancelling}
-                      onSelect={onSelect}
-                      onCancel={onCancel}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            }
+          >
+            {pulls.map((pull) => (
+              <TableRow key={pull.id}>
+                <TableCell className="font-medium">
+                  {projectLabels.get(pull.project_id) ?? pull.project_id}
+                </TableCell>
+                <TableCell>
+                  {customerLabels.get(pull.customer_id) ?? pull.customer_id}
+                </TableCell>
+                <TableCell className="num text-xs">
+                  {new Date(pull.created_at).toLocaleDateString()}
+                </TableCell>
+                <TableCell className="num text-center">
+                  {pull.lines.length}
+                </TableCell>
+                <TableCell>
+                  <Badge variant={STATE_VARIANT[pull.state]}>
+                    {STATE_LABEL[pull.state]}
+                  </Badge>
+                </TableCell>
+                <TableCell className="overflow-visible! text-right">
+                  <PullActions
+                    pull={pull}
+                    isAdmin={isAdmin}
+                    isCancelling={isCancelling}
+                    onSelect={onSelect}
+                    onCancel={onCancel}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </ListTable>
         </ListShell>
       )}
     </div>

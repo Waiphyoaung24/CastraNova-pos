@@ -5,7 +5,8 @@ import { useMemo, useState } from "react"
 
 import { DashboardsService } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -45,6 +46,10 @@ export const Route = createFileRoute("/_layout/stock")({
 
 // Radix Select forbids an empty-string item value, so "all" uses a sentinel.
 const ALL = "__all__"
+
+// Column widths in header order (expander, SKU, Model, Brand, Category,
+// Tracking, In stock, Labels); sum to 100%.
+const STOCK_WIDTHS = ["4%", "12%", "18%", "11%", "12%", "11%", "9%", "23%"]
 
 function StockOnHand() {
   const { isAdmin } = useRole()
@@ -167,41 +172,42 @@ function StockOnHand() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={STOCK_WIDTHS}
+            minWidth={1120}
+            head={
               <TableRow>
-                <TableHead className="w-8" />
+                <TableHead aria-label="Expand" />
                 <TableHead>SKU</TableHead>
                 <TableHead>Model</TableHead>
                 <TableHead>Brand</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Tracking</TableHead>
                 <TableHead className="text-right">In stock</TableHead>
-                <TableHead className="w-0" aria-label="Labels" />
+                <TableHead aria-label="Labels" />
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => {
-                const isQuantity = r.tracking_mode === "QUANTITY"
-                const isOpen = expandedId === r.product_id
-                return (
-                  <StockRow
-                    key={r.product_id}
-                    productId={r.product_id}
-                    sku={r.sku}
-                    modelName={r.model_name}
-                    brand={r.brand}
-                    category={r.category}
-                    trackingMode={r.tracking_mode}
-                    quantityOnHand={r.quantity_on_hand}
-                    isQuantity={isQuantity}
-                    isOpen={isOpen}
-                    onToggle={() => setExpandedId(isOpen ? null : r.product_id)}
-                  />
-                )
-              })}
-            </TableBody>
-          </Table>
+            }
+          >
+            {rows.map((r) => {
+              const isQuantity = r.tracking_mode === "QUANTITY"
+              const isOpen = expandedId === r.product_id
+              return (
+                <StockRow
+                  key={r.product_id}
+                  productId={r.product_id}
+                  sku={r.sku}
+                  modelName={r.model_name}
+                  brand={r.brand}
+                  category={r.category}
+                  trackingMode={r.tracking_mode}
+                  quantityOnHand={r.quantity_on_hand}
+                  isQuantity={isQuantity}
+                  isOpen={isOpen}
+                  onToggle={() => setExpandedId(isOpen ? null : r.product_id)}
+                />
+              )
+            })}
+          </ListTable>
         </ListShell>
       )}
     </div>
@@ -367,7 +373,7 @@ function StockRow({
           <Badge variant="secondary">{trackingModeLabel(trackingMode)}</Badge>
         </TableCell>
         <TableCell className="num text-right">{quantityOnHand}</TableCell>
-        <TableCell className="text-right">
+        <TableCell className="overflow-visible! text-right">
           {isQuantity ? (
             <PrintLabelButton target={{ kind: "sku", productId, sku }} />
           ) : null}
@@ -375,7 +381,10 @@ function StockRow({
       </TableRow>
       {isOpen ? (
         <TableRow>
-          <TableCell colSpan={8} className="bg-muted/30">
+          <TableCell
+            colSpan={8}
+            className="bg-muted/30 overflow-visible! whitespace-normal"
+          >
             <StockDrillDown productId={productId} isQuantity={isQuantity} />
           </TableCell>
         </TableRow>

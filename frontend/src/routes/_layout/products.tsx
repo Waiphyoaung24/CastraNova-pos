@@ -14,7 +14,8 @@ import {
   ProductsService,
   type TrackingMode,
 } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { EmptyState } from "@/components/EmptyState"
@@ -64,6 +65,20 @@ export const Route = createFileRoute("/_layout/products")({
 })
 
 const TRACKING_MODES: TrackingMode[] = ["QUANTITY", "SERIALIZED"]
+
+// Column widths in header order (SKU, Model, Brand, Category, Tracking,
+// Purchase, Retail, Repair, History); sum to 100%.
+const PRODUCT_WIDTHS = [
+  "12%",
+  "16%",
+  "9%",
+  "10%",
+  "10%",
+  "9%",
+  "9%",
+  "9%",
+  "16%",
+]
 
 function Products() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -275,8 +290,10 @@ function Products() {
               hint="Create your first product with the form above."
             />
           ) : (
-            <Table containerClassName={LIST_SCROLL}>
-              <TableHeader className="bg-background sticky top-0 z-10">
+            <ListTable
+              widths={PRODUCT_WIDTHS}
+              minWidth={1040}
+              head={
                 <TableRow>
                   <TableHead>SKU</TableHead>
                   <TableHead>Model</TableHead>
@@ -288,44 +305,43 @@ function Products() {
                   <TableHead className="text-right">Repair</TableHead>
                   <TableHead className="text-right">History</TableHead>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {products.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="num font-medium">{p.sku}</TableCell>
-                    <TableCell>{p.model_name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {p.brand ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {p.category ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {costByProductId.has(p.id)
-                        ? formatThb(costByProductId.get(p.id) as string)
-                        : "—"}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {formatThb(p.retail_price_thb)}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {formatThb(p.repair_price_thb)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <EditProductDialog product={p} />
-                        <PriceHistoryDialog productId={p.id} sku={p.sku} />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+              }
+            >
+              {products.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="num font-medium">{p.sku}</TableCell>
+                  <TableCell>{p.model_name}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {p.brand ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {p.category ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">
+                      {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {costByProductId.has(p.id)
+                      ? formatThb(costByProductId.get(p.id) as string)
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(p.retail_price_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(p.repair_price_thb)}
+                  </TableCell>
+                  <TableCell className="overflow-visible! text-right">
+                    <div className="flex justify-end gap-2">
+                      <EditProductDialog product={p} />
+                      <PriceHistoryDialog productId={p.id} sku={p.sku} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </ListTable>
           )}
         </ListShell>
         <PaginationControls

@@ -4,7 +4,8 @@ import { FileSpreadsheet, FileText } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { ReportsService } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { MetricBar } from "@/components/reports/MetricBar"
 import { StatCard } from "@/components/reports/StatCard"
@@ -12,14 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { downloadReport } from "@/lib/report-download"
@@ -48,6 +42,10 @@ const BUCKET_TONE: Record<string, "default" | "warning" | "danger"> = {
   "61–90": "warning",
   "90+": "danger",
 }
+
+// Column widths in header order (SKU, Reference, Mode, Received, Qty,
+// Holding days); sum to 100%.
+const HOLDING_WIDTHS = ["18%", "26%", "14%", "16%", "10%", "16%"]
 
 function HoldingPeriod() {
   const { showErrorToast } = useCustomToast()
@@ -202,8 +200,10 @@ function HoldingPeriod() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={HOLDING_WIDTHS}
+            minWidth={820}
+            head={
               <TableRow>
                 <TableHead>SKU</TableHead>
                 <TableHead>Reference</TableHead>
@@ -212,30 +212,29 @@ function HoldingPeriod() {
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead className="text-right">Holding days</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedRows.map((r) => (
-                <TableRow key={`${r.product_id}-${r.reference}`}>
-                  <TableCell className="num font-medium">{r.sku}</TableCell>
-                  <TableCell className="num">{r.reference}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{r.tracking_mode}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(r.received_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell className="num text-right">{r.quantity}</TableCell>
-                  <TableCell className="num text-right">
-                    {r.over_threshold ? (
-                      <Badge variant="destructive">{r.holding_days}</Badge>
-                    ) : (
-                      r.holding_days
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            }
+          >
+            {sortedRows.map((r) => (
+              <TableRow key={`${r.product_id}-${r.reference}`}>
+                <TableCell className="num font-medium">{r.sku}</TableCell>
+                <TableCell className="num">{r.reference}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{r.tracking_mode}</Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {new Date(r.received_at).toLocaleDateString()}
+                </TableCell>
+                <TableCell className="num text-right">{r.quantity}</TableCell>
+                <TableCell className="num text-right">
+                  {r.over_threshold ? (
+                    <Badge variant="destructive">{r.holding_days}</Badge>
+                  ) : (
+                    r.holding_days
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </ListTable>
         </ListShell>
       )}
     </div>
