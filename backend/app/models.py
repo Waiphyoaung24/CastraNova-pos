@@ -639,6 +639,11 @@ class AuditEntryPublic(SQLModel):
     actor_full_name: str | None = None  # acting user's full_name, else email
 
 
+class AuditPublic(SQLModel):
+    data: list[AuditEntryPublic]
+    count: int
+
+
 # --- Serialized receive (FR-005) request/response -----------------------------
 
 

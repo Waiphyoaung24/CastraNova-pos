@@ -3817,6 +3817,79 @@ def list_audit(
     return _hydrate_audit(session=session, rows=page)
 
 
+def count_audit(
+    *,
+    session: Session,
+    event_type: MovementType | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    product_id: uuid.UUID | None = None,
+    unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
+) -> int:
+    """Total row count for the same filter set as list_audit, across both ledgers,
+    for the pagination envelope (GET /audit). Mirrors list_audit's WHERE-clause
+    construction exactly, so the count and the page it describes can never
+    disagree about what "matches" — a deliberate, small duplication rather than
+    a shared filter-builder abstraction, which would be a larger restructure of
+    the read path than this fix warrants."""
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return 0
+
+    audit_unit = product_id is None
+    audit_part = unit_id is None
+
+    total = 0
+
+    if audit_unit:
+        u_stmt = select(func.count()).select_from(UnitMovement)
+        if event_type is not None:
+            u_stmt = u_stmt.where(UnitMovement.event_type == event_type)
+        if from_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
+        if unit_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
+        total += session.exec(u_stmt).one()
+
+    if audit_part:
+        p_stmt = select(func.count()).select_from(PartMovement)
+        if event_type is not None:
+            p_stmt = p_stmt.where(PartMovement.event_type == event_type)
+        if from_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
+        if product_id is not None:
+            p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
+        total += session.exec(p_stmt).one()
+
+    return total
+
+
 def _hydrate_audit(
     *, session: Session, rows: list[AuditEntryPublic]
 ) -> list[AuditEntryPublic]:
