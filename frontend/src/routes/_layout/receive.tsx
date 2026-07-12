@@ -4,8 +4,7 @@ import { Boxes, PackagePlus, Trash2 } from "lucide-react"
 import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
-  type ProductPublic,
-  ProductsService,
+  type ProductOption,
   type ReceiptsReceiveQuantityResponse,
   ReceiptsService,
   type ReceiveQuantityRequest,
@@ -42,6 +41,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { queued } from "@/lib/query-client"
 import {
   addPiece,
@@ -142,11 +142,8 @@ function SerializedTab() {
   }
 
   // Reference data — same staleTime as other reference-data screens.
-  const { data: products = [], isPending: productsPending } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products = [], isPending: productsPending } =
+    useProductOptions()
   const { data: suppliers = [], isPending: suppliersPending } = useQuery({
     queryKey: ["suppliers"],
     queryFn: () => SuppliersService.readSuppliers(),
@@ -477,11 +474,8 @@ function QuantityTab() {
 
   // Reference data — keyed identically to the Serialized tab, so TanStack Query
   // serves both tabs from one shared cache entry (no duplicate fetch).
-  const { data: products = [], isPending: productsPending } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products = [], isPending: productsPending } =
+    useProductOptions()
   const { data: suppliers = [], isPending: suppliersPending } = useQuery({
     queryKey: ["suppliers"],
     queryFn: () => SuppliersService.readSuppliers(),
@@ -788,7 +782,7 @@ function ReceivedBatchLabels({
   products,
 }: {
   batch: ReceiptsReceiveQuantityResponse
-  products: ProductPublic[]
+  products: ProductOption[]
 }) {
   const product = products.find((p) => p.id === batch.product_id)
   if (!product) return null

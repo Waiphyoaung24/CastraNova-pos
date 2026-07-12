@@ -409,6 +409,20 @@ class ProductPublic(ProductBase):
     id: uuid.UUID
 
 
+class ProductOption(SQLModel):
+    """Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+    receive/tickets/pulls product selection). Omits `specs` (JSONB) and admin-only
+    catalog fields (brand, category, default_min_stock_level); prices are included
+    because GET /products already exposes them to the same authenticated audience."""
+
+    id: uuid.UUID
+    sku: str
+    model_name: str
+    tracking_mode: TrackingMode
+    retail_price_thb: Decimal
+    repair_price_thb: Decimal
+
+
 class ProductPurchaseCost(SQLModel):
     # Admin-only: latest receipt cost (COGS). Never added to ProductPublic,
     # which is served by the staff-accessible GET /products/.
@@ -623,6 +637,11 @@ class AuditEntryPublic(SQLModel):
     unit_supplier_serial: str | None = None
     customer_name: str | None = None  # source sale/ticket/pull customer, if any
     actor_full_name: str | None = None  # acting user's full_name, else email
+
+
+class AuditPublic(SQLModel):
+    data: list[AuditEntryPublic]
+    count: int
 
 
 # --- Serialized receive (FR-005) request/response -----------------------------

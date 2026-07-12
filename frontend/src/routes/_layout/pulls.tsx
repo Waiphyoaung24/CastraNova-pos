@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   DashboardsService,
-  ProductsService,
   type ProjectPullCreate,
   type ProjectPullFulfill,
   type ProjectPullLinePublic,
@@ -18,6 +17,7 @@ import { PullFulfillPanel } from "@/components/pos/PullFulfillPanel"
 import { PullQueue, type PullStateFilter } from "@/components/pos/PullQueue"
 import type { ScanFieldHandle } from "@/components/ScanField"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import {
@@ -81,11 +81,7 @@ function Pulls() {
     staleTime: 5 * 60 * 1000,
     enabled: isAdmin,
   })
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions()
 
   // Built from the pull rows (each carries its project/customer labels) so staff,
   // who can't list projects, still render names instead of raw UUIDs.

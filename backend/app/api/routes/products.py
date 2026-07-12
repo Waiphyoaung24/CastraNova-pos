@@ -9,6 +9,7 @@ from app.models import (
     MinStockLevelUpdate,
     PriceChangePublic,
     ProductCreate,
+    ProductOption,
     ProductPublic,
     ProductPurchaseCost,
     ProductUpdate,
@@ -46,14 +47,17 @@ def read_purchase_costs(session: SessionDep) -> list[ProductPurchaseCost]:
 
 
 @router.get(
-    "/skus", response_model=list[str], dependencies=[Depends(get_current_user)]
+    "/options",
+    response_model=list[ProductOption],
+    dependencies=[Depends(get_current_user)],
 )
-def read_skus(session: SessionDep) -> list[str]:
-    """Every product SKU, ascending — the full catalog in one request, sized for
-    client-side SKU autocomplete (FR-019). Deliberately unpaginated: it projects a
-    single indexed column of a human-curated catalog (hundreds of rows) and takes no
-    client parameter that could amplify the response size."""
-    return crud.list_skus(session=session)
+def read_options(session: SessionDep) -> list[ProductOption]:
+    """Every product as a lightweight picker/lookup projection, ordered by SKU
+    (FR-019 audit filter; sale/receive/tickets/pulls/pricing-overrides product
+    selection). Deliberately unpaginated: no client parameter can amplify the
+    response size, and it is far lighter than the full ProductPublic (no specs
+    JSONB, no brand/category/timestamps)."""
+    return crud.list_product_options(session=session)
 
 
 # Shared-team access (mirrors the serialized unit-label endpoint): any

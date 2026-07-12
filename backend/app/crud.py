@@ -49,6 +49,7 @@ from app.models import (
     PricingOverrideRequest,
     Product,
     ProductCreate,
+    ProductOption,
     ProductUpdate,
     Project,
     ProjectCreate,
@@ -420,11 +421,32 @@ def list_products(
     )
 
 
-def list_skus(*, session: Session) -> list[str]:
-    """Every product SKU, ascending. Unpaginated single-column projection for the
-    audit SKU autocomplete (FR-019); includes inactive products, whose historical
-    movements still appear in the ledger."""
-    return list(session.exec(select(col(Product.sku)).order_by(col(Product.sku))).all())
+def list_product_options(*, session: Session) -> list[ProductOption]:
+    """Every product as a lightweight {id, sku, model_name, tracking_mode, prices}
+    projection, ordered by SKU. Unpaginated single round-trip for pickers/lookups
+    across the app; includes inactive products, whose historical movements still
+    appear in the append-only ledgers."""
+    rows = session.exec(
+        select(  # type: ignore[call-overload]
+            col(Product.id),
+            col(Product.sku),
+            col(Product.model_name),
+            col(Product.tracking_mode),
+            col(Product.retail_price_thb),
+            col(Product.repair_price_thb),
+        ).order_by(col(Product.sku))
+    ).all()
+    return [
+        ProductOption(
+            id=r[0],
+            sku=r[1],
+            model_name=r[2],
+            tracking_mode=r[3],
+            retail_price_thb=r[4],
+            repair_price_thb=r[5],
+        )
+        for r in rows
+    ]
 
 
 def latest_purchase_costs(*, session: Session) -> dict[uuid.UUID, Decimal]:
@@ -3793,6 +3815,79 @@ def list_audit(
     rows.sort(key=lambda e: (e.occurred_at, e.id), reverse=True)
     page = rows[skip : skip + limit]
     return _hydrate_audit(session=session, rows=page)
+
+
+def count_audit(
+    *,
+    session: Session,
+    event_type: MovementType | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    product_id: uuid.UUID | None = None,
+    unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
+) -> int:
+    """Total row count for the same filter set as list_audit, across both ledgers,
+    for the pagination envelope (GET /audit). Mirrors list_audit's WHERE-clause
+    construction exactly, so the count and the page it describes can never
+    disagree about what "matches" — a deliberate, small duplication rather than
+    a shared filter-builder abstraction, which would be a larger restructure of
+    the read path than this fix warrants."""
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return 0
+
+    audit_unit = product_id is None
+    audit_part = unit_id is None
+
+    total = 0
+
+    if audit_unit:
+        u_stmt = select(func.count()).select_from(UnitMovement)
+        if event_type is not None:
+            u_stmt = u_stmt.where(UnitMovement.event_type == event_type)
+        if from_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
+        if unit_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
+        total += session.exec(u_stmt).one()
+
+    if audit_part:
+        p_stmt = select(func.count()).select_from(PartMovement)
+        if event_type is not None:
+            p_stmt = p_stmt.where(PartMovement.event_type == event_type)
+        if from_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
+        if product_id is not None:
+            p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
+        total += session.exec(p_stmt).one()
+
+    return total
 
 
 def _hydrate_audit(

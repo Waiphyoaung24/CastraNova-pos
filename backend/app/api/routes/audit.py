@@ -6,14 +6,14 @@ from fastapi import APIRouter, Depends, Query
 
 from app import crud
 from app.api.deps import SessionDep, get_admin
-from app.models import AuditEntryPublic, MovementType
+from app.models import AuditPublic, MovementType
 
 router = APIRouter(
     prefix="/audit", tags=["audit"], dependencies=[Depends(get_admin)]
 )
 
 
-@router.get("", response_model=list[AuditEntryPublic])
+@router.get("", response_model=AuditPublic)
 def list_audit(
     *,
     session: SessionDep,
@@ -39,12 +39,12 @@ def list_audit(
     ] = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[AuditEntryPublic]:
+) -> AuditPublic:
     """Chronological (occurred_at DESC) audit trail over the append-only
     unit_movement + part_movement ledgers, admin-only (FR-019). ``product_id``
     restricts to PART entries; ``unit_id`` restricts to UNIT entries; ``sku``
     scopes to a product across whichever ledger it uses."""
-    return crud.list_audit(
+    data = crud.list_audit(
         session=session,
         event_type=event_type,
         from_date=from_date,
@@ -56,3 +56,14 @@ def list_audit(
         skip=skip,
         limit=limit,
     )
+    count = crud.count_audit(
+        session=session,
+        event_type=event_type,
+        from_date=from_date,
+        to_date=to_date,
+        actor_user_id=actor_user_id,
+        product_id=product_id,
+        unit_id=unit_id,
+        sku=sku,
+    )
+    return AuditPublic(data=data, count=count)

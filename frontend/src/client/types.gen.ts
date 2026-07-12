@@ -26,6 +26,11 @@ export type AuditEntryPublic = {
 
 export type ledger = 'UNIT' | 'PART';
 
+export type AuditPublic = {
+    data: Array<AuditEntryPublic>;
+    count: number;
+};
+
 export type BatchDrillRow = {
     batch_no: string;
     remaining_qty: number;
@@ -292,6 +297,21 @@ export type ProductCreate = {
     repair_price_thb: (number | string);
     default_min_stock_level?: (number | null);
     is_active?: boolean;
+};
+
+/**
+ * Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+ * receive/tickets/pulls product selection). Omits `specs` (JSONB) and admin-only
+ * catalog fields (brand, category, default_min_stock_level); prices are included
+ * because GET /products already exposes them to the same authenticated audience.
+ */
+export type ProductOption = {
+    id: string;
+    sku: string;
+    model_name: string;
+    tracking_mode: TrackingMode;
+    retail_price_thb: string;
+    repair_price_thb: string;
 };
 
 export type ProductPublic = {
@@ -887,7 +907,7 @@ export type AuditListAuditData = {
     unitId?: (string | null);
 };
 
-export type AuditListAuditResponse = (Array<AuditEntryPublic>);
+export type AuditListAuditResponse = (AuditPublic);
 
 export type CustomersReadCustomersData = {
     limit?: number;
@@ -1023,7 +1043,7 @@ export type ProductsCreateProductResponse = (ProductPublic);
 
 export type ProductsReadPurchaseCostsResponse = (Array<ProductPurchaseCost>);
 
-export type ProductsReadSkusResponse = (Array<(string)>);
+export type ProductsReadOptionsResponse = (Array<ProductOption>);
 
 export type ProductsReadSkuLabelData = {
     productId: string;
