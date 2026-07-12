@@ -10,6 +10,8 @@ from app.models import (
     ProjectDashboardAdminPublic,
     ProjectDashboardStaffPublic,
     ProjectPublic,
+    ProjectOption,
+    ProjectsPublic,
     ProjectUpdate,
 )
 
@@ -18,14 +20,22 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 @router.get(
-    "/", response_model=list[ProjectPublic], dependencies=[Depends(get_admin)]
+    "/", response_model=ProjectsPublic, dependencies=[Depends(get_admin)]
 )
 def read_projects(
     session: SessionDep,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[ProjectPublic]:
-    return crud.list_projects(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+) -> ProjectsPublic:
+    return ProjectsPublic(
+        data=crud.list_projects(session=session, skip=skip, limit=limit),
+        count=crud.count_projects(session=session),
+    )
+
+
+@router.get("/options", response_model=list[ProjectOption], dependencies=[Depends(get_admin)])
+def read_options(session: SessionDep) -> list[ProjectOption]:
+    return crud.list_project_options(session=session)
 
 
 @router.post(

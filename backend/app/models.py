@@ -269,6 +269,11 @@ class SupplierPublic(SupplierBase):
     id: uuid.UUID
 
 
+class SupplierOption(SQLModel):
+    id: uuid.UUID
+    name: str
+
+
 # --- Customer -----------------------------------------------------------------
 
 
@@ -306,6 +311,11 @@ class CustomerUpdate(SQLModel):
 
 class CustomerPublic(CustomerBase):
     id: uuid.UUID
+
+
+class CustomerOption(SQLModel):
+    id: uuid.UUID
+    name: str
 
 
 # --- Project ------------------------------------------------------------------
@@ -353,6 +363,27 @@ class ProjectUpdate(SQLModel):
 
 class ProjectPublic(ProjectBase):
     id: uuid.UUID
+
+
+class ProjectOption(SQLModel):
+    id: uuid.UUID
+    code: str
+    name: str
+
+
+class CustomersPublic(SQLModel):
+    data: list[CustomerPublic]
+    count: int
+
+
+class SuppliersPublic(SQLModel):
+    data: list[SupplierPublic]
+    count: int
+
+
+class ProjectsPublic(SQLModel):
+    data: list[ProjectPublic]
+    count: int
 
 
 # --- Product ------------------------------------------------------------------
@@ -407,6 +438,11 @@ class ProductUpdate(SQLModel):
 
 class ProductPublic(ProductBase):
     id: uuid.UUID
+
+
+class ProductsPublic(SQLModel):
+    data: list[ProductPublic]
+    count: int
 
 
 class ProductOption(SQLModel):
@@ -917,6 +953,7 @@ class PricingOverridePublic(SQLModel):
     id: uuid.UUID
     target_kind: OverrideTargetKind
     product_id: uuid.UUID
+    product_sku: str
     default_price_thb: Decimal
     requested_price_thb: Decimal
     deviation_pct: Decimal
@@ -1429,6 +1466,8 @@ class ProjectPullLinePublic(SQLModel):
     id: uuid.UUID
     line_kind: SaleLineKind
     product_id: uuid.UUID
+    product_sku: str
+    model_name: str
     unit_serial: str | None
     requested_qty: int | None
     fulfilled_qty: int
@@ -1453,6 +1492,16 @@ class ProjectPullPublic(SQLModel):
     cancelled_at: datetime | None
     cancelled_by_user_id: uuid.UUID | None
     lines: list[ProjectPullLinePublic]
+
+
+class PricingOverridesPublic(SQLModel):
+    data: list[PricingOverridePublic]
+    count: int
+
+
+class ProjectPullsPublic(SQLModel):
+    data: list[ProjectPullPublic]
+    count: int
 
 
 # --- Notifications (FR-018; M007/M019) ----------------------------------------

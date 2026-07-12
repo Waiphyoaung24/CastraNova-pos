@@ -26,6 +26,7 @@ from app.models import (
     CostLine,
     Customer,
     CustomerCreate,
+    CustomerOption,
     CustomerUpdate,
     HoldingPeriodReport,
     HoldingPeriodRow,
@@ -52,6 +53,7 @@ from app.models import (
     ProductOption,
     ProductUpdate,
     Project,
+    ProjectOption,
     ProjectCreate,
     ProjectPull,
     ProjectPullCreate,
@@ -82,6 +84,7 @@ from app.models import (
     StockOnHandResponse,
     StockOnHandRow,
     Supplier,
+    SupplierOption,
     SupplierCreate,
     SupplierUpdate,
     SyncReviewItem,
@@ -288,6 +291,17 @@ def list_suppliers(
     )
 
 
+def list_supplier_options(*, session: Session) -> list[SupplierOption]:
+    rows = session.exec(
+        select(col(Supplier.id), col(Supplier.name)).order_by(col(Supplier.name))
+    ).all()
+    return [SupplierOption(id=row[0], name=row[1]) for row in rows]
+
+
+def count_suppliers(*, session: Session) -> int:
+    return session.exec(select(func.count()).select_from(Supplier)).one()
+
+
 def update_supplier(
     *, session: Session, db_supplier: Supplier, supplier_in: SupplierUpdate
 ) -> Supplier:
@@ -325,6 +339,17 @@ def list_customers(
             .limit(limit)
         ).all()
     )
+
+
+def list_customer_options(*, session: Session) -> list[CustomerOption]:
+    rows = session.exec(
+        select(col(Customer.id), col(Customer.name)).order_by(col(Customer.name))
+    ).all()
+    return [CustomerOption(id=row[0], name=row[1]) for row in rows]
+
+
+def count_customers(*, session: Session) -> int:
+    return session.exec(select(func.count()).select_from(Customer)).one()
 
 
 def update_customer(
@@ -370,6 +395,19 @@ def list_projects(
             .limit(limit)
         ).all()
     )
+
+
+def list_project_options(*, session: Session) -> list[ProjectOption]:
+    rows = session.exec(
+        select(col(Project.id), col(Project.code), col(Project.name))
+        .where(Project.status == ProjectStatus.ACTIVE)
+        .order_by(col(Project.code))
+    ).all()
+    return [ProjectOption(id=row[0], code=row[1], name=row[2]) for row in rows]
+
+
+def count_projects(*, session: Session) -> int:
+    return session.exec(select(func.count()).select_from(Project)).one()
 
 
 def update_project(
@@ -421,13 +459,18 @@ def list_products(
     )
 
 
-def list_product_options(*, session: Session) -> list[ProductOption]:
+def count_products(*, session: Session) -> int:
+    return session.exec(select(func.count()).select_from(Product)).one()
+
+
+def list_product_options(
+    *, session: Session, active_only: bool = False
+) -> list[ProductOption]:
     """Every product as a lightweight {id, sku, model_name, tracking_mode, prices}
     projection, ordered by SKU. Unpaginated single round-trip for pickers/lookups
     across the app; includes inactive products, whose historical movements still
     appear in the append-only ledgers."""
-    rows = session.exec(
-        select(  # type: ignore[call-overload]
+    statement = select(  # type: ignore[call-overload]
             col(Product.id),
             col(Product.sku),
             col(Product.model_name),
@@ -435,7 +478,9 @@ def list_product_options(*, session: Session) -> list[ProductOption]:
             col(Product.retail_price_thb),
             col(Product.repair_price_thb),
         ).order_by(col(Product.sku))
-    ).all()
+    if active_only:
+        statement = statement.where(Product.is_active)
+    rows = session.exec(statement).all()
     return [
         ProductOption(
             id=r[0],
@@ -1048,6 +1093,15 @@ def list_pricing_overrides(
         .limit(limit)
     )
     return list(session.exec(stmt).all())
+
+
+def count_pricing_overrides(
+    *, session: Session, state: OverrideState | None = None
+) -> int:
+    statement = select(func.count()).select_from(PricingOverrideRequest)
+    if state is not None:
+        statement = statement.where(PricingOverrideRequest.state == state)
+    return session.exec(statement).one()
 
 
 def decide_pricing_override(
@@ -2594,6 +2648,15 @@ def list_project_pulls(
         statement.order_by(col(ProjectPull.created_at).desc()).offset(skip).limit(limit)
     )
     return list(session.exec(statement).all())
+
+
+def count_project_pulls(
+    *, session: Session, state: ProjectPullState | None = None
+) -> int:
+    statement = select(func.count()).select_from(ProjectPull)
+    if state is not None:
+        statement = statement.where(ProjectPull.state == state)
+    return session.exec(statement).one()
 
 
 def create_project_pull(

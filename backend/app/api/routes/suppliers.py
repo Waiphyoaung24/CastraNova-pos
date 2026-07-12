@@ -5,22 +5,38 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import crud
 from app.api.deps import SessionDep, get_admin, get_current_user
-from app.models import SupplierCreate, SupplierPublic, SupplierUpdate
+from app.models import (
+    SupplierCreate,
+    SupplierOption,
+    SupplierPublic,
+    SuppliersPublic,
+    SupplierUpdate,
+)
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 
 
 @router.get(
     "/",
-    response_model=list[SupplierPublic],
+    response_model=SuppliersPublic,
     dependencies=[Depends(get_current_user)],
 )
 def read_suppliers(
     session: SessionDep,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[SupplierPublic]:
-    return crud.list_suppliers(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+) -> SuppliersPublic:
+    return SuppliersPublic(
+        data=crud.list_suppliers(session=session, skip=skip, limit=limit),
+        count=crud.count_suppliers(session=session),
+    )
+
+
+@router.get(
+    "/options", response_model=list[SupplierOption], dependencies=[Depends(get_current_user)]
+)
+def read_options(session: SessionDep) -> list[SupplierOption]:
+    return crud.list_supplier_options(session=session)
 
 
 @router.post(

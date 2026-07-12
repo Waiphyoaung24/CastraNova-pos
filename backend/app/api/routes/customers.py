@@ -10,6 +10,8 @@ from app.models import (
     CustomerDashboardAdminPublic,
     CustomerDashboardStaffPublic,
     CustomerPublic,
+    CustomerOption,
+    CustomersPublic,
     CustomerUpdate,
 )
 
@@ -18,15 +20,25 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 
 @router.get(
     "/",
-    response_model=list[CustomerPublic],
+    response_model=CustomersPublic,
     dependencies=[Depends(get_current_user)],
 )
 def read_customers(
     session: SessionDep,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[CustomerPublic]:
-    return crud.list_customers(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+) -> CustomersPublic:
+    return CustomersPublic(
+        data=crud.list_customers(session=session, skip=skip, limit=limit),
+        count=crud.count_customers(session=session),
+    )
+
+
+@router.get(
+    "/options", response_model=list[CustomerOption], dependencies=[Depends(get_current_user)]
+)
+def read_options(session: SessionDep) -> list[CustomerOption]:
+    return crud.list_customer_options(session=session)
 
 
 @router.post(

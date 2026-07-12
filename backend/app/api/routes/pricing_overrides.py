@@ -11,6 +11,7 @@ from app.models import (
     PricingOverrideCreate,
     PricingOverrideDecision,
     PricingOverridePublic,
+    PricingOverridesPublic,
 )
 from app.services import notify
 
@@ -39,12 +40,15 @@ def create_pricing_override(
         background_tasks.add_task(
             notify.notify_override_pending_bg, override_id=override.id
         )
-    return PricingOverridePublic.model_validate(override)
+    product = crud.get_product(session=session, product_id=override.product_id)
+    return PricingOverridePublic.model_validate(
+        override, update={"product_sku": product.sku if product else ""}
+    )
 
 
 @router.get(
     "",
-    response_model=list[PricingOverridePublic],
+    response_model=PricingOverridesPublic,
     dependencies=[Depends(get_admin)],
 )
 def list_pricing_overrides(
@@ -53,12 +57,22 @@ def list_pricing_overrides(
     state: OverrideState | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[PricingOverridePublic]:
+) -> PricingOverridesPublic:
     """Admin queue of override requests, newest first (FR-010)."""
     rows = crud.list_pricing_overrides(
         session=session, state=state, skip=skip, limit=limit
     )
-    return [PricingOverridePublic.model_validate(r) for r in rows]
+    data = []
+    for row in rows:
+        product = crud.get_product(session=session, product_id=row.product_id)
+        data.append(
+            PricingOverridePublic.model_validate(
+                row, update={"product_sku": product.sku if product else ""}
+            )
+        )
+    return PricingOverridesPublic(
+        data=data, count=crud.count_pricing_overrides(session=session, state=state)
+    )
 
 
 @router.post(
@@ -79,4 +93,7 @@ def decide_pricing_override(
         decision=payload.decision,
         decided_by_user_id=admin.id,
     )
-    return PricingOverridePublic.model_validate(override)
+    product = crud.get_product(session=session, product_id=override.product_id)
+    return PricingOverridePublic.model_validate(
+        override, update={"product_sku": product.sku if product else ""}
+    )
