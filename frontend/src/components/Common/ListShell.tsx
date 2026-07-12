@@ -14,11 +14,9 @@ interface ListShellProps {
 }
 
 /**
- * Loading affordance only. The scroll box lives on the table's own container
- * (`<Table containerClassName={LIST_SCROLL}>`): shadcn's Table already wraps
- * itself in an `overflow-x-auto` div, and nesting that inside another scroll
- * box would make *it* the sticky-positioning container, so a sticky header
- * would never engage.
+ * Loading affordance only. The scroll box lives inside `ListTable`, which
+ * splits the header and body into separate tables so the row scrollbar never
+ * runs beside the header.
  */
 export function ListShell({
   loading = false,
@@ -44,6 +42,3 @@ export function ListShell({
     </div>
   )
 }
-
-/** Scroll box for a list table: pass to `<Table containerClassName={LIST_SCROLL}>`. */
-export const LIST_SCROLL = "scrollbar-thin max-h-[60vh] overflow-auto"

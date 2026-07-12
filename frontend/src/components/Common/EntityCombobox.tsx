@@ -132,13 +132,15 @@ export function EntityCombobox<T>({
                     close(false)
                   }}
                 >
+                  <span className="text-muted-foreground flex-1 truncate text-left">
+                    All
+                  </span>
                   <Check
                     className={cn(
-                      "mr-2 h-4 w-4",
+                      "ml-auto h-4 w-4",
                       value ? "opacity-0" : "opacity-100",
                     )}
                   />
-                  <span className="text-muted-foreground">All</span>
                 </CommandItem>
               )}
               {visible.map((item) => {
@@ -152,13 +154,15 @@ export function EntityCombobox<T>({
                       close(false)
                     }}
                   >
+                    <span className="flex-1 truncate text-left">
+                      {getLabel(item)}
+                    </span>
                     <Check
                       className={cn(
-                        "mr-2 h-4 w-4",
+                        "ml-auto h-4 w-4",
                         value === key ? "opacity-100" : "opacity-0",
                       )}
                     />
-                    <span className="truncate">{getLabel(item)}</span>
                   </CommandItem>
                 )
               })}

@@ -167,6 +167,14 @@
   }
 }
 
+/* ── Reserve the scrollbar's gutter even when it isn't showing, so a frozen
+      header table and its scrolling body table keep identical content widths ── */
+@layer utilities {
+  .gutter-stable {
+    scrollbar-gutter: stable;
+  }
+}
+
 /* ── Indeterminate bar for a list refetch that keeps the current page ─────── */
 @layer utilities {
   @keyframes list-loading {

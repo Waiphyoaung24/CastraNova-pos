@@ -4,21 +4,15 @@ import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { formatDeviationPct } from "@/lib/pricing-overrides"
@@ -53,6 +47,19 @@ function shareHint(part: number, total: number): string | undefined {
 function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleDateString() : "—"
 }
+
+// Column widths in header order (Product, Default, Requested, Deviation,
+// Reason, State, Raised, Decided); sum to 100%.
+const EXCEPTION_WIDTHS = [
+  "13%",
+  "11%",
+  "11%",
+  "10%",
+  "20%",
+  "12%",
+  "11%",
+  "12%",
+]
 
 function OverrideExceptions() {
   const { showErrorToast } = useCustomToast()
@@ -194,8 +201,10 @@ function OverrideExceptions() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={EXCEPTION_WIDTHS}
+            minWidth={1020}
+            head={
               <TableRow>
                 <TableHead>Product</TableHead>
                 <TableHead className="text-right">Default</TableHead>
@@ -206,36 +215,35 @@ function OverrideExceptions() {
                 <TableHead>Raised</TableHead>
                 <TableHead>Decided</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="num font-medium">{r.sku}</TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(r.default_price_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(r.requested_price_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatDeviationPct(r.deviation_pct)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground max-w-xs truncate">
-                    {r.reason}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{r.state}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground num">
-                    {formatDate(r.created_at)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground num">
-                    {formatDate(r.decided_at)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            }
+          >
+            {rows.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="num font-medium">{r.sku}</TableCell>
+                <TableCell className="num text-right">
+                  {formatThb(r.default_price_thb)}
+                </TableCell>
+                <TableCell className="num text-right">
+                  {formatThb(r.requested_price_thb)}
+                </TableCell>
+                <TableCell className="num text-right">
+                  {formatDeviationPct(r.deviation_pct)}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {r.reason}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{r.state}</Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground num">
+                  {formatDate(r.created_at)}
+                </TableCell>
+                <TableCell className="text-muted-foreground num">
+                  {formatDate(r.decided_at)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </ListTable>
         </ListShell>
       )}
     </div>

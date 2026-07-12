@@ -4,20 +4,14 @@ import { AlertTriangle } from "lucide-react"
 import { useState } from "react"
 
 import { type BulkMinStockUpdate, LowStockService } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { useRole } from "@/hooks/useRole"
@@ -35,6 +29,10 @@ export const Route = createFileRoute("/_layout/low-stock")({
     meta: [{ title: "Low stock - CastraNova POS" }],
   }),
 })
+
+// Column widths in header order (SKU, Model, Type, In stock, Reorder at);
+// sum to 100%.
+const LOW_STOCK_WIDTHS = ["18%", "34%", "14%", "13%", "21%"]
 
 function LowStock() {
   const { isAdmin } = useRole()
@@ -171,8 +169,10 @@ function LowStock() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={LOW_STOCK_WIDTHS}
+            minWidth={760}
+            head={
               <TableRow>
                 <TableHead>SKU</TableHead>
                 <TableHead>Model</TableHead>
@@ -180,45 +180,44 @@ function LowStock() {
                 <TableHead className="text-right">In stock</TableHead>
                 <TableHead className="text-right">Reorder at</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.product_id}>
-                  <TableCell className="num font-medium">{r.sku}</TableCell>
-                  <TableCell>{r.model_name}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">
-                      {trackingModeLabel(r.tracking_mode)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="num text-right font-semibold text-destructive">
-                    {r.on_hand}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {isAdmin ? (
-                      <Input
-                        type="number"
-                        min={0}
-                        step={1}
-                        aria-label={`Reorder level for ${r.sku}`}
-                        className="num ml-auto w-24 text-right"
-                        placeholder="e.g. 5"
-                        value={valueFor(r.product_id, r.min_stock_level)}
-                        onChange={(e) =>
-                          setEdits((prev) => ({
-                            ...prev,
-                            [r.product_id]: e.target.value,
-                          }))
-                        }
-                      />
-                    ) : (
-                      <span className="num">{r.min_stock_level}</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            }
+          >
+            {rows.map((r) => (
+              <TableRow key={r.product_id}>
+                <TableCell className="num font-medium">{r.sku}</TableCell>
+                <TableCell>{r.model_name}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary">
+                    {trackingModeLabel(r.tracking_mode)}
+                  </Badge>
+                </TableCell>
+                <TableCell className="num text-right font-semibold text-destructive">
+                  {r.on_hand}
+                </TableCell>
+                <TableCell className="overflow-visible! text-right">
+                  {isAdmin ? (
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      aria-label={`Reorder level for ${r.sku}`}
+                      className="num ml-auto w-24 text-right"
+                      placeholder="e.g. 5"
+                      value={valueFor(r.product_id, r.min_stock_level)}
+                      onChange={(e) =>
+                        setEdits((prev) => ({
+                          ...prev,
+                          [r.product_id]: e.target.value,
+                        }))
+                      }
+                    />
+                  ) : (
+                    <span className="num">{r.min_stock_level}</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </ListTable>
         </ListShell>
       )}
     </div>

@@ -13,7 +13,8 @@ import {
   SyncReviewService,
   type SyncReviewState,
 } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -26,14 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { requireAdmin } from "@/lib/route-guards"
@@ -50,6 +44,9 @@ export const Route = createFileRoute("/_layout/sync-review")({
 })
 
 const STATES: SyncReviewState[] = ["PENDING", "RESOLVED", "DISCARDED"]
+
+// Column widths in header order (When, Mutation, Reason, Actions); sum to 100%.
+const SYNC_REVIEW_WIDTHS = ["22%", "28%", "24%", "26%"]
 
 function SyncReview() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -201,66 +198,67 @@ function SyncReview() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={SYNC_REVIEW_WIDTHS}
+            minWidth={780}
+            head={
               <TableRow>
                 <TableHead>When</TableHead>
                 <TableHead>Mutation</TableHead>
                 <TableHead>Reason</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(item.created_at).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    {item.mutation_kind}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{item.reason}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {isResolvable(item.state) ? (
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={resolveMutation.isPending}
-                          onClick={() =>
-                            resolveMutation.mutate({
-                              itemId: item.id,
-                              decision: "RESOLVED",
-                            })
-                          }
-                        >
-                          Keep
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={resolveMutation.isPending}
-                          onClick={() =>
-                            resolveMutation.mutate({
-                              itemId: item.id,
-                              decision: "DISCARDED",
-                            })
-                          }
-                        >
-                          Discard
-                        </Button>
-                      </div>
-                    ) : (
-                      <Badge variant="secondary">{item.state}</Badge>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            }
+          >
+            {rows.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell className="text-muted-foreground">
+                  {new Date(item.created_at).toLocaleString()}
+                </TableCell>
+                <TableCell className="font-medium">
+                  {item.mutation_kind}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{item.reason}</Badge>
+                </TableCell>
+                <TableCell className="overflow-visible! text-right">
+                  {isResolvable(item.state) ? (
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={resolveMutation.isPending}
+                        onClick={() =>
+                          resolveMutation.mutate({
+                            itemId: item.id,
+                            decision: "RESOLVED",
+                          })
+                        }
+                      >
+                        Keep
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={resolveMutation.isPending}
+                        onClick={() =>
+                          resolveMutation.mutate({
+                            itemId: item.id,
+                            decision: "DISCARDED",
+                          })
+                        }
+                      >
+                        Discard
+                      </Button>
+                    </div>
+                  ) : (
+                    <Badge variant="secondary">{item.state}</Badge>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </ListTable>
         </ListShell>
       )}
     </div>

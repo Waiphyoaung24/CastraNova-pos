@@ -4,7 +4,8 @@ import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { MetricBar } from "@/components/reports/MetricBar"
 import { StatCard } from "@/components/reports/StatCard"
@@ -18,15 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
@@ -56,6 +49,10 @@ const GROUP_BY_LABELS: Record<MarginGroupBy, string> = {
 }
 
 const ALL_CHANNELS = "all"
+
+// Column widths in header order (Channel/Product/Customer/Project, Revenue,
+// COGS, Margin, Margin %); sum to 100%.
+const MARGIN_WIDTHS = ["32%", "17%", "17%", "17%", "17%"]
 
 // Admin-only: revenue/COGS/margin are financial fields redacted from staff.
 export const Route = createFileRoute("/_layout/channel-margin")({
@@ -305,8 +302,10 @@ function ChannelMargin() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={MARGIN_WIDTHS}
+            minWidth={720}
+            head={
               <TableRow>
                 <TableHead>{firstColumnLabel}</TableHead>
                 <TableHead className="text-right">Revenue</TableHead>
@@ -314,30 +313,8 @@ function ChannelMargin() {
                 <TableHead className="text-right">Margin</TableHead>
                 <TableHead className="text-right">Margin %</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => {
-                const mPct = marginPct(r.margin_thb, r.revenue_thb)
-                return (
-                  <TableRow key={r.key}>
-                    <TableCell className="font-medium">{r.label}</TableCell>
-                    <TableCell className="num text-right">
-                      {formatThb(r.revenue_thb)}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {formatThb(r.cogs_thb)}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {formatThb(r.margin_thb)}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {mPct == null ? "—" : formatPct(mPct)}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-            <TableFooter>
+            }
+            footer={
               <TableRow>
                 <TableCell className="font-medium">Total</TableCell>
                 <TableCell className="num text-right">
@@ -353,8 +330,29 @@ function ChannelMargin() {
                   {blendedMarginPct == null ? "—" : formatPct(blendedMarginPct)}
                 </TableCell>
               </TableRow>
-            </TableFooter>
-          </Table>
+            }
+          >
+            {rows.map((r) => {
+              const mPct = marginPct(r.margin_thb, r.revenue_thb)
+              return (
+                <TableRow key={r.key}>
+                  <TableCell className="font-medium">{r.label}</TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(r.revenue_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(r.cogs_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(r.margin_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {mPct == null ? "—" : formatPct(mPct)}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </ListTable>
         </ListShell>
       )}
     </div>

@@ -13,7 +13,8 @@ import {
   CustomersService,
   type CustomerType,
 } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -36,14 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
@@ -81,6 +75,9 @@ const TYPE_LABEL: Record<CustomerType, string> = {
   END_CUSTOMER: "End customer",
   DEALER: "Dealer",
 }
+
+// Column widths in header order (Name, Type, Contact, Country, edit); sum to 100%.
+const CUSTOMER_WIDTHS = ["32%", "13%", "26%", "17%", "12%"]
 
 /** The full customer field set, shared by the create card and the edit dialog. */
 function CustomerFieldset({
@@ -337,45 +334,46 @@ function Customers() {
               ))}
             </div>
           ) : (
-            <Table containerClassName={LIST_SCROLL}>
-              <TableHeader className="bg-background sticky top-0 z-10">
+            <ListTable
+              widths={CUSTOMER_WIDTHS}
+              minWidth={760}
+              head={
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Contact</TableHead>
                   <TableHead>Country</TableHead>
-                  <TableHead className="w-0" />
+                  <TableHead className="text-right" />
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {customers.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-medium">{c.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {c.contact ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {c.country ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setEditing(c)}
-                      >
-                        Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+              }
+            >
+              {customers.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell className="font-medium">{c.name}</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">
+                      {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {c.contact ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {c.country ?? "—"}
+                  </TableCell>
+                  <TableCell className="overflow-visible! text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditing(c)}
+                    >
+                      Edit
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </ListTable>
           )}
         </ListShell>
         <PaginationControls

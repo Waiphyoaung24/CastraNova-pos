@@ -13,7 +13,8 @@ import {
   type PricingOverrideDecision,
   PricingOverridesService,
 } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -27,14 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
@@ -59,6 +53,10 @@ const STATES: OverrideState[] = [
   "APPROVED",
   "REJECTED",
 ]
+
+// Column widths in header order (Product, Default, Requested, Deviation,
+// Reason, Actions); sum to 100%.
+const OVERRIDE_WIDTHS = ["16%", "12%", "12%", "11%", "26%", "23%"]
 
 function PricingOverrides() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -224,8 +222,10 @@ function PricingOverrides() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={OVERRIDE_WIDTHS}
+            minWidth={900}
+            head={
               <TableRow>
                 <TableHead>Product</TableHead>
                 <TableHead className="text-right">Default</TableHead>
@@ -234,69 +234,68 @@ function PricingOverrides() {
                 <TableHead>Reason</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((o) => {
-                // One decision at a time: disable every row's actions while any
-                // decide is in flight (a single shared mutation isn't re-entrant).
-                const deciding = decideMutation.isPending
-                return (
-                  <TableRow key={o.id}>
-                    <TableCell className="num font-medium">
-                      {o.product_sku}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {formatThb(o.default_price_thb)}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {formatThb(o.requested_price_thb)}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {formatDeviationPct(o.deviation_pct)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-xs truncate">
-                      {o.reason}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isPending(o.state) ? (
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            disabled={deciding}
-                            onClick={() =>
-                              decideMutation.mutate({
-                                overrideId: o.id,
-                                decision: "APPROVED",
-                              })
-                            }
-                          >
-                            Approve
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={deciding}
-                            onClick={() =>
-                              decideMutation.mutate({
-                                overrideId: o.id,
-                                decision: "REJECTED",
-                              })
-                            }
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      ) : (
-                        <Badge variant="secondary">{o.state}</Badge>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+            }
+          >
+            {rows.map((o) => {
+              // One decision at a time: disable every row's actions while any
+              // decide is in flight (a single shared mutation isn't re-entrant).
+              const deciding = decideMutation.isPending
+              return (
+                <TableRow key={o.id}>
+                  <TableCell className="num font-medium">
+                    {o.product_sku}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(o.default_price_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatThb(o.requested_price_thb)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {formatDeviationPct(o.deviation_pct)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {o.reason}
+                  </TableCell>
+                  <TableCell className="overflow-visible! text-right">
+                    {isPending(o.state) ? (
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={deciding}
+                          onClick={() =>
+                            decideMutation.mutate({
+                              overrideId: o.id,
+                              decision: "APPROVED",
+                            })
+                          }
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={deciding}
+                          onClick={() =>
+                            decideMutation.mutate({
+                              overrideId: o.id,
+                              decision: "REJECTED",
+                            })
+                          }
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    ) : (
+                      <Badge variant="secondary">{o.state}</Badge>
+                    )}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </ListTable>
         </ListShell>
       )}
       <PaginationControls

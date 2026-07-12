@@ -6,19 +6,13 @@ import {
   type NotificationPreferenceUpdate,
   NotificationsService,
 } from "@/client"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { channelLabel } from "@/lib/labels"
@@ -37,6 +31,9 @@ function humanize(value: string): string {
   const lower = value.replace(/_/g, " ").toLowerCase()
   return lower.charAt(0).toUpperCase() + lower.slice(1)
 }
+
+// Column widths in header order (Send to, Event, Enabled); sum to 100%.
+const NOTIFICATION_WIDTHS = ["22%", "66%", "12%"]
 
 function Notifications() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -124,39 +121,40 @@ function Notifications() {
         </ListShell>
       ) : (
         <ListShell loading={listLoading}>
-          <Table containerClassName={LIST_SCROLL}>
-            <TableHeader className="bg-background sticky top-0 z-10">
+          <ListTable
+            widths={NOTIFICATION_WIDTHS}
+            minWidth={560}
+            head={
               <TableRow>
                 <TableHead>Send to</TableHead>
                 <TableHead>Event</TableHead>
                 <TableHead className="text-right">Enabled</TableHead>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell>
-                    <Badge variant="secondary">{channelLabel(p.channel)}</Badge>
-                  </TableCell>
-                  <TableCell>{humanize(p.event_type)}</TableCell>
-                  <TableCell className="text-right">
-                    <Checkbox
-                      checked={p.enabled}
-                      disabled={updateMutation.isPending}
-                      aria-label={`${channelLabel(p.channel)} ${humanize(p.event_type)}`}
-                      onCheckedChange={(checked) =>
-                        updateMutation.mutate({
-                          channel: p.channel,
-                          event_type: p.event_type,
-                          enabled: checked === true,
-                        })
-                      }
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            }
+          >
+            {rows.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell>
+                  <Badge variant="secondary">{channelLabel(p.channel)}</Badge>
+                </TableCell>
+                <TableCell>{humanize(p.event_type)}</TableCell>
+                <TableCell className="overflow-visible! text-right">
+                  <Checkbox
+                    checked={p.enabled}
+                    disabled={updateMutation.isPending}
+                    aria-label={`${channelLabel(p.channel)} ${humanize(p.event_type)}`}
+                    onCheckedChange={(checked) =>
+                      updateMutation.mutate({
+                        channel: p.channel,
+                        event_type: p.event_type,
+                        enabled: checked === true,
+                      })
+                    }
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </ListTable>
         </ListShell>
       )}
     </div>

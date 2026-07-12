@@ -14,7 +14,8 @@ import {
   ProjectsService,
 } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
-import { LIST_SCROLL, ListShell } from "@/components/Common/ListShell"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { ProjectEditDialog } from "@/components/projects/ProjectEditDialog"
@@ -24,20 +25,16 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
 import { buildProjectPayload, canCreateProject } from "@/lib/project-create"
 import { requireAdmin } from "@/lib/route-guards"
+
+// Column widths in header order (Code, Name, Customer, Status, edit); sum to 100%.
+const PROJECT_WIDTHS = ["14%", "30%", "27%", "14%", "15%"]
 
 export const Route = createFileRoute("/_layout/projects")({
   component: Projects,
@@ -203,8 +200,10 @@ function Projects() {
               ))}
             </div>
           ) : (
-            <Table containerClassName={LIST_SCROLL}>
-              <TableHeader className="bg-background sticky top-0 z-10">
+            <ListTable
+              widths={PROJECT_WIDTHS}
+              minWidth={820}
+              head={
                 <TableRow>
                   <TableHead>Code</TableHead>
                   <TableHead>Name</TableHead>
@@ -212,47 +211,46 @@ function Projects() {
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right" />
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {projects.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="num font-medium">
-                      <Link
-                        to="/project/$projectId"
-                        params={{ projectId: p.id }}
-                        className="hover:underline"
-                      >
-                        {p.code}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{p.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <Link
-                        to="/customer/$customerId"
-                        params={{ customerId: p.customer_id }}
-                        className="hover:underline"
-                      >
-                        {customerLabels.get(p.customer_id) ?? p.customer_id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{p.status ?? "ACTIVE"}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setEditing(p)}
-                      >
-                        <Pencil className="mr-1 size-4" />
-                        Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+              }
+            >
+              {projects.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="num font-medium">
+                    <Link
+                      to="/project/$projectId"
+                      params={{ projectId: p.id }}
+                      className="hover:underline"
+                    >
+                      {p.code}
+                    </Link>
+                  </TableCell>
+                  <TableCell>{p.name}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    <Link
+                      to="/customer/$customerId"
+                      params={{ customerId: p.customer_id }}
+                      className="hover:underline"
+                    >
+                      {customerLabels.get(p.customer_id) ?? p.customer_id}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{p.status ?? "ACTIVE"}</Badge>
+                  </TableCell>
+                  <TableCell className="overflow-visible! text-right">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditing(p)}
+                    >
+                      <Pencil className="mr-1 size-4" />
+                      Edit
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </ListTable>
           )}
         </ListShell>
         <PaginationControls
