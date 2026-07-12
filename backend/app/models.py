@@ -409,6 +409,20 @@ class ProductPublic(ProductBase):
     id: uuid.UUID
 
 
+class ProductOption(SQLModel):
+    """Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+    receive/tickets/pulls product selection). Omits `specs` (JSONB) and admin-only
+    catalog fields (brand, category, default_min_stock_level); prices are included
+    because GET /products already exposes them to the same authenticated audience."""
+
+    id: uuid.UUID
+    sku: str
+    model_name: str
+    tracking_mode: TrackingMode
+    retail_price_thb: Decimal
+    repair_price_thb: Decimal
+
+
 class ProductPurchaseCost(SQLModel):
     # Admin-only: latest receipt cost (COGS). Never added to ProductPublic,
     # which is served by the staff-accessible GET /products/.

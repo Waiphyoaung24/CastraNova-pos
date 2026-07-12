@@ -230,7 +230,7 @@ def test_staff_can_fetch_sku_label(
     assert r.status_code == 200
 
 
-def test_read_skus_returns_all_ascending(
+def test_read_options_returns_all_ascending_by_sku(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
     sku_z = f"ZZZ-{uuid.uuid4().hex[:8]}"
@@ -243,25 +243,50 @@ def test_read_skus_returns_all_ascending(
         )
         assert r.status_code == 200, r.text
 
-    r = client.get(f"{PREFIX}/products/skus", headers=superuser_token_headers)
+    r = client.get(f"{PREFIX}/products/options", headers=superuser_token_headers)
     assert r.status_code == 200
-    skus = r.json()
+    options = r.json()
+    skus = [o["sku"] for o in options]
     assert sku_a in skus
     assert sku_z in skus
-    # Relative order only: asserting the whole list equals sorted(list) would
-    # compare Postgres' collation against Python's codepoint sort, which diverge
-    # on punctuation, over every SKU any test in the session happens to seed.
+    # Relative order only — see test_products.py history for why a full
+    # sorted() equality check is collation-fragile across a shared test DB.
     assert skus.index(sku_a) < skus.index(sku_z)
 
 
-def test_staff_can_read_skus(
+def test_read_options_payload_shape(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    sku = f"OPT-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(sku, retail_price_thb="1234.50", repair_price_thb="99.00"),
+    )
+    assert created.status_code == 200, created.text
+    pid = created.json()["id"]
+
+    r = client.get(f"{PREFIX}/products/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    match = next(o for o in r.json() if o["id"] == pid)
+    assert match["sku"] == sku
+    assert match["model_name"] == "Compressor 100"
+    assert match["tracking_mode"] == "SERIALIZED"
+    assert match["retail_price_thb"] == "1234.50"
+    assert match["repair_price_thb"] == "99.00"
+    assert "specs" not in match
+    assert "brand" not in match
+    assert "category" not in match
+
+
+def test_staff_can_read_options(
     client: TestClient, staff_token_headers: dict[str, str]
 ) -> None:
-    r = client.get(f"{PREFIX}/products/skus", headers=staff_token_headers)
+    r = client.get(f"{PREFIX}/products/options", headers=staff_token_headers)
     assert r.status_code == 200
 
 
-def test_read_skus_includes_inactive_product(
+def test_read_options_includes_inactive_product(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:
     sku = f"INACT-{uuid.uuid4().hex[:8]}"
@@ -278,11 +303,11 @@ def test_read_skus_includes_inactive_product(
     assert upd.status_code == 200
     assert upd.json()["is_active"] is False
 
-    r = client.get(f"{PREFIX}/products/skus", headers=superuser_token_headers)
+    r = client.get(f"{PREFIX}/products/options", headers=superuser_token_headers)
     assert r.status_code == 200
-    assert sku in r.json()
+    assert sku in [o["sku"] for o in r.json()]
 
 
-def test_read_skus_requires_auth(client: TestClient) -> None:
-    r = client.get(f"{PREFIX}/products/skus")
+def test_read_options_requires_auth(client: TestClient) -> None:
+    r = client.get(f"{PREFIX}/products/options")
     assert r.status_code == 401

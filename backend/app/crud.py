@@ -49,6 +49,7 @@ from app.models import (
     PricingOverrideRequest,
     Product,
     ProductCreate,
+    ProductOption,
     ProductUpdate,
     Project,
     ProjectCreate,
@@ -420,11 +421,32 @@ def list_products(
     )
 
 
-def list_skus(*, session: Session) -> list[str]:
-    """Every product SKU, ascending. Unpaginated single-column projection for the
-    audit SKU autocomplete (FR-019); includes inactive products, whose historical
-    movements still appear in the ledger."""
-    return list(session.exec(select(col(Product.sku)).order_by(col(Product.sku))).all())
+def list_product_options(*, session: Session) -> list[ProductOption]:
+    """Every product as a lightweight {id, sku, model_name, tracking_mode, prices}
+    projection, ordered by SKU. Unpaginated single round-trip for pickers/lookups
+    across the app; includes inactive products, whose historical movements still
+    appear in the append-only ledgers."""
+    rows = session.exec(
+        select(  # type: ignore[call-overload]
+            col(Product.id),
+            col(Product.sku),
+            col(Product.model_name),
+            col(Product.tracking_mode),
+            col(Product.retail_price_thb),
+            col(Product.repair_price_thb),
+        ).order_by(col(Product.sku))
+    ).all()
+    return [
+        ProductOption(
+            id=r[0],
+            sku=r[1],
+            model_name=r[2],
+            tracking_mode=r[3],
+            retail_price_thb=r[4],
+            repair_price_thb=r[5],
+        )
+        for r in rows
+    ]
 
 
 def latest_purchase_costs(*, session: Session) -> dict[uuid.UUID, Decimal]:
