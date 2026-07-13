@@ -356,12 +356,31 @@ reformat them on whichever branch next edits them.
 
 ### Still open — follow-ups this pass surfaced
 
-- **Audit's User filter still truncates at 100.** `audit.tsx` resolves actor names with a
-  bare `UsersService.readUsers()` (no `skip`/`limit`), so it is the one picker the
-  pagination migration never converted — user #101+ is missing from the filter dropdown
-  *and* their rows render as "Unknown user". Fixing it properly needs a lightweight
-  `GET /users/options` endpoint (a backend change), mirroring
-  `/customers|suppliers|projects|products/options`. **Not done — needs a backend endpoint.**
+> **DONE 2026-07-13.** Added `GET /users/options` (`UserOption {id, full_name, email}`,
+> `crud.list_user_options`), mirroring `/customers|suppliers|projects|products/options`, and
+> a `useUserOptions` hook. `audit.tsx`'s User filter is now an `EntityCombobox` like the SKU
+> filter beside it. Two things surfaced during the fix, beyond the ticket as filed:
+>
+> 1. **The "Unknown user" rows needed no backend change at all.** `AuditEntryPublic
+>    .actor_full_name` was already populated on every list row by `crud._hydrate_audit`
+>    and already read correctly by `AuditDetailSheet`. The **table** alone was ignoring it
+>    and rebuilding a client-side map from the truncated `readUsers()` instead — that part
+>    of the bug was a frontend regression, not a missing endpoint.
+> 2. **A worse bug sat underneath the truncation.** `/audit` is gated `get_admin` (superuser
+>    *or* `BKK_ADMIN`), but `GET /users/` is gated `get_current_active_superuser`. A plain
+>    `BKK_ADMIN` — a real, tested role — could open the audit page and get **403** on
+>    `readUsers()`, so *every* row read "Unknown user" for them, not just #101+. `/users/
+>    options` is deliberately gated on `get_admin` instead, to match the page that consumes
+>    it.
+>
+> Original finding, for the record:
+>
+> **Audit's User filter still truncates at 100.** `audit.tsx` resolves actor names with a
+> bare `UsersService.readUsers()` (no `skip`/`limit`), so it is the one picker the
+> pagination migration never converted — user #101+ is missing from the filter dropdown
+> *and* their rows render as "Unknown user". Fixing it properly needs a lightweight
+> `GET /users/options` endpoint (a backend change), mirroring
+> `/customers|suppliers|projects|products/options`.
 - **Catalog list pages need a search filter.** With 25 rows a page and no search, finding
   one customer/product/supplier means paging through the list by hand. Server-side
   pagination made this *more* acute, not less: the rows you want are now genuinely not on

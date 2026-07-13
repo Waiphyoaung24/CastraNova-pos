@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Contact } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useId, useState } from "react"
 
 import {
@@ -17,16 +17,15 @@ import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -39,6 +38,7 @@ import {
 } from "@/components/ui/select"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
 import { buildCustomerPayload, canCreateCustomer } from "@/lib/customer-create"
@@ -154,6 +154,68 @@ function CustomerFieldset({
   )
 }
 
+/** "New customer" — the register form behind a dialog, off the page header.
+ * Distinct from `components/pos/CustomerCreateDialog.tsx`, the lean inline
+ * quick-create used by the Sale/Tickets pickers — this is the full admin form. */
+function CustomerCreateDialog() {
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<CustomerDraft>(EMPTY_DRAFT)
+
+  const mutation = useMutation<CustomerPublic, Error, void>({
+    mutationFn: () =>
+      CustomersService.createCustomer({
+        requestBody: buildCustomerPayload(draft),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customers"] })
+      showSuccessToast("Customer created.")
+      setOpen(false)
+      setDraft(EMPTY_DRAFT)
+    },
+    onError: () =>
+      showErrorToast("Could not create the customer. Please try again."),
+  })
+
+  const canSubmit = canCreateCustomer(draft) && !mutation.isPending
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setDraft(EMPTY_DRAFT)
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button type="button">
+          <Plus className="mr-2 size-4" aria-hidden="true" />
+          New customer
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New customer</DialogTitle>
+        </DialogHeader>
+        <CustomerFieldset
+          draft={draft}
+          onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+        />
+        <DialogFooter>
+          <Button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => mutation.mutate()}
+          >
+            {mutation.isPending ? "Creating…" : "Create customer"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function CustomerEditDialog({
   customer,
   onClose,
@@ -218,11 +280,10 @@ function CustomerEditDialog({
 }
 
 function Customers() {
-  const { showSuccessToast, showErrorToast } = useCustomToast()
-  const queryClient = useQueryClient()
   const isMobile = useIsMobile()
-  const [draft, setDraft] = useState<CustomerDraft>(EMPTY_DRAFT)
   const [editing, setEditing] = useState<CustomerPublic | null>(null)
+  const [search, setSearch] = useState("")
+  const debouncedSearch = useDebouncedValue(search)
   const pagination = usePagination()
 
   const {
@@ -230,75 +291,45 @@ function Customers() {
     isPlaceholderData,
     isFetching,
   } = useQuery({
-    queryKey: ["customers", pagination.page],
+    queryKey: ["customers", { page: pagination.page, q: debouncedSearch }],
     queryFn: () =>
       CustomersService.readCustomers({
         skip: pagination.skip,
         limit: pagination.limit,
+        q: debouncedSearch || undefined,
       }),
     placeholderData: keepPreviousData,
   })
   const customers = customersResponse?.data ?? []
   const listLoading = isPlaceholderData || isFetching
 
-  const createMutation = useMutation<CustomerPublic, Error, void>({
-    mutationFn: () =>
-      CustomersService.createCustomer({
-        requestBody: buildCustomerPayload(draft),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customers"] })
-      setDraft(EMPTY_DRAFT)
-      showSuccessToast("Customer created.")
-    },
-    onError: () =>
-      showErrorToast("Could not create the customer. Please try again."),
-  })
-
-  const canCreate = canCreateCustomer(draft) && !createMutation.isPending
-
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Customers"
         description="Create and review customer records used by sales, tickets, and projects."
+        actions={<CustomerCreateDialog />}
       />
 
-      <Alert>
-        <Contact />
-        <AlertTitle>Manage your customers</AlertTitle>
-        <AlertDescription>
-          Add customers here so they're ready to pick during sales, tickets, and
-          projects. Create a record below, then Edit any entry in the list to
-          keep its details current.
-        </AlertDescription>
-      </Alert>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>New customer</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <CustomerFieldset
-            draft={draft}
-            onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
-          />
-          <Button
-            type="button"
-            disabled={!canCreate}
-            onClick={() => createMutation.mutate()}
-          >
-            {createMutation.isPending ? "Creating…" : "Create customer"}
-          </Button>
-        </CardContent>
-      </Card>
+      <Input
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value)
+          pagination.reset()
+        }}
+        placeholder="Search name…"
+        className="w-full sm:w-64"
+      />
 
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold">Existing customers</h2>
         <ListShell loading={listLoading}>
           {customers.length === 0 ? (
             <p className="text-muted-foreground py-6 text-center text-sm">
-              {customersResponse ? "No customers yet." : "Loading…"}
+              {!customersResponse
+                ? "Loading…"
+                : debouncedSearch
+                  ? `No customers match "${debouncedSearch}".`
+                  : "No customers yet."}
             </p>
           ) : isMobile ? (
             <div className="space-y-3">

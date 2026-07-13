@@ -4454,6 +4454,39 @@ export const UserCreateSchema = {
     title: 'UserCreate'
 } as const;
 
+export const UserOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Full Name'
+        },
+        email: {
+            type: 'string',
+            format: 'email',
+            title: 'Email'
+        }
+    },
+    type: 'object',
+    required: ['id', 'full_name', 'email'],
+    title: 'UserOption',
+    description: `Lightweight actor projection for the audit User filter. Deliberately
+unpaginated: no client parameter can amplify the response size. \`email\` is the
+label fallback because \`full_name\` is nullable. Includes deactivated users,
+whose historical movements still appear in the append-only ledgers.`
+} as const;
+
 export const UserPublicSchema = {
     properties: {
         email: {

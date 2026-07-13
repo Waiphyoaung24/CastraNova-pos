@@ -1,16 +1,21 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Plus } from "lucide-react"
 import { useState } from "react"
 
-import { type SupplierPublic, SuppliersService } from "@/client"
+import {
+  type SupplierCreate,
+  type SupplierPublic,
+  SuppliersService,
+} from "@/client"
 import { SupplierFieldset } from "@/components/suppliers/SupplierFieldset"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
 import useCustomToast from "@/hooks/useCustomToast"
 import {
@@ -19,48 +24,37 @@ import {
   type SupplierDraft,
 } from "@/lib/supplier-create"
 
-export function SupplierEditDialog({
-  supplier,
-  onClose,
-}: {
-  supplier: SupplierPublic
-  onClose: () => void
-}) {
+const EMPTY_DRAFT: SupplierDraft = { name: "", country: "", contact: "" }
+
+/** "New supplier" — the register form behind a dialog, off the Suppliers page header. */
+export function SupplierCreateDialog() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
-  const [draft, setDraft] = useState<SupplierDraft>({
-    name: supplier.name,
-    country: supplier.country ?? "",
-    contact: supplier.contact ?? "",
-  })
 
-  const mutation = useMutation<SupplierPublic, Error, void>({
-    mutationFn: () =>
-      SuppliersService.updateSupplier({
-        supplierId: supplier.id,
-        requestBody: buildSupplierPayload(draft),
-      }),
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<SupplierDraft>(EMPTY_DRAFT)
+
+  const reset = () => setDraft(EMPTY_DRAFT)
+
+  const mutation = useMutation<SupplierPublic, Error, SupplierCreate>({
+    mutationFn: (payload) =>
+      SuppliersService.createSupplier({ requestBody: payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["suppliers"] })
       queryClient.invalidateQueries({ queryKey: ["supplier-countries"] })
-      showSuccessToast("Supplier updated.")
-      onClose()
+      showSuccessToast("Supplier created.")
+      setOpen(false)
+      reset()
     },
     onError: () =>
-      showErrorToast("Could not update the supplier. Please try again."),
+      showErrorToast("Could not create the supplier. Please try again."),
   })
 
-  // Skip a no-op PATCH (which would still bump updated_at) when nothing changed.
-  const isUnchanged =
-    draft.name === supplier.name &&
-    draft.country === (supplier.country ?? "") &&
-    draft.contact === (supplier.contact ?? "")
-  const canSave =
-    canCreateSupplier(draft) && !isUnchanged && !mutation.isPending
+  const canSubmit = canCreateSupplier(draft) && !mutation.isPending
 
   return (
     <Dialog
-      open
+      open={open}
       // The Country field's popover combobox is portalled outside this
       // Dialog's DOM subtree; a modal Dialog's focus trap fights that
       // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
@@ -68,13 +62,19 @@ export function SupplierEditDialog({
       // trap, letting the combobox actually receive focus and keystrokes.
       modal={false}
       onOpenChange={(next) => {
-        if (!next) onClose()
+        setOpen(next)
+        if (!next) reset()
       }}
     >
+      <DialogTrigger asChild>
+        <Button type="button">
+          <Plus className="mr-2 size-4" aria-hidden="true" />
+          New supplier
+        </Button>
+      </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit supplier</DialogTitle>
-          <DialogDescription>Update this supplier's details.</DialogDescription>
+          <DialogTitle>New supplier</DialogTitle>
         </DialogHeader>
         <SupplierFieldset
           draft={draft}
@@ -83,10 +83,10 @@ export function SupplierEditDialog({
         <DialogFooter>
           <Button
             type="button"
-            disabled={!canSave}
-            onClick={() => mutation.mutate()}
+            disabled={!canSubmit}
+            onClick={() => mutation.mutate(buildSupplierPayload(draft))}
           >
-            {mutation.isPending ? "Saving…" : "Save"}
+            {mutation.isPending ? "Creating…" : "Create supplier"}
           </Button>
         </DialogFooter>
       </DialogContent>

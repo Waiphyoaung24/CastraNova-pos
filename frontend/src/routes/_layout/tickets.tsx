@@ -3,12 +3,9 @@ import { createFileRoute } from "@tanstack/react-router"
 import { Wrench } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
-import {
-  type CustomerOption,
-  type ServiceTicketPublic,
-} from "@/client"
-import { PageHeader } from "@/components/Common/PageHeader"
+import type { CustomerOption, ServiceTicketPublic } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import {
   TicketPartsList,
@@ -19,9 +16,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useProductOptions } from "@/hooks/useProductOptions"
-import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"

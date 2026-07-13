@@ -190,6 +190,17 @@ class UsersPublic(SQLModel):
     count: int
 
 
+class UserOption(SQLModel):
+    """Lightweight actor projection for the audit User filter. Deliberately
+    unpaginated: no client parameter can amplify the response size. `email` is the
+    label fallback because `full_name` is nullable. Includes deactivated users,
+    whose historical movements still appear in the append-only ledgers."""
+
+    id: uuid.UUID
+    full_name: str | None
+    email: EmailStr
+
+
 # --- Location -----------------------------------------------------------------
 
 

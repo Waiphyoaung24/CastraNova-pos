@@ -26,12 +26,40 @@ router = APIRouter(prefix="/products", tags=["products"])
 )
 def read_products(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=255,
+            description="Case-insensitive substring match on SKU or model name",
+        ),
+    ] = None,
+    brand: Annotated[
+        str | None,
+        Query(max_length=255, description="Case-insensitive substring match on brand"),
+    ] = None,
+    category: Annotated[
+        str | None,
+        Query(
+            max_length=128, description="Case-insensitive substring match on category"
+        ),
+    ] = None,
+    tracking_mode: TrackingMode | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ProductsPublic:
     return ProductsPublic(
-        data=crud.list_products(session=session, skip=skip, limit=limit),
-        count=crud.count_products(session=session),
+        data=crud.list_products(
+            session=session,
+            q=q,
+            brand=brand,
+            category=category,
+            tracking_mode=tracking_mode,
+            skip=skip,
+            limit=limit,
+        ),
+        count=crud.count_products(
+            session=session, q=q, brand=brand, category=category, tracking_mode=tracking_mode
+        ),
     )
 
 

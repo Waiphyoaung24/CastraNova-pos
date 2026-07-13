@@ -109,10 +109,11 @@ export function EntityCombobox<T>({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-(--radix-popover-trigger-width) p-0"
+        className="w-(--radix-popover-trigger-width) max-h-[var(--radix-popover-content-available-height)] overflow-hidden p-0"
         align="start"
+        collisionPadding={8}
       >
-        <Command shouldFilter={false}>
+        <Command shouldFilter={false} className="max-h-full">
           <CommandInput
             placeholder={searchPlaceholder}
             value={query}
@@ -121,7 +122,7 @@ export function EntityCombobox<T>({
               setShown(VISIBLE_LIMIT)
             }}
           />
-          <CommandList className="scrollbar-thin">
+          <CommandList className="scrollbar-thin max-h-none min-h-0 flex-1">
             <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
               {allowClear && (

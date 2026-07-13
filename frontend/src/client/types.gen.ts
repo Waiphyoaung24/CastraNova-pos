@@ -885,6 +885,18 @@ export type UserCreate = {
     password: string;
 };
 
+/**
+ * Lightweight actor projection for the audit User filter. Deliberately
+ * unpaginated: no client parameter can amplify the response size. `email` is the
+ * label fallback because `full_name` is nullable. Includes deactivated users,
+ * whose historical movements still appear in the append-only ledgers.
+ */
+export type UserOption = {
+    id: string;
+    full_name: (string | null);
+    email: string;
+};
+
 export type UserPublic = {
     email: string;
     is_active?: boolean;
@@ -960,6 +972,10 @@ export type AuditListAuditResponse = (AuditPublic);
 
 export type CustomersReadCustomersData = {
     limit?: number;
+    /**
+     * Case-insensitive substring match on name
+     */
+    q?: (string | null);
     skip?: number;
 };
 
@@ -1080,8 +1096,21 @@ export type PrivateCreateUserData = {
 export type PrivateCreateUserResponse = (UserPublic);
 
 export type ProductsReadProductsData = {
+    /**
+     * Case-insensitive substring match on brand
+     */
+    brand?: (string | null);
+    /**
+     * Case-insensitive substring match on category
+     */
+    category?: (string | null);
     limit?: number;
+    /**
+     * Case-insensitive substring match on SKU or model name
+     */
+    q?: (string | null);
     skip?: number;
+    trackingMode?: (TrackingMode | null);
 };
 
 export type ProductsReadProductsResponse = (ProductsPublic);
@@ -1161,8 +1190,17 @@ export type ProjectPullsCancelProjectPullData = {
 export type ProjectPullsCancelProjectPullResponse = (ProjectPullPublic);
 
 export type ProjectsReadProjectsData = {
+    /**
+     * Exact customer match
+     */
+    customerId?: (string | null);
     limit?: number;
+    /**
+     * Case-insensitive substring match on code or name
+     */
+    q?: (string | null);
     skip?: number;
+    status?: (ProjectStatus | null);
 };
 
 export type ProjectsReadProjectsResponse = (ProjectsPublic);
@@ -1328,7 +1366,15 @@ export type StockAdjustmentsCreateStockAdjustmentData = {
 export type StockAdjustmentsCreateStockAdjustmentResponse = (StockAdjustmentPublic);
 
 export type SuppliersReadSuppliersData = {
+    /**
+     * Exact match on country
+     */
+    country?: (string | null);
     limit?: number;
+    /**
+     * Case-insensitive substring match on name
+     */
+    q?: (string | null);
     skip?: number;
 };
 
@@ -1341,6 +1387,8 @@ export type SuppliersCreateSupplierData = {
 export type SuppliersCreateSupplierResponse = (SupplierPublic);
 
 export type SuppliersReadOptionsResponse = (Array<SupplierOption>);
+
+export type SuppliersListCountriesResponse = (Array<(string)>);
 
 export type SuppliersUpdateSupplierData = {
     requestBody: SupplierUpdate;
@@ -1382,6 +1430,8 @@ export type UsersCreateUserData = {
 };
 
 export type UsersCreateUserResponse = (UserPublic);
+
+export type UsersReadOptionsResponse = (Array<UserOption>);
 
 export type UsersReadUserMeResponse = (UserPublic);
 

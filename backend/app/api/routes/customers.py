@@ -25,12 +25,16 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 )
 def read_customers(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(max_length=255, description="Case-insensitive substring match on name"),
+    ] = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> CustomersPublic:
     return CustomersPublic(
-        data=crud.list_customers(session=session, skip=skip, limit=limit),
-        count=crud.count_customers(session=session),
+        data=crud.list_customers(session=session, q=q, skip=skip, limit=limit),
+        count=crud.count_customers(session=session, q=q),
     )
 
 

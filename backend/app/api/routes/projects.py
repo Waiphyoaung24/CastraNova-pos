@@ -12,6 +12,7 @@ from app.models import (
     ProjectOption,
     ProjectPublic,
     ProjectsPublic,
+    ProjectStatus,
     ProjectUpdate,
 )
 
@@ -24,12 +25,30 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 )
 def read_projects(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=255,
+            description="Case-insensitive substring match on code or name",
+        ),
+    ] = None,
+    customer_id: Annotated[
+        uuid.UUID | None, Query(description="Exact customer match")
+    ] = None,
+    status: ProjectStatus | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ProjectsPublic:
     return ProjectsPublic(
-        data=crud.list_projects(session=session, skip=skip, limit=limit),
-        count=crud.count_projects(session=session),
+        data=crud.list_projects(
+            session=session,
+            q=q,
+            customer_id=customer_id,
+            status=status,
+            skip=skip,
+            limit=limit,
+        ),
+        count=crud.count_projects(session=session, q=q, customer_id=customer_id, status=status),
     )
 
 

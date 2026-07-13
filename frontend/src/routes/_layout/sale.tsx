@@ -3,23 +3,23 @@ import { createFileRoute } from "@tanstack/react-router"
 import { ShoppingCart } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import {
-  type CustomerOption,
-  type SaleCreateRequest,
-  type SalePublic,
-  type SaleStaffPublic,
+import type {
+  CustomerOption,
+  SaleCreateRequest,
+  SalePublic,
+  SaleStaffPublic,
 } from "@/client"
-import { PageHeader } from "@/components/Common/PageHeader"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
 import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useProductOptions } from "@/hooks/useProductOptions"
-import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import { queued } from "@/lib/query-client"

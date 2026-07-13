@@ -6,7 +6,9 @@ export interface PaginationOptions {
   pageSize?: number
 }
 
-export function usePagination({ pageSize = DEFAULT_PAGE_SIZE }: PaginationOptions = {}) {
+export function usePagination({
+  pageSize = DEFAULT_PAGE_SIZE,
+}: PaginationOptions = {}) {
   const [page, setPageRaw] = useState(1)
 
   const setPage = useCallback((nextPage: number) => {

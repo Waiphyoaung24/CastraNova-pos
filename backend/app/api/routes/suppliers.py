@@ -23,12 +23,21 @@ router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 )
 def read_suppliers(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(max_length=255, description="Case-insensitive substring match on name"),
+    ] = None,
+    country: Annotated[
+        str | None, Query(max_length=64, description="Exact match on country")
+    ] = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> SuppliersPublic:
     return SuppliersPublic(
-        data=crud.list_suppliers(session=session, skip=skip, limit=limit),
-        count=crud.count_suppliers(session=session),
+        data=crud.list_suppliers(
+            session=session, q=q, country=country, skip=skip, limit=limit
+        ),
+        count=crud.count_suppliers(session=session, q=q, country=country),
     )
 
 
@@ -37,6 +46,13 @@ def read_suppliers(
 )
 def read_options(session: SessionDep) -> list[SupplierOption]:
     return crud.list_supplier_options(session=session)
+
+
+@router.get(
+    "/countries", response_model=list[str], dependencies=[Depends(get_current_user)]
+)
+def list_countries(session: SessionDep) -> list[str]:
+    return crud.list_supplier_countries(session=session)
 
 
 @router.post(

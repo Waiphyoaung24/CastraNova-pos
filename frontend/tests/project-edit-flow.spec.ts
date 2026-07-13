@@ -11,6 +11,7 @@ test("editing a project's status updates its row", async ({ page }) => {
   // Create a project against that customer.
   const code = `E2E-${Date.now()}`
   await page.goto("/projects")
+  await page.getByRole("button", { name: "New project" }).click()
   await page.getByLabel("Code").fill(code)
   await page.getByLabel("Name").fill("E2E Project")
   await page.getByRole("combobox").click()

@@ -8,6 +8,7 @@ from app import crud
 from app.api.deps import (
     CurrentUser,
     SessionDep,
+    get_admin,
     get_current_active_superuser,
 )
 from app.core.config import settings
@@ -17,6 +18,7 @@ from app.models import (
     UpdatePassword,
     User,
     UserCreate,
+    UserOption,
     UserPublic,
     UsersPublic,
     UserUpdate,
@@ -51,6 +53,21 @@ def read_users(
 
     users_public = [UserPublic.model_validate(user) for user in users]
     return UsersPublic(data=users_public, count=count)
+
+
+@router.get(
+    "/options",
+    response_model=list[UserOption],
+    dependencies=[Depends(get_admin)],
+)
+def read_options(session: SessionDep) -> list[UserOption]:
+    """Every user as a lightweight projection for the audit User filter.
+
+    Gated on `get_admin`, not `get_current_active_superuser` like the rest of this
+    router: `/audit` is itself admin-gated, so a BKK_ADMIN who can read the ledger
+    must be able to resolve and filter by its actors.
+    """
+    return crud.list_user_options(session=session)
 
 
 @router.post(

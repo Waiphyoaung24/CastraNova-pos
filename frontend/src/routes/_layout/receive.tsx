@@ -12,8 +12,8 @@ import {
   type ReceiveSerializedResponse,
   type UnitPublic,
 } from "@/client"
-import { PageHeader } from "@/components/Common/PageHeader"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { EmptyState } from "@/components/EmptyState"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { ScanField } from "@/components/ScanField"
@@ -135,8 +135,9 @@ function SerializedTab() {
   }
 
   // Reference data — same staleTime as other reference-data screens.
-  const { data: products = [], isPending: productsPending } =
-    useProductOptions({ activeOnly: true })
+  const { data: products = [], isPending: productsPending } = useProductOptions(
+    { activeOnly: true },
+  )
   const { data: suppliers = [], isPending: suppliersPending } =
     useSupplierOptions()
 
@@ -450,8 +451,9 @@ function QuantityTab() {
 
   // Reference data — keyed identically to the Serialized tab, so TanStack Query
   // serves both tabs from one shared cache entry (no duplicate fetch).
-  const { data: products = [], isPending: productsPending } =
-    useProductOptions({ activeOnly: true })
+  const { data: products = [], isPending: productsPending } = useProductOptions(
+    { activeOnly: true },
+  )
   const { data: suppliers = [], isPending: suppliersPending } =
     useSupplierOptions()
 

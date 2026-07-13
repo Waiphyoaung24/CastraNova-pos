@@ -157,9 +157,9 @@ test.describe("Sale screen", () => {
 
     // PRD FR-007: no walk-in / anonymous sales. The Customer field must start
     // empty (placeholder showing) — nothing is auto-selected on load.
-    await expect(
-      page.getByRole("combobox", { name: "Customer" }),
-    ).toHaveText("Select a customer")
+    await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(
+      "Select a customer",
+    )
 
     // Even with a unit in the cart, checkout stays disabled until a customer
     // is explicitly chosen.

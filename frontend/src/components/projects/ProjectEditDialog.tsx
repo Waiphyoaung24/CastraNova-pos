@@ -2,10 +2,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 
 import {
-  type CustomerPublic,
+  type CustomerOption,
   type ProjectPublic,
   ProjectsService,
 } from "@/client"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -20,7 +21,6 @@ import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
-  SelectEmpty,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -39,7 +39,7 @@ export function ProjectEditDialog({
   onClose,
 }: {
   project: ProjectPublic
-  customers: CustomerPublic[]
+  customers: CustomerOption[]
   onClose: () => void
 }) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -110,25 +110,18 @@ export function ProjectEditDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor={customerSelectId}>Customer</Label>
-            <Select
-              value={draft.customerId}
-              onValueChange={(v) => patch({ customerId: v })}
-            >
-              <SelectTrigger id={customerSelectId} className="w-full">
-                <SelectValue placeholder="Select a customer" />
-              </SelectTrigger>
-              <SelectContent>
-                {customers.length ? (
-                  customers.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))
-                ) : (
-                  <SelectEmpty>No customers available</SelectEmpty>
-                )}
-              </SelectContent>
-            </Select>
+            <EntityCombobox
+              id={customerSelectId}
+              items={customers}
+              value={draft.customerId || undefined}
+              onChange={(next) => patch({ customerId: next ?? "" })}
+              getKey={(c) => c.id}
+              getLabel={(c) => c.name}
+              placeholder="Select a customer"
+              searchPlaceholder="Search customers…"
+              emptyText="No customers available"
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor={statusId}>Status</Label>

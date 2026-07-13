@@ -1,29 +1,19 @@
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Package } from "lucide-react"
-import { type ReactNode, useId, useState } from "react"
+import { useState } from "react"
 
-import {
-  type ProductCreate,
-  type ProductPublic,
-  ProductsService,
-  type TrackingMode,
-} from "@/client"
+import { ProductsService } from "@/client"
+import type { TrackingMode } from "@/client/types.gen"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { EmptyState } from "@/components/EmptyState"
 import { EditProductDialog } from "@/components/products/EditProductDialog"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { ProductCreateDialog } from "@/components/products/ProductCreateDialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -32,7 +22,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -48,12 +37,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import useCustomToast from "@/hooks/useCustomToast"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { usePagination } from "@/hooks/usePagination"
 import { trackingModeLabel } from "@/lib/labels"
-import { buildProductPayload, canCreateProduct } from "@/lib/product-create"
 import { formatThb } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
+
+// Radix Select forbids an empty-string item value, so "all" uses a sentinel.
+const ALL = "__all__"
 
 // Admin-only catalog management (FR-001) + per-product price history (FR-002).
 export const Route = createFileRoute("/_layout/products")({
@@ -63,8 +54,6 @@ export const Route = createFileRoute("/_layout/products")({
     meta: [{ title: "Products - CastraNova POS" }],
   }),
 })
-
-const TRACKING_MODES: TrackingMode[] = ["QUANTITY", "SERIALIZED"]
 
 // Column widths in header order (SKU, Model, Brand, Category, Tracking,
 // Purchase, Retail, Repair, History); sum to 100%.
@@ -81,37 +70,41 @@ const PRODUCT_WIDTHS = [
 ]
 
 function Products() {
-  const { showSuccessToast, showErrorToast } = useCustomToast()
-  const queryClient = useQueryClient()
-  const skuId = useId()
-  const modelId = useId()
-  const brandId = useId()
-  const categoryId = useId()
-  const retailId = useId()
-  const repairId = useId()
-  const minStockId = useId()
-  const trackingId = useId()
-
-  const [sku, setSku] = useState("")
-  const [modelName, setModelName] = useState("")
+  const [search, setSearch] = useState("")
   const [brand, setBrand] = useState("")
   const [category, setCategory] = useState("")
-  const [trackingMode, setTrackingMode] = useState<TrackingMode>("QUANTITY")
-  const [retailPrice, setRetailPrice] = useState("")
-  const [repairPrice, setRepairPrice] = useState("")
-  const [minStock, setMinStock] = useState("")
+  const [trackingMode, setTrackingMode] = useState("")
+  const debouncedSearch = useDebouncedValue(search)
+  const debouncedBrand = useDebouncedValue(brand)
+  const debouncedCategory = useDebouncedValue(category)
   const pagination = usePagination()
+  const hasFilters = Boolean(
+    debouncedSearch || debouncedBrand || debouncedCategory || trackingMode,
+  )
 
   const {
     data: productsResponse,
     isPlaceholderData,
     isFetching,
   } = useQuery({
-    queryKey: ["products", pagination.page],
+    queryKey: [
+      "products",
+      {
+        page: pagination.page,
+        q: debouncedSearch,
+        brand: debouncedBrand,
+        category: debouncedCategory,
+        trackingMode,
+      },
+    ],
     queryFn: () =>
       ProductsService.readProducts({
         skip: pagination.skip,
         limit: pagination.limit,
+        q: debouncedSearch || undefined,
+        brand: debouncedBrand || undefined,
+        category: debouncedCategory || undefined,
+        trackingMode: (trackingMode || undefined) as TrackingMode | undefined,
       }),
     placeholderData: keepPreviousData,
   })
@@ -128,156 +121,70 @@ function Products() {
     ]),
   )
 
-  const draft = {
-    sku,
-    modelName,
-    brand,
-    category,
-    trackingMode,
-    retailPrice,
-    repairPrice,
-    minStock,
-  }
-
-  const createMutation = useMutation<ProductPublic, Error, ProductCreate>({
-    mutationFn: (payload) =>
-      ProductsService.createProduct({ requestBody: payload }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["products"] })
-      setSku("")
-      setModelName("")
-      setBrand("")
-      setCategory("")
-      setRetailPrice("")
-      setRepairPrice("")
-      setMinStock("")
-      showSuccessToast("Product created.")
-    },
-    onError: () =>
-      showErrorToast("Could not create the product. Please try again."),
-  })
-
-  const canCreate = canCreateProduct(draft) && !createMutation.isPending
-
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Products"
         description="Manage the catalog and review per-product price history."
+        actions={<ProductCreateDialog />}
       />
 
-      <Alert>
-        <Package />
-        <AlertTitle>Set up a product line</AlertTitle>
-        <AlertDescription>
-          A product is the catalog entry every unit is sold and repaired against
-          — its SKU, model, pricing, and how its stock is counted. Create one
-          here, then review or revise its prices from the catalog below.
-        </AlertDescription>
-      </Alert>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>New product</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <SectionLabel>Identity</SectionLabel>
-          <Field
-            id={skuId}
-            label="SKU"
-            value={sku}
-            onChange={setSku}
-            placeholder="e.g. IP15P-256-BLK"
-          />
-          <Field
-            id={modelId}
-            label="Model name"
-            value={modelName}
-            onChange={setModelName}
-            placeholder="e.g. iPhone 15 Pro"
-          />
-          <Field
-            id={brandId}
-            label="Brand"
-            value={brand}
-            onChange={setBrand}
-            placeholder="e.g. Apple"
-          />
-          <Field
-            id={categoryId}
-            label="Category"
-            value={category}
-            onChange={setCategory}
-            placeholder="e.g. Smartphone"
-          />
-
-          <SectionLabel>Classification</SectionLabel>
-          <div className="space-y-2">
-            <Label htmlFor={trackingId}>Tracking</Label>
-            <Select
-              value={trackingMode}
-              onValueChange={(v) => setTrackingMode(v as TrackingMode)}
-            >
-              <SelectTrigger id={trackingId} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TRACKING_MODES.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-muted-foreground text-sm">
-              Quantity counts stock as a number; Serialized tracks each unit by
-              its own barcode.
-            </p>
-          </div>
-          <Field
-            id={minStockId}
-            label="Min stock level"
-            value={minStock}
-            onChange={setMinStock}
-            type="number"
-            numeric
-            placeholder="e.g. 5"
-          />
-
-          <SectionLabel>Pricing</SectionLabel>
-          <Field
-            id={retailId}
-            label="Retail price (THB)"
-            value={retailPrice}
-            onChange={setRetailPrice}
-            type="number"
-            numeric
-            placeholder="0.00"
-          />
-          <Field
-            id={repairId}
-            label="Repair price (THB)"
-            value={repairPrice}
-            onChange={setRepairPrice}
-            type="number"
-            numeric
-            placeholder="0.00"
-          />
-          <div className="sm:col-span-2">
-            <Button
-              type="button"
-              disabled={!canCreate}
-              onClick={() => createMutation.mutate(buildProductPayload(draft))}
-              className="w-full sm:w-auto"
-            >
-              {createMutation.isPending ? "Creating…" : "Create product"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex flex-wrap gap-3">
+        <Input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            pagination.reset()
+          }}
+          placeholder="Search SKU or model…"
+          className="w-full sm:w-64"
+        />
+        <Input
+          value={brand}
+          onChange={(e) => {
+            setBrand(e.target.value)
+            pagination.reset()
+          }}
+          placeholder="Brand…"
+          aria-label="Brand filter"
+          className="w-full sm:w-40"
+        />
+        <Input
+          value={category}
+          onChange={(e) => {
+            setCategory(e.target.value)
+            pagination.reset()
+          }}
+          placeholder="Category…"
+          aria-label="Category filter"
+          className="w-full sm:w-40"
+        />
+        <Select
+          value={trackingMode === "" ? ALL : trackingMode}
+          onValueChange={(v) => {
+            setTrackingMode(v === ALL ? "" : v)
+            pagination.reset()
+          }}
+        >
+          <SelectTrigger
+            className="w-full sm:w-40"
+            aria-label="Tracking filter"
+          >
+            <SelectValue placeholder="All tracking" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All tracking</SelectItem>
+            <SelectItem value="SERIALIZED">
+              {trackingModeLabel("SERIALIZED")}
+            </SelectItem>
+            <SelectItem value="QUANTITY">
+              {trackingModeLabel("QUANTITY")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold">Catalog</h2>
         <ListShell loading={listLoading}>
           {!productsResponse ? (
             <p className="text-muted-foreground py-6 text-center text-sm">
@@ -286,8 +193,16 @@ function Products() {
           ) : products.length === 0 ? (
             <EmptyState
               icon={Package}
-              title="No products yet"
-              hint="Create your first product with the form above."
+              title={
+                hasFilters
+                  ? "No products match these filters."
+                  : "No products yet"
+              }
+              hint={
+                hasFilters
+                  ? undefined
+                  : "Create your first product with the New product button above."
+              }
             />
           ) : (
             <ListTable
@@ -351,52 +266,6 @@ function Products() {
           onPageChange={pagination.setPage}
         />
       </div>
-    </div>
-  )
-}
-
-/** Full-width group heading inside the form grid — splits a long field list
- * into scannable sections (Identity / Classification / Pricing). */
-function SectionLabel({ children }: { children: ReactNode }) {
-  return (
-    <h3 className="text-muted-foreground col-span-full text-xs font-semibold tracking-wide uppercase not-first:mt-2">
-      {children}
-    </h3>
-  )
-}
-
-function Field({
-  id,
-  label,
-  value,
-  onChange,
-  type = "text",
-  numeric = false,
-  placeholder,
-}: {
-  id: string
-  label: string
-  value: string
-  onChange: (v: string) => void
-  type?: string
-  /** Tabular monospace + decimal keypad for prices/quantities. */
-  numeric?: boolean
-  /** Example/format hint shown when the field is empty. */
-  placeholder?: string
-}) {
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={numeric ? "num" : undefined}
-        {...(numeric ? { inputMode: "decimal" as const } : {})}
-        {...(type === "number" ? { min: 0 } : {})}
-      />
     </div>
   )
 }

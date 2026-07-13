@@ -6,7 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypeVar, cast
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, case, func
+from sqlalchemy import ColumnElement, Select, case, func, or_
 from sqlalchemy import select as sa_select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, col, select
@@ -98,6 +98,7 @@ from app.models import (
     UnitState,
     User,
     UserCreate,
+    UserOption,
     UserUpdate,
     get_datetime_utc,
 )
@@ -147,6 +148,15 @@ def count_active_superusers(*, session: Session) -> int:
         .with_for_update()
     )
     return len(session.exec(statement).all())
+
+
+def list_user_options(*, session: Session) -> list[UserOption]:
+    rows = session.exec(
+        select(col(User.id), col(User.full_name), col(User.email)).order_by(
+            func.coalesce(col(User.full_name), col(User.email))
+        )
+    ).all()
+    return [UserOption(id=row[0], full_name=row[1], email=row[2]) for row in rows]
 
 
 _T = TypeVar("_T", bound=SQLModel)
@@ -263,6 +273,16 @@ def seed_system_settings(*, session: Session) -> None:
     session.commit()
 
 
+def _ilike_term(q: str) -> str:
+    """Escape LIKE wildcards in user input before wrapping it as `%q%`.
+
+    Without this, a literal `%` or `_` typed into a catalog search box would
+    be interpreted as a SQL wildcard instead of a literal character.
+    """
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 # --- Supplier -----------------------------------------------------------------
 
 
@@ -278,17 +298,32 @@ def get_supplier(*, session: Session, supplier_id: Any) -> Supplier | None:
     return session.get(Supplier, supplier_id)
 
 
+_S = TypeVar("_S", bound=Select[Any])
+
+
+def _supplier_where(stmt: _S, *, q: str | None, country: str | None) -> _S:
+    if q and q.strip():
+        stmt = stmt.where(col(Supplier.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    if country and country.strip():
+        stmt = stmt.where(col(Supplier.country) == country.strip())
+    return stmt
+
+
 def list_suppliers(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Supplier]:
-    return list(
-        session.exec(
-            select(Supplier)
-            .order_by(col(Supplier.created_at).desc().nulls_last(), col(Supplier.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = _supplier_where(select(Supplier), q=q, country=country)
+    stmt = (
+        stmt.order_by(col(Supplier.created_at).desc().nulls_last(), col(Supplier.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
 
 
 def list_supplier_options(*, session: Session) -> list[SupplierOption]:
@@ -298,8 +333,23 @@ def list_supplier_options(*, session: Session) -> list[SupplierOption]:
     return [SupplierOption(id=row[0], name=row[1]) for row in rows]
 
 
-def count_suppliers(*, session: Session) -> int:
-    return session.exec(select(func.count()).select_from(Supplier)).one()
+def list_supplier_countries(*, session: Session) -> list[str]:
+    rows = session.exec(
+        select(col(Supplier.country))
+        .where(col(Supplier.country).is_not(None))
+        .distinct()
+        .order_by(col(Supplier.country))
+    ).all()
+    return [row for row in rows if row]
+
+
+def count_suppliers(
+    *, session: Session, q: str | None = None, country: str | None = None
+) -> int:
+    stmt = _supplier_where(
+        select(func.count()).select_from(Supplier), q=q, country=country
+    )
+    return session.exec(stmt).one()
 
 
 def update_supplier(
@@ -329,16 +379,17 @@ def get_customer(*, session: Session, customer_id: Any) -> Customer | None:
 
 
 def list_customers(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *, session: Session, q: str | None = None, skip: int = 0, limit: int = 100
 ) -> list[Customer]:
-    return list(
-        session.exec(
-            select(Customer)
-            .order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Customer)
+    if q and q.strip():
+        stmt = stmt.where(col(Customer.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    stmt = (
+        stmt.order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
 
 
 def list_customer_options(*, session: Session) -> list[CustomerOption]:
@@ -348,8 +399,11 @@ def list_customer_options(*, session: Session) -> list[CustomerOption]:
     return [CustomerOption(id=row[0], name=row[1]) for row in rows]
 
 
-def count_customers(*, session: Session) -> int:
-    return session.exec(select(func.count()).select_from(Customer)).one()
+def count_customers(*, session: Session, q: str | None = None) -> int:
+    stmt = select(func.count()).select_from(Customer)
+    if q and q.strip():
+        stmt = stmt.where(col(Customer.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    return session.exec(stmt).one()
 
 
 def update_customer(
@@ -384,17 +438,46 @@ def get_project(*, session: Session, project_id: Any) -> Project | None:
     return session.get(Project, project_id)
 
 
+def _project_filter_clauses(
+    *,
+    q: str | None,
+    customer_id: uuid.UUID | None,
+    status: ProjectStatus | None,
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        term = _ilike_term(q.strip())
+        clauses.append(
+            or_(
+                col(Project.code).ilike(term, escape="\\"),
+                col(Project.name).ilike(term, escape="\\"),
+            )
+        )
+    if customer_id is not None:
+        clauses.append(col(Project.customer_id) == customer_id)
+    if status is not None:
+        clauses.append(col(Project.status) == status)
+    return clauses
+
+
 def list_projects(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    customer_id: uuid.UUID | None = None,
+    status: ProjectStatus | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Project]:
-    return list(
-        session.exec(
-            select(Project)
-            .order_by(col(Project.created_at).desc().nulls_last(), col(Project.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Project)
+    for clause in _project_filter_clauses(q=q, customer_id=customer_id, status=status):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Project.created_at).desc().nulls_last(), col(Project.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
 
 
 def list_project_options(*, session: Session) -> list[ProjectOption]:
@@ -406,8 +489,17 @@ def list_project_options(*, session: Session) -> list[ProjectOption]:
     return [ProjectOption(id=row[0], code=row[1], name=row[2]) for row in rows]
 
 
-def count_projects(*, session: Session) -> int:
-    return session.exec(select(func.count()).select_from(Project)).one()
+def count_projects(
+    *,
+    session: Session,
+    q: str | None = None,
+    customer_id: uuid.UUID | None = None,
+    status: ProjectStatus | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Project)
+    for clause in _project_filter_clauses(q=q, customer_id=customer_id, status=status):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
 
 
 def update_project(
@@ -446,21 +538,70 @@ def get_product(*, session: Session, product_id: Any) -> Product | None:
     return session.get(Product, product_id)
 
 
+def _product_filter_clauses(
+    *,
+    q: str | None,
+    brand: str | None,
+    category: str | None,
+    tracking_mode: TrackingMode | None,
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        term = _ilike_term(q.strip())
+        clauses.append(
+            or_(
+                col(Product.sku).ilike(term, escape="\\"),
+                col(Product.model_name).ilike(term, escape="\\"),
+            )
+        )
+    if brand and brand.strip():
+        clauses.append(col(Product.brand).ilike(_ilike_term(brand.strip()), escape="\\"))
+    if category and category.strip():
+        clauses.append(
+            col(Product.category).ilike(_ilike_term(category.strip()), escape="\\")
+        )
+    if tracking_mode is not None:
+        clauses.append(col(Product.tracking_mode) == tracking_mode)
+    return clauses
+
+
 def list_products(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    tracking_mode: TrackingMode | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Product]:
-    return list(
-        session.exec(
-            select(Product)
-            .order_by(col(Product.created_at).desc().nulls_last(), col(Product.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Product)
+    for clause in _product_filter_clauses(
+        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+    ):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Product.created_at).desc().nulls_last(), col(Product.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
 
 
-def count_products(*, session: Session) -> int:
-    return session.exec(select(func.count()).select_from(Product)).one()
+def count_products(
+    *,
+    session: Session,
+    q: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    tracking_mode: TrackingMode | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Product)
+    for clause in _product_filter_clauses(
+        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+    ):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
 
 
 def list_product_options(

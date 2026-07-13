@@ -6,7 +6,6 @@ import {
   type AuditEntryPublic,
   AuditService,
   type MovementType,
-  UsersService,
 } from "@/client"
 import { AuditDetailSheet } from "@/components/audit/AuditDetailSheet"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
@@ -29,6 +28,7 @@ import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
 import { useProductOptions } from "@/hooks/useProductOptions"
+import { useUserOptions } from "@/hooks/useUserOptions"
 import {
   type AuditFilter,
   buildAuditQuery,
@@ -97,29 +97,18 @@ function Audit() {
     placeholderData: keepPreviousData,
   })
   const listLoading = isPlaceholderData || isFetching
-  // Reference data to resolve UUIDs -> readable names (admin-only screen, so
-  // both reads are permitted). Held steady; the ledger itself is the live data.
-  const { data: users } = useQuery({
-    queryKey: ["users"],
-    queryFn: () => UsersService.readUsers(),
-    staleTime: 5 * 60 * 1000,
-  })
   // No `activeOnly` — the ledger must still reach discontinued products, whose
   // historical movements live in the append-only history forever.
   const { data: options } = useProductOptions()
   const productOptions = options ?? []
-
-  const userList = users?.data ?? []
-  const userNames = useMemo(
-    () => new Map(userList.map((u) => [u.id, u.full_name || u.email])),
-    [userList],
-  )
+  const { data: userOptionsData } = useUserOptions()
+  const userOptions = userOptionsData ?? []
 
   const rows = data?.data ?? []
   const totalCount = data?.count ?? 0
   const summary = useMemo(() => summarizeAudit(rows), [rows])
 
-  const actorName = (id: string) => userNames.get(id) ?? "Unknown user"
+  const actorName = (e: AuditEntryPublic) => e.actor_full_name ?? "Unknown user"
   const itemRef = (e: AuditEntryPublic) => {
     if (e.product_id) return e.product_sku ?? "Part"
     if (e.unit_id) return `Unit ·${e.unit_id.slice(0, 8)}`
@@ -172,25 +161,24 @@ function Audit() {
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={userSelectId}>User</Label>
-          <Select
-            value={filter.actorUserId || ALL}
-            onValueChange={(v) => {
-              setFilter((f) => ({ ...f, actorUserId: v === ALL ? "" : v }))
-              resetPage()
-            }}
-          >
-            <SelectTrigger id={userSelectId} className="w-full sm:w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All users</SelectItem>
-              {userList.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.full_name || u.email}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="w-full sm:w-56">
+            <EntityCombobox
+              id={userSelectId}
+              items={userOptions}
+              value={filter.actorUserId || undefined}
+              onChange={(id) => {
+                setFilter((f) => ({ ...f, actorUserId: id ?? "" }))
+                resetPage()
+              }}
+              getKey={(u) => u.id}
+              getLabel={(u) => u.full_name || u.email}
+              placeholder="All users"
+              searchPlaceholder="Search user…"
+              emptyText="No user found."
+              ariaLabel="Filter by user"
+              allowClear
+            />
+          </div>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={fromId}>From</Label>
@@ -285,9 +273,7 @@ function Audit() {
                 </div>
                 <dl className="text-muted-foreground mt-3 grid grid-cols-[5rem_1fr] gap-y-1 border-t pt-3 text-sm">
                   <dt>By</dt>
-                  <dd className="text-foreground truncate">
-                    {actorName(e.actor_user_id)}
-                  </dd>
+                  <dd className="text-foreground truncate">{actorName(e)}</dd>
                   <dt>Model</dt>
                   <dd className="text-foreground truncate">
                     <div className="truncate">
@@ -345,9 +331,7 @@ function Audit() {
                   <TableCell className="text-muted-foreground">
                     {new Date(e.occurred_at).toLocaleString()}
                   </TableCell>
-                  <TableCell className="font-medium">
-                    {actorName(e.actor_user_id)}
-                  </TableCell>
+                  <TableCell className="font-medium">{actorName(e)}</TableCell>
                   <TableCell>{e.event_type}</TableCell>
                   <TableCell>
                     <div className="truncate">
