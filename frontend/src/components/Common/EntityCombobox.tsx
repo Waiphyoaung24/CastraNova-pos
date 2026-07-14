@@ -1,5 +1,5 @@
 import { Check, ChevronsUpDown } from "lucide-react"
-import { useMemo, useState } from "react"
+import { type UIEvent, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -19,6 +19,8 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { cn } from "@/lib/utils"
 
 const VISIBLE_LIMIT = 50
+/** Reveal the next page once the list is scrolled this close to its end. */
+const REVEAL_MARGIN_PX = 64
 
 export interface EntityComboboxProps<T> {
   items: T[]
@@ -83,6 +85,17 @@ export function EntityCombobox<T>({
     }
   }
 
+  // Options are already fully in memory; the window only caps how many rows we
+  // render, so paging in on scroll is instant and needs no fetch.
+  const revealMore = (event: UIEvent<HTMLDivElement>) => {
+    if (hidden <= 0) return
+    const list = event.currentTarget
+    const distanceToEnd = list.scrollHeight - list.scrollTop - list.clientHeight
+    if (distanceToEnd <= REVEAL_MARGIN_PX) {
+      setShown((current) => current + VISIBLE_LIMIT)
+    }
+  }
+
   return (
     <Popover open={open} onOpenChange={close}>
       <PopoverTrigger asChild>
@@ -108,12 +121,17 @@ export function EntityCombobox<T>({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
+      {/* The popover is a bounded flex column so that CommandList — the only
+          element with `overflow-y-auto` — is the one that actually scrolls.
+          Without `flex flex-col` here, Command's `h-full` resolves against an
+          auto-height parent, the list grows to its full content height, and the
+          popover silently clips it instead (no wheel scroll, hidden footer). */}
       <PopoverContent
-        className="w-(--radix-popover-trigger-width) max-h-[var(--radix-popover-content-available-height)] overflow-hidden p-0"
+        className="flex w-(--radix-popover-trigger-width) max-h-[var(--radix-popover-content-available-height)] flex-col overflow-hidden p-0"
         align="start"
         collisionPadding={8}
       >
-        <Command shouldFilter={false} className="max-h-full">
+        <Command shouldFilter={false} className="min-h-0">
           <CommandInput
             placeholder={searchPlaceholder}
             value={query}
@@ -122,7 +140,10 @@ export function EntityCombobox<T>({
               setShown(VISIBLE_LIMIT)
             }}
           />
-          <CommandList className="scrollbar-thin max-h-none min-h-0 flex-1">
+          <CommandList
+            className="scrollbar-thin min-h-0 flex-1"
+            onScroll={revealMore}
+          >
             <CommandEmpty>{emptyText}</CommandEmpty>
             <CommandGroup>
               {allowClear && (
@@ -169,22 +190,11 @@ export function EntityCombobox<T>({
               })}
             </CommandGroup>
           </CommandList>
-          <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
-            <span className="text-xs text-muted-foreground">
+          {matches.length > VISIBLE_LIMIT && (
+            <div className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground">
               Showing {visible.length} of {matches.length}
-            </span>
-            {hidden > 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setShown((current) => current + VISIBLE_LIMIT)}
-              >
-                Show {Math.min(VISIBLE_LIMIT, hidden)} more
-              </Button>
-            )}
-          </div>
+            </div>
+          )}
         </Command>
       </PopoverContent>
     </Popover>
