@@ -1,5 +1,6 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
+import jwt
 from fastapi.testclient import TestClient
 
 from app.core import security
@@ -91,3 +92,25 @@ def test_expired_refresh_cookie_returns_401(client: TestClient) -> None:
     r = client.post(REFRESH)
     client.cookies.clear()
     assert r.status_code == 401
+
+
+def test_refresh_cookie_max_age_is_12h(client: TestClient) -> None:
+    # The sliding idle window IS the refresh cookie's max-age. Lock it at 12h
+    # so a future TTL edit can't silently change the inactivity boundary.
+    _login(client)
+    r = client.post(REFRESH)
+    assert r.status_code == 200
+    set_cookie = r.headers.get("set-cookie", "").lower()
+    assert "max-age=43200" in set_cookie  # 60 * 12 * 60 seconds
+
+
+def test_access_token_lifetime_is_15_minutes(client: TestClient) -> None:
+    # Access tokens are short-lived; the frontend refreshes them transparently.
+    login = _login(client)
+    access = login.json()["access_token"]
+    payload = jwt.decode(
+        access, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+    )
+    lifetime_s = payload["exp"] - int(datetime.now(timezone.utc).timestamp())
+    # Allow a few seconds of clock/setup slack around the 900s target.
+    assert 870 <= lifetime_s <= 900

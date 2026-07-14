@@ -23,6 +23,7 @@ from app.models import (
     UserRole,
 )
 from app.services import notify
+from tests.utils.utils import assert_no_financial_keys
 
 LINE_TOKEN = "line-secret-token-xyz"
 VIBER_TOKEN = "viber-secret-token-xyz"
@@ -478,3 +479,65 @@ def test_notify_pull_short_targets_bkk_admins_with_pref(
     sample = next(log for log in logs if log.target_user_id == admin.id)
     assert sample.payload["short_line_count"] == 1
     assert sample.payload["pull_id"] == str(pull.id)
+
+
+# --- notify_pull_fulfilled helper (FR-018) ------------------------------------
+
+
+def test_render_text_pull_fulfilled_mentions_pull_id() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.PULL_FULFILLED,
+        payload={"pull_id": "the-pull-id"},
+    )
+    assert "the-pull-id" in text
+    assert "fulfilled" in text.lower()
+
+
+def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import crud
+    from app.models import (
+        CustomerCreate,
+        ProjectCreate,
+        ProjectPull,
+        ProjectPullState,
+    )
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.PULL_FULFILLED)
+    # a staff user opted in must NOT receive (role gate)
+    staff = _make_user(db, role=UserRole.YGN_STAFF)
+    _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.PULL_FULFILLED)
+
+    customer = crud.create_customer(
+        session=db, customer_in=CustomerCreate(name="C")
+    )
+    project = crud.create_project(
+        session=db,
+        project_in=ProjectCreate(
+            code=f"P-{uuid.uuid4().hex[:8]}", name="P", customer_id=customer.id
+        ),
+    )
+    pull = ProjectPull(
+        project_id=project.id,
+        customer_id=customer.id,
+        state=ProjectPullState.FULFILLED,
+        created_by_user_id=admin.id,
+    )
+    db.add(pull)
+    db.commit()
+    db.refresh(pull)
+
+    logs = notify.notify_pull_fulfilled(session=db, pull=pull)
+    targets = {log.target_user_id for log in logs}
+    assert admin.id in targets
+    assert staff.id not in targets
+    assert all(
+        log.event_type == NotificationEvent.PULL_FULFILLED for log in logs
+    )
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["pull_id"] == str(pull.id)
+    # FR-018 requires the FULFILLED push carry NO financial fields.
+    assert_no_financial_keys(sample.payload)

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type KeyboardEvent, useId, useMemo, useState } from "react"
 
@@ -6,11 +6,13 @@ import {
   type AuditEntryPublic,
   AuditService,
   type MovementType,
-  ProductsService,
-  UsersService,
 } from "@/client"
 import { AuditDetailSheet } from "@/components/audit/AuditDetailSheet"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -22,15 +24,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
+import { useProductOptions } from "@/hooks/useProductOptions"
+import { useUserOptions } from "@/hooks/useUserOptions"
 import {
   type AuditFilter,
   buildAuditQuery,
@@ -51,8 +49,6 @@ export const Route = createFileRoute("/_layout/audit")({
 })
 
 const ALL = "ALL"
-// The endpoint's default page size; a full page means there may be older rows.
-const PAGE_LIMIT = 100
 const EVENT_TYPES: MovementType[] = [
   "RECEIVED",
   "SOLD",
@@ -61,54 +57,59 @@ const EVENT_TYPES: MovementType[] = [
   "ADJUSTED_OUT",
 ]
 
+// Column widths in header order (When, By, Event, Model, Source, Qty, Notes);
+// sum to 100%. Long text columns (Model, Notes) absorb the slack + truncate.
+const AUDIT_WIDTHS = ["17%", "17%", "16%", "15%", "12%", "5%", "18%"]
+
 function Audit() {
   const isMobile = useIsMobile()
   const eventId = useId()
   const fromId = useId()
   const toId = useId()
   const userSelectId = useId()
+  const skuSelectId = useId()
   const [filter, setFilter] = useState<AuditFilter>({
     eventType: "",
     fromDate: "",
     toDate: "",
     actorUserId: "",
+    sku: "",
   })
   const [selected, setSelected] = useState<AuditEntryPublic | null>(null)
+  const {
+    page,
+    pageSize,
+    skip,
+    limit,
+    setPage,
+    reset: resetPage,
+  } = usePagination()
 
-  const { data, isPending, isError } = useQuery({
-    queryKey: ["audit", filter],
-    queryFn: () => AuditService.listAudit(buildAuditQuery(filter)),
+  const { data, isError, isPlaceholderData, isFetching } = useQuery({
+    queryKey: ["audit", filter, page],
+    queryFn: () =>
+      AuditService.listAudit({
+        ...buildAuditQuery(filter),
+        skip,
+        limit,
+      }),
+    placeholderData: keepPreviousData,
   })
-  // Reference data to resolve UUIDs -> readable names (admin-only screen, so
-  // both reads are permitted). Held steady; the ledger itself is the live data.
-  const { data: users } = useQuery({
-    queryKey: ["users"],
-    queryFn: () => UsersService.readUsers(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const listLoading = isPlaceholderData || isFetching
+  // No `activeOnly` — the ledger must still reach discontinued products, whose
+  // historical movements live in the append-only history forever.
+  const { data: options } = useProductOptions()
+  const productOptions = options ?? []
+  const { data: userOptionsData } = useUserOptions()
+  const userOptions = userOptionsData ?? []
 
-  const userList = users?.data ?? []
-  const userNames = useMemo(
-    () => new Map(userList.map((u) => [u.id, u.full_name || u.email])),
-    [userList],
-  )
-  const skuById = useMemo(
-    () => new Map((products ?? []).map((p) => [p.id, p.sku])),
-    [products],
-  )
-
-  const rows = data ?? []
+  const rows = data?.data ?? []
+  const totalCount = data?.count ?? 0
   const summary = useMemo(() => summarizeAudit(rows), [rows])
-  const capped = rows.length >= PAGE_LIMIT
 
-  const actorName = (id: string) => userNames.get(id) ?? "Unknown user"
+  const actorName = (e: AuditEntryPublic) => e.actor_full_name ?? "Unknown user"
   const itemRef = (e: AuditEntryPublic) => {
-    if (e.product_id) return skuById.get(e.product_id) ?? "Part"
+    if (e.product_id) return e.product_sku ?? "Part"
     if (e.unit_id) return `Unit ·${e.unit_id.slice(0, 8)}`
     return "—"
   }
@@ -139,9 +140,10 @@ function Audit() {
           <Label htmlFor={eventId}>Event</Label>
           <Select
             value={filter.eventType || ALL}
-            onValueChange={(v) =>
+            onValueChange={(v) => {
               setFilter((f) => ({ ...f, eventType: v === ALL ? "" : v }))
-            }
+              resetPage()
+            }}
           >
             <SelectTrigger id={eventId} className="w-full sm:w-48">
               <SelectValue />
@@ -158,24 +160,24 @@ function Audit() {
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={userSelectId}>User</Label>
-          <Select
-            value={filter.actorUserId || ALL}
-            onValueChange={(v) =>
-              setFilter((f) => ({ ...f, actorUserId: v === ALL ? "" : v }))
-            }
-          >
-            <SelectTrigger id={userSelectId} className="w-full sm:w-56">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All users</SelectItem>
-              {userList.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.full_name || u.email}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="w-full sm:w-56">
+            <EntityCombobox
+              id={userSelectId}
+              items={userOptions}
+              value={filter.actorUserId || undefined}
+              onChange={(id) => {
+                setFilter((f) => ({ ...f, actorUserId: id ?? "" }))
+                resetPage()
+              }}
+              getKey={(u) => u.id}
+              getLabel={(u) => u.full_name || u.email}
+              placeholder="All users"
+              searchPlaceholder="Search user…"
+              emptyText="No user found."
+              ariaLabel="Filter by user"
+              allowClear
+            />
+          </div>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={fromId}>From</Label>
@@ -183,9 +185,10 @@ function Audit() {
             id={fromId}
             type="date"
             value={filter.fromDate}
-            onChange={(e) =>
+            onChange={(e) => {
               setFilter((f) => ({ ...f, fromDate: e.target.value }))
-            }
+              resetPage()
+            }}
             className="w-full sm:w-44"
           />
         </div>
@@ -195,28 +198,46 @@ function Audit() {
             id={toId}
             type="date"
             value={filter.toDate}
-            onChange={(e) =>
+            onChange={(e) => {
               setFilter((f) => ({ ...f, toDate: e.target.value }))
-            }
+              resetPage()
+            }}
             className="w-full sm:w-44"
           />
         </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={skuSelectId}>SKU</Label>
+          <div className="w-full sm:w-56">
+            <EntityCombobox
+              id={skuSelectId}
+              items={productOptions}
+              value={filter.sku || undefined}
+              onChange={(sku) => {
+                setFilter((f) => ({ ...f, sku: sku ?? "" }))
+                resetPage()
+              }}
+              getKey={(o) => o.sku}
+              getLabel={(o) => `${o.model_name} (${o.sku})`}
+              placeholder="All SKUs"
+              searchPlaceholder="Search SKU…"
+              emptyText="No SKU found."
+              ariaLabel="Filter by SKU"
+              allowClear
+            />
+          </div>
+        </div>
       </div>
 
-      {rows.length > 0 ? (
+      {totalCount > 0 ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard
-            label="Movements"
-            value={summary.total}
-            hint={capped ? "latest 100 shown" : undefined}
-          />
+          <StatCard label="Movements" value={totalCount} />
           <StatCard label="Distinct users" value={summary.distinctActors} />
           <StatCard label="Receipts" value={summary.received} />
           <StatCard label="Outflows" value={summary.outflow} />
         </div>
       ) : null}
 
-      {isPending ? (
+      {!data && listLoading ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
           Loading…
         </p>
@@ -251,12 +272,17 @@ function Audit() {
                 </div>
                 <dl className="text-muted-foreground mt-3 grid grid-cols-[5rem_1fr] gap-y-1 border-t pt-3 text-sm">
                   <dt>By</dt>
+                  <dd className="text-foreground truncate">{actorName(e)}</dd>
+                  <dt>Model</dt>
                   <dd className="text-foreground truncate">
-                    {actorName(e.actor_user_id)}
-                  </dd>
-                  <dt>Model name</dt>
-                  <dd className="text-foreground truncate">
-                    {e.product_model_name ?? itemRef(e)}
+                    <div className="truncate">
+                      {e.product_model_name ?? itemRef(e)}
+                    </div>
+                    {e.product_sku ? (
+                      <div className="text-muted-foreground truncate text-xs">
+                        {e.product_sku}
+                      </div>
+                    ) : null}
                   </dd>
                   <dt>Source</dt>
                   <dd>
@@ -277,19 +303,22 @@ function Audit() {
           })}
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>When</TableHead>
-              <TableHead>By</TableHead>
-              <TableHead>Event</TableHead>
-              <TableHead>Model name</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
-              <TableHead>Notes</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <ListTable
+            widths={AUDIT_WIDTHS}
+            minWidth={940}
+            head={
+              <TableRow className="hover:bg-transparent">
+                <TableHead>When</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>Event</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead>Notes</TableHead>
+              </TableRow>
+            }
+          >
             {rows.map((e) => {
               const source = movementSource(e)
               return (
@@ -298,14 +327,21 @@ function Audit() {
                   {...rowProps(e)}
                   className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
                 >
-                  <TableCell className="text-muted-foreground whitespace-nowrap">
+                  <TableCell className="text-muted-foreground">
                     {new Date(e.occurred_at).toLocaleString()}
                   </TableCell>
-                  <TableCell className="font-medium">
-                    {actorName(e.actor_user_id)}
-                  </TableCell>
+                  <TableCell className="font-medium">{actorName(e)}</TableCell>
                   <TableCell>{e.event_type}</TableCell>
-                  <TableCell>{e.product_model_name ?? itemRef(e)}</TableCell>
+                  <TableCell>
+                    <div className="truncate">
+                      {e.product_model_name ?? itemRef(e)}
+                    </div>
+                    {e.product_sku ? (
+                      <div className="text-muted-foreground truncate text-xs">
+                        {e.product_sku}
+                      </div>
+                    ) : null}
+                  </TableCell>
                   <TableCell>
                     {source ? (
                       <Badge variant="outline">{source.label}</Badge>
@@ -314,15 +350,22 @@ function Audit() {
                     )}
                   </TableCell>
                   <TableCell className="num text-right">{e.quantity}</TableCell>
-                  <TableCell className="text-muted-foreground max-w-xs truncate">
+                  <TableCell className="text-muted-foreground">
                     {e.notes ?? "—"}
                   </TableCell>
                 </TableRow>
               )
             })}
-          </TableBody>
-        </Table>
+          </ListTable>
+        </ListShell>
       )}
+
+      <PaginationControls
+        total={totalCount}
+        pageSize={pageSize}
+        page={page}
+        onPageChange={setPage}
+      />
 
       <AuditDetailSheet entry={selected} onClose={() => setSelected(null)} />
     </div>

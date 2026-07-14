@@ -10,6 +10,9 @@ export type UserTableData = UserPublic & {
   isCurrentUser: boolean
 }
 
+/** Column widths for the users DataTable, in column order (sums to 100%). */
+export const USER_COLUMN_WIDTHS = ["26%", "32%", "14%", "16%", "12%"]
+
 export const columns: ColumnDef<UserTableData>[] = [
   {
     accessorKey: "full_name",

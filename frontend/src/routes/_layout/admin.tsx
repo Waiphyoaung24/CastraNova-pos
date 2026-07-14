@@ -1,29 +1,27 @@
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Users } from "lucide-react"
-import { Suspense } from "react"
 
 import { type UserPublic, UsersService } from "@/client"
 import AddUser from "@/components/Admin/AddUser"
-import { columns, type UserTableData } from "@/components/Admin/columns"
+import {
+  columns,
+  USER_COLUMN_WIDTHS,
+  type UserTableData,
+} from "@/components/Admin/columns"
 import { TierBadge } from "@/components/Admin/TierBadge"
 import { UserActionsMenu } from "@/components/Admin/UserActionsMenu"
 import { DataTable } from "@/components/Common/DataTable"
+import { ListShell } from "@/components/Common/ListShell"
 import { PageHeader } from "@/components/Common/PageHeader"
-import PendingUsers from "@/components/Pending/PendingUsers"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import useAuth from "@/hooks/useAuth"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { requireSuperuser } from "@/lib/route-guards"
 import { cn } from "@/lib/utils"
-
-function getUsersQueryOptions() {
-  return {
-    queryFn: () => UsersService.readUsers({ skip: 0, limit: 100 }),
-    queryKey: ["users"],
-  }
-}
 
 export const Route = createFileRoute("/_layout/admin")({
   component: Admin,
@@ -81,38 +79,72 @@ function UserCard({ user }: { user: UserTableData }) {
   )
 }
 
-function UsersTableContent() {
+function UsersTable() {
   const isMobile = useIsMobile()
   const { user: currentUser } = useAuth()
-  const { data: users } = useSuspenseQuery(getUsersQueryOptions())
+  const pagination = usePagination()
+  const {
+    data: users,
+    isPlaceholderData,
+    isFetching,
+  } = useQuery({
+    queryKey: ["users", pagination.skip, pagination.limit],
+    queryFn: () =>
+      UsersService.readUsers({
+        skip: pagination.skip,
+        limit: pagination.limit,
+      }),
+    placeholderData: keepPreviousData,
+  })
+  const loading = isPlaceholderData || isFetching
 
-  const tableData: UserTableData[] = users.data.map((user: UserPublic) => ({
-    ...user,
-    isCurrentUser: currentUser?.id === user.id,
-  }))
+  const tableData: UserTableData[] = (users?.data ?? []).map(
+    (user: UserPublic) => ({
+      ...user,
+      isCurrentUser: currentUser?.id === user.id,
+    }),
+  )
 
   if (isMobile) {
-    return tableData.length === 0 ? (
-      <p className="text-muted-foreground py-6 text-center text-sm">
-        No results found.
-      </p>
-    ) : (
-      <div className="space-y-3">
-        {tableData.map((user) => (
-          <UserCard key={user.id} user={user} />
-        ))}
-      </div>
+    return (
+      <>
+        <ListShell loading={loading}>
+          {tableData.length === 0 ? (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              {users ? "No results found." : "Loading…"}
+            </p>
+          ) : (
+            <div className="space-y-3 p-3">
+              {tableData.map((user) => (
+                <UserCard key={user.id} user={user} />
+              ))}
+            </div>
+          )}
+        </ListShell>
+        <PaginationControls
+          total={users?.count ?? 0}
+          pageSize={pagination.pageSize}
+          page={pagination.page}
+          onPageChange={pagination.setPage}
+        />
+      </>
     )
   }
 
-  return <DataTable columns={columns} data={tableData} />
-}
-
-function UsersTable() {
   return (
-    <Suspense fallback={<PendingUsers />}>
-      <UsersTableContent />
-    </Suspense>
+    <DataTable
+      columns={columns}
+      data={tableData}
+      widths={USER_COLUMN_WIDTHS}
+      minWidth={820}
+      loading={loading}
+      pagination={{
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        total: users?.count ?? 0,
+        onPageChange: pagination.setPage,
+      }}
+    />
   )
 }
 

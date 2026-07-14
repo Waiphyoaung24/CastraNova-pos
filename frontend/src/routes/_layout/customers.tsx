@@ -1,6 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Contact } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useId, useState } from "react"
 
 import {
@@ -8,17 +13,21 @@ import {
   CustomersService,
   type CustomerType,
 } from "@/client"
+import { CountryCombobox } from "@/components/Common/CountryCombobox"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,16 +38,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { buildCustomerPayload, canCreateCustomer } from "@/lib/customer-create"
 import { requireAdmin } from "@/lib/route-guards"
 
@@ -73,6 +77,12 @@ const TYPE_LABEL: Record<CustomerType, string> = {
   END_CUSTOMER: "End customer",
   DEALER: "Dealer",
 }
+
+// Column widths in header order (Name, Type, Contact, Country, edit); sum to 100%.
+const CUSTOMER_WIDTHS = ["32%", "13%", "26%", "17%", "12%"]
+
+// Radix Select forbids an empty-string item value, so "all types" needs a sentinel.
+const ALL_TYPES = "__all__"
 
 /** The full customer field set, shared by the create card and the edit dialog. */
 function CustomerFieldset({
@@ -127,12 +137,11 @@ function CustomerFieldset({
       </div>
       <div className="space-y-2">
         <Label htmlFor={countryId}>Country</Label>
-        <Input
+        <CountryCombobox
           id={countryId}
+          ariaLabel="Country"
           value={draft.country}
-          maxLength={64}
-          placeholder="e.g. Thailand"
-          onChange={(e) => onChange({ country: e.target.value })}
+          onChange={(country) => onChange({ country })}
         />
       </div>
       <div className="space-y-2">
@@ -146,6 +155,75 @@ function CustomerFieldset({
         />
       </div>
     </div>
+  )
+}
+
+/** "New customer" — the register form behind a dialog, off the page header.
+ * Distinct from `components/pos/CustomerCreateDialog.tsx`, the lean inline
+ * quick-create used by the Sale/Tickets pickers — this is the full admin form. */
+function CustomerCreateDialog() {
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<CustomerDraft>(EMPTY_DRAFT)
+
+  const mutation = useMutation<CustomerPublic, Error, void>({
+    mutationFn: () =>
+      CustomersService.createCustomer({
+        requestBody: buildCustomerPayload(draft),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customers"] })
+      queryClient.invalidateQueries({ queryKey: ["customer-countries"] })
+      showSuccessToast("Customer created.")
+      setOpen(false)
+      setDraft(EMPTY_DRAFT)
+    },
+    onError: () =>
+      showErrorToast("Could not create the customer. Please try again."),
+  })
+
+  const canSubmit = canCreateCustomer(draft) && !mutation.isPending
+
+  return (
+    <Dialog
+      open={open}
+      // The Country field's popover combobox is portalled outside this
+      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
+      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
+      // keeps the overlay/close-on-outside-click behavior but drops the
+      // trap, letting the combobox actually receive focus and keystrokes.
+      modal={false}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setDraft(EMPTY_DRAFT)
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button type="button">
+          <Plus className="mr-2 size-4" aria-hidden="true" />
+          New customer
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New customer</DialogTitle>
+        </DialogHeader>
+        <CustomerFieldset
+          draft={draft}
+          onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+        />
+        <DialogFooter>
+          <Button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => mutation.mutate()}
+          >
+            {mutation.isPending ? "Creating…" : "Create customer"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -174,6 +252,7 @@ function CustomerEditDialog({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] })
+      queryClient.invalidateQueries({ queryKey: ["customer-countries"] })
       showSuccessToast("Customer updated.")
       onClose()
     },
@@ -186,6 +265,12 @@ function CustomerEditDialog({
   return (
     <Dialog
       open
+      // The Country field's popover combobox is portalled outside this
+      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
+      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
+      // keeps the overlay/close-on-outside-click behavior but drops the
+      // trap, letting the combobox actually receive focus and keystrokes.
+      modal={false}
       onOpenChange={(next) => {
         if (!next) onClose()
       }}
@@ -213,121 +298,160 @@ function CustomerEditDialog({
 }
 
 function Customers() {
-  const { showSuccessToast, showErrorToast } = useCustomToast()
-  const queryClient = useQueryClient()
   const isMobile = useIsMobile()
-  const [draft, setDraft] = useState<CustomerDraft>(EMPTY_DRAFT)
+  const countryFilterId = useId()
   const [editing, setEditing] = useState<CustomerPublic | null>(null)
+  const [search, setSearch] = useState("")
+  const [country, setCountry] = useState("")
+  const [type, setType] = useState("")
+  const debouncedSearch = useDebouncedValue(search)
+  const pagination = usePagination()
 
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
+  const { data: countryOptions } = useQuery({
+    queryKey: ["customer-countries"],
+    queryFn: () => CustomersService.listCountries(),
   })
 
-  const createMutation = useMutation<CustomerPublic, Error, void>({
-    mutationFn: () =>
-      CustomersService.createCustomer({
-        requestBody: buildCustomerPayload(draft),
+  const {
+    data: customersResponse,
+    isPlaceholderData,
+    isFetching,
+  } = useQuery({
+    queryKey: [
+      "customers",
+      { page: pagination.page, q: debouncedSearch, country, type },
+    ],
+    queryFn: () =>
+      CustomersService.readCustomers({
+        skip: pagination.skip,
+        limit: pagination.limit,
+        q: debouncedSearch || undefined,
+        country: country || undefined,
+        type: (type || undefined) as CustomerType | undefined,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["customers"] })
-      setDraft(EMPTY_DRAFT)
-      showSuccessToast("Customer created.")
-    },
-    onError: () =>
-      showErrorToast("Could not create the customer. Please try again."),
+    placeholderData: keepPreviousData,
   })
-
-  const canCreate = canCreateCustomer(draft) && !createMutation.isPending
+  const customers = customersResponse?.data ?? []
+  const listLoading = isPlaceholderData || isFetching
+  const hasFilters = debouncedSearch || country || type
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Customers"
         description="Create and review customer records used by sales, tickets, and projects."
+        actions={<CustomerCreateDialog />}
       />
 
-      <Alert>
-        <Contact />
-        <AlertTitle>Manage your customers</AlertTitle>
-        <AlertDescription>
-          Add customers here so they're ready to pick during sales, tickets, and
-          projects. Create a record below, then Edit any entry in the list to
-          keep its details current.
-        </AlertDescription>
-      </Alert>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>New customer</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <CustomerFieldset
-            draft={draft}
-            onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
-          />
-          <Button
-            type="button"
-            disabled={!canCreate}
-            onClick={() => createMutation.mutate()}
-          >
-            {createMutation.isPending ? "Creating…" : "Create customer"}
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="flex flex-wrap items-end gap-3">
+        <Input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            pagination.reset()
+          }}
+          placeholder="Search name…"
+          className="w-full sm:w-64"
+        />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={countryFilterId}>Country</Label>
+          <div className="w-full sm:w-56">
+            <EntityCombobox
+              id={countryFilterId}
+              items={countryOptions ?? []}
+              value={country || undefined}
+              onChange={(next) => {
+                setCountry(next ?? "")
+                pagination.reset()
+              }}
+              getKey={(c) => c}
+              getLabel={(c) => c}
+              placeholder="All countries"
+              searchPlaceholder="Search country…"
+              emptyText="No countries in use."
+              ariaLabel="Country filter"
+              allowClear
+            />
+          </div>
+        </div>
+        <Select
+          value={type === "" ? ALL_TYPES : type}
+          onValueChange={(v) => {
+            setType(v === ALL_TYPES ? "" : v)
+            pagination.reset()
+          }}
+        >
+          <SelectTrigger className="w-full sm:w-40" aria-label="Type filter">
+            <SelectValue placeholder="All types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_TYPES}>All types</SelectItem>
+            <SelectItem value="END_CUSTOMER">
+              {TYPE_LABEL.END_CUSTOMER}
+            </SelectItem>
+            <SelectItem value="DEALER">{TYPE_LABEL.DEALER}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold">Existing customers</h2>
-        {(customers ?? []).length === 0 ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            No customers yet.
-          </p>
-        ) : isMobile ? (
-          <div className="space-y-3">
-            {(customers ?? []).map((c) => (
-              <div key={c.id} className="bg-card rounded-lg border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{c.name}</p>
-                    <Badge variant="secondary" className="mt-1">
-                      {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
-                    </Badge>
+        <ListShell loading={listLoading}>
+          {customers.length === 0 ? (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              {!customersResponse
+                ? "Loading…"
+                : hasFilters
+                  ? "No customers match the current filters."
+                  : "No customers yet."}
+            </p>
+          ) : isMobile ? (
+            <div className="space-y-3">
+              {customers.map((c) => (
+                <div key={c.id} className="bg-card rounded-lg border p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{c.name}</p>
+                      <Badge variant="secondary" className="mt-1">
+                        {TYPE_LABEL[c.type ?? "END_CUSTOMER"]}
+                      </Badge>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditing(c)}
+                    >
+                      Edit
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setEditing(c)}
-                  >
-                    Edit
-                  </Button>
+                  <div className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Contact</span>
+                      <span>{c.contact ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Country</span>
+                      <span>{c.country ?? "—"}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Contact</span>
-                    <span>{c.contact ?? "—"}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Country</span>
-                    <span>{c.country ?? "—"}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Country</TableHead>
-                <TableHead className="w-0" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(customers ?? []).map((c) => (
+              ))}
+            </div>
+          ) : (
+            <ListTable
+              widths={CUSTOMER_WIDTHS}
+              minWidth={760}
+              head={
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Country</TableHead>
+                  <TableHead className="text-right" />
+                </TableRow>
+              }
+            >
+              {customers.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell>
@@ -341,7 +465,7 @@ function Customers() {
                   <TableCell className="text-muted-foreground">
                     {c.country ?? "—"}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="overflow-visible! text-right">
                     <Button
                       type="button"
                       variant="outline"
@@ -353,9 +477,15 @@ function Customers() {
                   </TableCell>
                 </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        )}
+            </ListTable>
+          )}
+        </ListShell>
+        <PaginationControls
+          total={customersResponse?.count ?? 0}
+          pageSize={pagination.pageSize}
+          page={pagination.page}
+          onPageChange={pagination.setPage}
+        />
       </div>
 
       {editing && (

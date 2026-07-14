@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { FileSpreadsheet, FileText } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import { ReportsService } from "@/client"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { MetricBar } from "@/components/reports/MetricBar"
 import { StatCard } from "@/components/reports/StatCard"
@@ -11,14 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { downloadReport } from "@/lib/report-download"
@@ -48,15 +43,21 @@ const BUCKET_TONE: Record<string, "default" | "warning" | "danger"> = {
   "90+": "danger",
 }
 
+// Column widths in header order (SKU, Reference, Mode, Received, Qty,
+// Holding days); sum to 100%.
+const HOLDING_WIDTHS = ["18%", "26%", "14%", "16%", "10%", "16%"]
+
 function HoldingPeriod() {
   const { showErrorToast } = useCustomToast()
   const isMobile = useIsMobile()
   const [overThresholdOnly, setOverThresholdOnly] = useState(false)
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["holding-period", overThresholdOnly],
     queryFn: () => ReportsService.holdingPeriod({ overThresholdOnly }),
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
 
   async function handleExport(fmt: ReportFormat) {
     try {
@@ -160,54 +161,59 @@ function HoldingPeriod() {
             : "No stock on hand."}
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {sortedRows.map((r) => (
-            <div
-              key={`${r.product_id}-${r.reference}`}
-              className="bg-card rounded-lg border p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="num font-medium">{r.sku}</span>
-                    <Badge variant="secondary">{r.tracking_mode}</Badge>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
+            {sortedRows.map((r) => (
+              <div
+                key={`${r.product_id}-${r.reference}`}
+                className="bg-card rounded-lg border p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="num font-medium">{r.sku}</span>
+                      <Badge variant="secondary">{r.tracking_mode}</Badge>
+                    </div>
+                    <p className="num text-muted-foreground truncate text-sm">
+                      {r.reference}
+                    </p>
                   </div>
-                  <p className="num text-muted-foreground truncate text-sm">
-                    {r.reference}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  {r.over_threshold ? (
-                    <Badge variant="destructive">{r.holding_days} days</Badge>
-                  ) : (
-                    <span className="num font-semibold">
-                      {r.holding_days} days
-                    </span>
-                  )}
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    qty {r.quantity}
+                  <div className="shrink-0 text-right">
+                    {r.over_threshold ? (
+                      <Badge variant="destructive">{r.holding_days} days</Badge>
+                    ) : (
+                      <span className="num font-semibold">
+                        {r.holding_days} days
+                      </span>
+                    )}
+                    <div className="text-muted-foreground mt-1 text-xs">
+                      qty {r.quantity}
+                    </div>
                   </div>
                 </div>
+                <p className="text-muted-foreground mt-2 text-xs">
+                  Received {new Date(r.received_at).toLocaleDateString()}
+                </p>
               </div>
-              <p className="text-muted-foreground mt-2 text-xs">
-                Received {new Date(r.received_at).toLocaleDateString()}
-              </p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ListShell>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Reference</TableHead>
-              <TableHead>Mode</TableHead>
-              <TableHead>Received</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
-              <TableHead className="text-right">Holding days</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <ListTable
+            widths={HOLDING_WIDTHS}
+            minWidth={820}
+            head={
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>Reference</TableHead>
+                <TableHead>Mode</TableHead>
+                <TableHead>Received</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead className="text-right">Holding days</TableHead>
+              </TableRow>
+            }
+          >
             {sortedRows.map((r) => (
               <TableRow key={`${r.product_id}-${r.reference}`}>
                 <TableCell className="num font-medium">{r.sku}</TableCell>
@@ -228,8 +234,8 @@ function HoldingPeriod() {
                 </TableCell>
               </TableRow>
             ))}
-          </TableBody>
-        </Table>
+          </ListTable>
+        </ListShell>
       )}
     </div>
   )

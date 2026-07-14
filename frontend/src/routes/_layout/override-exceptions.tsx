@@ -1,23 +1,18 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { FileSpreadsheet, FileText } from "lucide-react"
 import { useState } from "react"
 
 import { ReportsService } from "@/client"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { formatDeviationPct } from "@/lib/pricing-overrides"
@@ -53,17 +48,32 @@ function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleDateString() : "—"
 }
 
+// Column widths in header order (Product, Default, Requested, Deviation,
+// Reason, State, Raised, Decided); sum to 100%.
+const EXCEPTION_WIDTHS = [
+  "13%",
+  "11%",
+  "11%",
+  "10%",
+  "20%",
+  "12%",
+  "11%",
+  "12%",
+]
+
 function OverrideExceptions() {
   const { showErrorToast } = useCustomToast()
   const isMobile = useIsMobile()
   const [month, setMonth] = useState(currentMonth())
   const validMonth = isValidMonth(month)
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["override-exceptions", month],
     queryFn: () => ReportsService.overrideExceptions({ month }),
     enabled: validMonth,
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
 
   async function handleExport(fmt: ReportFormat) {
     try {
@@ -157,49 +167,56 @@ function OverrideExceptions() {
           No override requests for {month}.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((r) => (
-            <div key={r.id} className="bg-card rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <span className="num font-medium">{r.sku}</span>
-                <Badge variant="secondary">{r.state}</Badge>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
+            {rows.map((r) => (
+              <div key={r.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="num font-medium">{r.sku}</span>
+                  <Badge variant="secondary">{r.state}</Badge>
+                </div>
+                <div className="mt-2 flex items-baseline gap-2 text-sm">
+                  <span className="num text-muted-foreground line-through">
+                    {formatThb(r.default_price_thb)}
+                  </span>
+                  <span className="num font-semibold">
+                    {formatThb(r.requested_price_thb)}
+                  </span>
+                  <span className="num text-muted-foreground">
+                    ({formatDeviationPct(r.deviation_pct)})
+                  </span>
+                </div>
+                {r.reason ? (
+                  <p className="text-muted-foreground mt-2 text-sm">
+                    {r.reason}
+                  </p>
+                ) : null}
+                <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
+                  Raised {formatDate(r.created_at)} · Decided{" "}
+                  {formatDate(r.decided_at)}
+                </p>
               </div>
-              <div className="mt-2 flex items-baseline gap-2 text-sm">
-                <span className="num text-muted-foreground line-through">
-                  {formatThb(r.default_price_thb)}
-                </span>
-                <span className="num font-semibold">
-                  {formatThb(r.requested_price_thb)}
-                </span>
-                <span className="num text-muted-foreground">
-                  ({formatDeviationPct(r.deviation_pct)})
-                </span>
-              </div>
-              {r.reason ? (
-                <p className="text-muted-foreground mt-2 text-sm">{r.reason}</p>
-              ) : null}
-              <p className="text-muted-foreground mt-2 border-t pt-2 text-xs">
-                Raised {formatDate(r.created_at)} · Decided{" "}
-                {formatDate(r.decided_at)}
-              </p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ListShell>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead className="text-right">Default</TableHead>
-              <TableHead className="text-right">Requested</TableHead>
-              <TableHead className="text-right">Deviation</TableHead>
-              <TableHead>Reason</TableHead>
-              <TableHead>State</TableHead>
-              <TableHead>Raised</TableHead>
-              <TableHead>Decided</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <ListTable
+            widths={EXCEPTION_WIDTHS}
+            minWidth={1020}
+            head={
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead className="text-right">Default</TableHead>
+                <TableHead className="text-right">Requested</TableHead>
+                <TableHead className="text-right">Deviation</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Raised</TableHead>
+                <TableHead>Decided</TableHead>
+              </TableRow>
+            }
+          >
             {rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="num font-medium">{r.sku}</TableCell>
@@ -212,7 +229,7 @@ function OverrideExceptions() {
                 <TableCell className="num text-right">
                   {formatDeviationPct(r.deviation_pct)}
                 </TableCell>
-                <TableCell className="text-muted-foreground max-w-xs truncate">
+                <TableCell className="text-muted-foreground">
                   {r.reason}
                 </TableCell>
                 <TableCell>
@@ -226,8 +243,8 @@ function OverrideExceptions() {
                 </TableCell>
               </TableRow>
             ))}
-          </TableBody>
-        </Table>
+          </ListTable>
+        </ListShell>
       )}
     </div>
   )

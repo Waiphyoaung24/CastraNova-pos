@@ -1,32 +1,27 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Pencil, Truck } from "lucide-react"
+import { Pencil } from "lucide-react"
 import { useId, useState } from "react"
 
-import {
-  type SupplierCreate,
-  type SupplierPublic,
-  SuppliersService,
-} from "@/client"
+import { type SupplierPublic, SuppliersService } from "@/client"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
+import { SupplierCreateDialog } from "@/components/suppliers/SupplierCreateDialog"
 import { SupplierEditDialog } from "@/components/suppliers/SupplierEditDialog"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import useCustomToast from "@/hooks/useCustomToast"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { requireAdmin } from "@/lib/route-guards"
-import { buildSupplierPayload, canCreateSupplier } from "@/lib/supplier-create"
+
+// Column widths in header order (Name, Country, Contact, edit); sum to 100%.
+const SUPPLIER_WIDTHS = ["34%", "18%", "34%", "14%"]
 
 // Admin-only supplier management (FR-003). Create + list, mirroring the
 // Projects screen.
@@ -39,138 +34,124 @@ export const Route = createFileRoute("/_layout/suppliers")({
 })
 
 function Suppliers() {
-  const { showSuccessToast, showErrorToast } = useCustomToast()
-  const queryClient = useQueryClient()
   const isMobile = useIsMobile()
-  const nameId = useId()
-  const countryId = useId()
-  const contactId = useId()
-
-  const [name, setName] = useState("")
-  const [country, setCountry] = useState("")
-  const [contact, setContact] = useState("")
+  const countryFilterId = useId()
   const [editing, setEditing] = useState<SupplierPublic | null>(null)
+  const [search, setSearch] = useState("")
+  const [country, setCountry] = useState("")
+  const debouncedSearch = useDebouncedValue(search)
+  const pagination = usePagination()
 
-  const { data: suppliers } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: () => SuppliersService.readSuppliers(),
+  const { data: countryOptions } = useQuery({
+    queryKey: ["supplier-countries"],
+    queryFn: () => SuppliersService.listCountries(),
   })
 
-  const createMutation = useMutation<SupplierPublic, Error, SupplierCreate>({
-    mutationFn: (payload) =>
-      SuppliersService.createSupplier({ requestBody: payload }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["suppliers"] })
-      setName("")
-      setCountry("")
-      setContact("")
-      showSuccessToast("Supplier created.")
-    },
-    onError: () =>
-      showErrorToast("Could not create the supplier. Please try again."),
+  const {
+    data: suppliersResponse,
+    isPlaceholderData,
+    isFetching,
+  } = useQuery({
+    queryKey: [
+      "suppliers",
+      { page: pagination.page, q: debouncedSearch, country },
+    ],
+    queryFn: () =>
+      SuppliersService.readSuppliers({
+        skip: pagination.skip,
+        limit: pagination.limit,
+        q: debouncedSearch || undefined,
+        country: country || undefined,
+      }),
+    placeholderData: keepPreviousData,
   })
-
-  const draft = { name, country, contact }
-  const canCreate = canCreateSupplier(draft) && !createMutation.isPending
+  const suppliers = suppliersResponse?.data ?? []
+  const listLoading = isPlaceholderData || isFetching
+  const hasFilters = debouncedSearch || country
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Suppliers"
         description="Create and review supplier records used when receiving stock."
+        actions={<SupplierCreateDialog />}
       />
 
-      <Alert>
-        <Truck />
-        <AlertTitle>Manage your suppliers</AlertTitle>
-        <AlertDescription>
-          Add a supplier here so you can pick it when receiving stock. Fill in
-          the details and Create supplier — saved suppliers appear in the list
-          below.
-        </AlertDescription>
-      </Alert>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>New supplier</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor={nameId}>Name</Label>
-            <Input
-              id={nameId}
-              value={name}
-              maxLength={255}
-              placeholder="e.g. Acme Trading Co."
-              onChange={(e) => setName(e.target.value)}
+      <div className="flex flex-wrap items-end gap-3">
+        <Input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            pagination.reset()
+          }}
+          placeholder="Search name…"
+          className="w-full sm:w-64"
+        />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={countryFilterId}>Country</Label>
+          <div className="w-full sm:w-56">
+            <EntityCombobox
+              id={countryFilterId}
+              items={countryOptions ?? []}
+              value={country || undefined}
+              onChange={(next) => {
+                setCountry(next ?? "")
+                pagination.reset()
+              }}
+              getKey={(c) => c}
+              getLabel={(c) => c}
+              placeholder="All countries"
+              searchPlaceholder="Search country…"
+              emptyText="No countries in use."
+              ariaLabel="Country filter"
+              allowClear
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor={countryId}>Country</Label>
-            <Input
-              id={countryId}
-              value={country}
-              maxLength={255}
-              placeholder="e.g. Thailand"
-              onChange={(e) => setCountry(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={contactId}>Contact</Label>
-            <Input
-              id={contactId}
-              value={contact}
-              maxLength={255}
-              placeholder="Phone, email, or contact person"
-              onChange={(e) => setContact(e.target.value)}
-            />
-          </div>
-          <Button
-            type="button"
-            disabled={!canCreate}
-            onClick={() => createMutation.mutate(buildSupplierPayload(draft))}
-          >
-            {createMutation.isPending ? "Creating…" : "Create supplier"}
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold">Existing suppliers</h2>
-        {(suppliers ?? []).length === 0 ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            No suppliers yet.
-          </p>
-        ) : isMobile ? (
-          <div className="space-y-3">
-            {(suppliers ?? []).map((s) => (
-              <div key={s.id} className="bg-card rounded-lg border p-4">
-                <p className="font-medium">{s.name}</p>
-                <div className="mt-2 flex flex-col gap-1 text-sm">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Country</span>
-                    <span>{s.country ?? "—"}</span>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">Contact</span>
-                    <span>{s.contact ?? "—"}</span>
+        <ListShell loading={listLoading}>
+          {suppliers.length === 0 ? (
+            <p className="text-muted-foreground py-6 text-center text-sm">
+              {!suppliersResponse
+                ? "Loading…"
+                : hasFilters
+                  ? "No suppliers match the current filters."
+                  : "No suppliers yet."}
+            </p>
+          ) : isMobile ? (
+            <div className="space-y-3">
+              {suppliers.map((s) => (
+                <div key={s.id} className="bg-card rounded-lg border p-4">
+                  <p className="font-medium">{s.name}</p>
+                  <div className="mt-2 flex flex-col gap-1 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Country</span>
+                      <span>{s.country ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Contact</span>
+                      <span>{s.contact ?? "—"}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Country</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead className="text-right" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(suppliers ?? []).map((s) => (
+              ))}
+            </div>
+          ) : (
+            <ListTable
+              widths={SUPPLIER_WIDTHS}
+              minWidth={700}
+              head={
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Country</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead className="text-right" />
+                </TableRow>
+              }
+            >
+              {suppliers.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell className="text-muted-foreground">
@@ -179,7 +160,7 @@ function Suppliers() {
                   <TableCell className="text-muted-foreground">
                     {s.contact ?? "—"}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="overflow-visible! text-right">
                     <Button
                       type="button"
                       variant="outline"
@@ -192,9 +173,15 @@ function Suppliers() {
                   </TableCell>
                 </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        )}
+            </ListTable>
+          )}
+        </ListShell>
+        <PaginationControls
+          total={suppliersResponse?.count ?? 0}
+          pageSize={pagination.pageSize}
+          page={pagination.page}
+          onPageChange={pagination.setPage}
+        />
       </div>
 
       {editing && (

@@ -190,6 +190,25 @@ export const AuditEntryPublicSchema = {
     title: 'AuditEntryPublic'
 } as const;
 
+export const AuditPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AuditEntryPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AuditPublic'
+} as const;
+
 export const BatchDrillRowSchema = {
     properties: {
         batch_no: {
@@ -315,66 +334,6 @@ export const ChannelSchema = {
     type: 'string',
     enum: ['SALE', 'MAINTENANCE', 'PROJECT'],
     title: 'Channel'
-} as const;
-
-export const ChannelMarginReportSchema = {
-    properties: {
-        month: {
-            type: 'string',
-            title: 'Month'
-        },
-        channels: {
-            items: {
-                '$ref': '#/components/schemas/ChannelMarginRow'
-            },
-            type: 'array',
-            title: 'Channels'
-        },
-        total_revenue_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Revenue Thb'
-        },
-        total_cogs_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Cogs Thb'
-        },
-        total_margin_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Margin Thb'
-        }
-    },
-    type: 'object',
-    required: ['month', 'channels', 'total_revenue_thb', 'total_cogs_thb', 'total_margin_thb'],
-    title: 'ChannelMarginReport'
-} as const;
-
-export const ChannelMarginRowSchema = {
-    properties: {
-        channel: {
-            '$ref': '#/components/schemas/Channel'
-        },
-        revenue_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Revenue Thb'
-        },
-        cogs_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Cogs Thb'
-        },
-        margin_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Margin Thb'
-        }
-    },
-    type: 'object',
-    required: ['channel', 'revenue_thb', 'cogs_thb', 'margin_thb'],
-    title: 'ChannelMarginRow'
 } as const;
 
 export const CustomerCreateSchema = {
@@ -529,6 +488,23 @@ export const CustomerDashboardStaffPublicSchema = {
     title: 'CustomerDashboardStaffPublic'
 } as const;
 
+export const CustomerOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name'],
+    title: 'CustomerOption'
+} as const;
+
 export const CustomerPublicSchema = {
     properties: {
         name: {
@@ -658,6 +634,25 @@ export const CustomerUpdateSchema = {
     title: 'CustomerUpdate'
 } as const;
 
+export const CustomersPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/CustomerPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'CustomersPublic'
+} as const;
+
 export const HTTPValidationErrorSchema = {
     properties: {
         detail: {
@@ -773,6 +768,90 @@ export const LowStockItemPublicSchema = {
     type: 'object',
     required: ['product_id', 'sku', 'model_name', 'tracking_mode', 'on_hand', 'min_stock_level'],
     title: 'LowStockItemPublic'
+} as const;
+
+export const MarginBreakdownReportSchema = {
+    properties: {
+        month: {
+            type: 'string',
+            title: 'Month'
+        },
+        group_by: {
+            '$ref': '#/components/schemas/MarginDimension'
+        },
+        channel: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/Channel'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        rows: {
+            items: {
+                '$ref': '#/components/schemas/MarginBreakdownRow'
+            },
+            type: 'array',
+            title: 'Rows'
+        },
+        total_revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Revenue Thb'
+        },
+        total_cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Cogs Thb'
+        },
+        total_margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Margin Thb'
+        }
+    },
+    type: 'object',
+    required: ['month', 'group_by', 'channel', 'rows', 'total_revenue_thb', 'total_cogs_thb', 'total_margin_thb'],
+    title: 'MarginBreakdownReport'
+} as const;
+
+export const MarginBreakdownRowSchema = {
+    properties: {
+        key: {
+            type: 'string',
+            title: 'Key'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Revenue Thb'
+        },
+        cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Cogs Thb'
+        },
+        margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Margin Thb'
+        }
+    },
+    type: 'object',
+    required: ['key', 'label', 'revenue_thb', 'cogs_thb', 'margin_thb'],
+    title: 'MarginBreakdownRow'
+} as const;
+
+export const MarginDimensionSchema = {
+    type: 'string',
+    enum: ['channel', 'product', 'customer', 'project'],
+    title: 'MarginDimension'
 } as const;
 
 export const MessageSchema = {
@@ -1241,6 +1320,10 @@ export const PricingOverridePublicSchema = {
             format: 'uuid',
             title: 'Product Id'
         },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
         default_price_thb: {
             type: 'string',
             pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
@@ -1299,8 +1382,27 @@ export const PricingOverridePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'target_kind', 'product_id', 'default_price_thb', 'requested_price_thb', 'deviation_pct', 'reason', 'state', 'created_by_user_id', 'created_at', 'decided_by_user_id', 'decided_at'],
+    required: ['id', 'target_kind', 'product_id', 'product_sku', 'default_price_thb', 'requested_price_thb', 'deviation_pct', 'reason', 'state', 'created_by_user_id', 'created_at', 'decided_by_user_id', 'decided_at'],
     title: 'PricingOverridePublic'
+} as const;
+
+export const PricingOverridesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/PricingOverridePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'PricingOverridesPublic'
 } as const;
 
 export const PrivateUserCreateSchema = {
@@ -1428,6 +1530,44 @@ export const ProductCreateSchema = {
     type: 'object',
     required: ['sku', 'model_name', 'retail_price_thb', 'repair_price_thb'],
     title: 'ProductCreate'
+} as const;
+
+export const ProductOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sku: {
+            type: 'string',
+            title: 'Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode'
+        },
+        retail_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Retail Price Thb'
+        },
+        repair_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Repair Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sku', 'model_name', 'tracking_mode', 'retail_price_thb', 'repair_price_thb'],
+    title: 'ProductOption',
+    description: `Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+receive/tickets/pulls product selection). Omits \`specs\` (JSONB) and admin-only
+catalog fields (brand, category, default_min_stock_level); prices are included
+because GET /products already exposes them to the same authenticated audience.`
 } as const;
 
 export const ProductPublicSchema = {
@@ -1654,6 +1794,25 @@ export const ProductUpdateSchema = {
     title: 'ProductUpdate'
 } as const;
 
+export const ProductsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProductPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProductsPublic'
+} as const;
+
 export const ProjectCreateSchema = {
     properties: {
         code: {
@@ -1771,6 +1930,27 @@ export const ProjectDashboardStaffPublicSchema = {
     type: 'object',
     required: ['project', 'pulls'],
     title: 'ProjectDashboardStaffPublic'
+} as const;
+
+export const ProjectOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'code', 'name'],
+    title: 'ProjectOption'
 } as const;
 
 export const ProjectPublicSchema = {
@@ -1965,6 +2145,14 @@ export const ProjectPullLinePublicSchema = {
             format: 'uuid',
             title: 'Product Id'
         },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
         unit_serial: {
             anyOf: [
                 {
@@ -1996,7 +2184,7 @@ export const ProjectPullLinePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'line_kind', 'product_id', 'unit_serial', 'requested_qty', 'fulfilled_qty', 'line_state'],
+    required: ['id', 'line_kind', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'requested_qty', 'fulfilled_qty', 'line_state'],
     title: 'ProjectPullLinePublic'
 } as const;
 
@@ -2118,6 +2306,25 @@ export const ProjectPullStateSchema = {
     type: 'string',
     enum: ['PENDING', 'FULFILLED', 'SHORT', 'CANCELLED'],
     title: 'ProjectPullState'
+} as const;
+
+export const ProjectPullsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProjectPullPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProjectPullsPublic'
 } as const;
 
 export const ProjectStaffPublicSchema = {
@@ -2334,6 +2541,25 @@ export const ProjectUpdateSchema = {
     },
     type: 'object',
     title: 'ProjectUpdate'
+} as const;
+
+export const ProjectsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProjectPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProjectsPublic'
 } as const;
 
 export const ReceivePieceSchema = {
@@ -2946,61 +3172,6 @@ export const SerialSearchResultSchema = {
     title: 'SerialSearchResult'
 } as const;
 
-export const ServiceTicketCloseSchema = {
-    properties: {
-        resolution: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 512
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Resolution'
-        }
-    },
-    type: 'object',
-    title: 'ServiceTicketClose'
-} as const;
-
-export const ServiceTicketCreateSchema = {
-    properties: {
-        customer_id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Customer Id'
-        },
-        issue: {
-            type: 'string',
-            maxLength: 512,
-            minLength: 1,
-            title: 'Issue'
-        },
-        notes: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 512
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Notes'
-        },
-        idempotency_key: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Idempotency Key'
-        }
-    },
-    type: 'object',
-    required: ['customer_id', 'issue', 'idempotency_key'],
-    title: 'ServiceTicketCreate'
-} as const;
-
 export const ServiceTicketPartCreateSchema = {
     properties: {
         sku: {
@@ -3125,6 +3296,61 @@ export const ServiceTicketPublicSchema = {
     type: 'object',
     required: ['id', 'customer_id', 'issue', 'resolution', 'notes', 'opened_at', 'closed_at', 'parts'],
     title: 'ServiceTicketPublic'
+} as const;
+
+export const ServiceTicketRecordRequestSchema = {
+    properties: {
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        issue: {
+            type: 'string',
+            maxLength: 512,
+            minLength: 1,
+            title: 'Issue'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        resolution: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolution'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        parts: {
+            items: {
+                '$ref': '#/components/schemas/ServiceTicketPartCreate'
+            },
+            type: 'array',
+            title: 'Parts'
+        }
+    },
+    type: 'object',
+    required: ['customer_id', 'issue', 'idempotency_key'],
+    title: 'ServiceTicketRecordRequest'
 } as const;
 
 export const SkuBatchAdminPublicSchema = {
@@ -3718,6 +3944,23 @@ export const SupplierCreateSchema = {
     title: 'SupplierCreate'
 } as const;
 
+export const SupplierOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name'],
+    title: 'SupplierOption'
+} as const;
+
 export const SupplierPublicSchema = {
     properties: {
         name: {
@@ -3801,6 +4044,25 @@ export const SupplierUpdateSchema = {
     },
     type: 'object',
     title: 'SupplierUpdate'
+} as const;
+
+export const SuppliersPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/SupplierPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'SuppliersPublic'
 } as const;
 
 export const SyncReviewItemCreateSchema = {
@@ -4190,6 +4452,39 @@ export const UserCreateSchema = {
     type: 'object',
     required: ['email', 'password'],
     title: 'UserCreate'
+} as const;
+
+export const UserOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Full Name'
+        },
+        email: {
+            type: 'string',
+            format: 'email',
+            title: 'Email'
+        }
+    },
+    type: 'object',
+    required: ['id', 'full_name', 'email'],
+    title: 'UserOption',
+    description: `Lightweight actor projection for the audit User filter. Deliberately
+unpaginated: no client parameter can amplify the response size. \`email\` is the
+label fallback because \`full_name\` is nullable. Includes deactivated users,
+whose historical movements still appear in the append-only ledgers.`
 } as const;
 
 export const UserPublicSchema = {

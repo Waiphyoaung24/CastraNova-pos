@@ -99,15 +99,37 @@ services:
 
   frontend:
     restart: "no"
-    ports:
-      - "5173:80"
+    # Dev: run the Vite dev server (HMR) instead of the nginx static build.
+    # Target the Dockerfile's build-stage (it already has deps + source from
+    # `bun install`) and override its command to serve dev on 0.0.0.0:5173.
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      target: build-stage
       args:
         - VITE_API_URL=http://localhost:8000
         - NODE_ENV=development
         - VITE_ENABLE_PWA=false
+    command: ["bun", "run", "dev", "--host", "--port", "5173"]
+    ports:
+      - "5173:5173"
+    # `docker compose watch` pushes source edits into the container; Vite's
+    # in-container watcher then fires HMR. This is the Windows-safe path — host
+    # inotify events don't cross into the Linux container over a bind mount, so
+    # sync (not a volume) is what makes HMR actually fire here.
+    develop:
+      watch:
+        - path: ./frontend/src
+          action: sync
+          target: /app/frontend/src
+        - path: ./frontend/index.html
+          action: sync
+          target: /app/frontend/index.html
+        - path: ./frontend/public
+          action: sync
+          target: /app/frontend/public
+        - path: ./frontend/package.json
+          action: rebuild
 
   playwright:
     build:

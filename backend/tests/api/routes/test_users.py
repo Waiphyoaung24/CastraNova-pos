@@ -594,3 +594,68 @@ def test_can_update_other_fields_on_sole_superuser(
         seed.full_name = original_name
         db.add(seed)
         db.commit()
+
+
+def test_options_not_truncated_at_100(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    emails = [random_email() for _ in range(105)]
+    for email in emails:
+        crud.create_user(
+            session=db, user_create=UserCreate(email=email, password=random_lower_string())
+        )
+
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    option_emails = {o["email"] for o in r.json()}
+    for email in emails:
+        assert email in option_emails
+
+    r = client.get(f"{settings.API_V1_STR}/users/", headers=superuser_token_headers)
+    assert r.status_code == 200
+    assert len(r.json()["data"]) == 100
+
+
+def test_bkk_admin_can_read_user_options(
+    client: TestClient, bkk_admin_token_headers: dict[str, str]
+) -> None:
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=bkk_admin_token_headers)
+    assert r.status_code == 200
+
+
+def test_staff_cannot_read_user_options(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=staff_token_headers)
+    assert r.status_code == 403
+
+
+def test_read_user_options_payload_shape(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    email = random_email()
+    user = crud.create_user(
+        session=db, user_create=UserCreate(email=email, password=random_lower_string())
+    )
+
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    match = next(o for o in r.json() if o["id"] == str(user.id))
+    assert match["email"] == email
+    assert set(match.keys()) == {"id", "full_name", "email"}
+
+
+def test_read_user_options_includes_inactive_user(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    email = random_email()
+    user = crud.create_user(
+        session=db, user_create=UserCreate(email=email, password=random_lower_string())
+    )
+    user.is_active = False
+    db.add(user)
+    db.commit()
+
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    assert email in {o["email"] for o in r.json()}

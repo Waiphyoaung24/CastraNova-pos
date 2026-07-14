@@ -4,19 +4,14 @@ import { AlertTriangle } from "lucide-react"
 import { useState } from "react"
 
 import { type BulkMinStockUpdate, LowStockService } from "@/client"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { useRole } from "@/hooks/useRole"
@@ -35,6 +30,10 @@ export const Route = createFileRoute("/_layout/low-stock")({
   }),
 })
 
+// Column widths in header order (SKU, Model, Type, In stock, Reorder at);
+// sum to 100%.
+const LOW_STOCK_WIDTHS = ["18%", "34%", "14%", "13%", "21%"]
+
 function LowStock() {
   const { isAdmin } = useRole()
   const isMobile = useIsMobile()
@@ -42,10 +41,11 @@ function LowStock() {
   const queryClient = useQueryClient()
   const [edits, setEdits] = useState<Record<string, string>>({})
 
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["low-stock"],
     queryFn: () => LowStockService.readLowStock(),
   })
+  const listLoading = isPlaceholderData || isFetching
 
   const saveMutation = useMutation({
     mutationFn: (body: BulkMinStockUpdate) =>
@@ -116,67 +116,72 @@ function LowStock() {
           Nothing below threshold. 🎉
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((r) => (
-            <div key={r.product_id} className="bg-card rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="num font-medium">{r.sku}</span>
-                    <Badge variant="secondary">
-                      {trackingModeLabel(r.tracking_mode)}
-                    </Badge>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
+            {rows.map((r) => (
+              <div key={r.product_id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="num font-medium">{r.sku}</span>
+                      <Badge variant="secondary">
+                        {trackingModeLabel(r.tracking_mode)}
+                      </Badge>
+                    </div>
+                    <p className="truncate text-sm">{r.model_name}</p>
                   </div>
-                  <p className="truncate text-sm">{r.model_name}</p>
+                  <div className="shrink-0 text-right">
+                    <div className="num text-destructive text-lg leading-none font-semibold">
+                      {r.on_hand}
+                    </div>
+                    <div className="text-muted-foreground mt-1 text-xs">
+                      in stock
+                    </div>
+                  </div>
                 </div>
-                <div className="shrink-0 text-right">
-                  <div className="num text-destructive text-lg leading-none font-semibold">
-                    {r.on_hand}
-                  </div>
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    in stock
-                  </div>
+                <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+                  <span className="text-muted-foreground text-sm">
+                    Reorder at
+                  </span>
+                  {isAdmin ? (
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      aria-label={`Reorder level for ${r.sku}`}
+                      className="num w-24 text-right"
+                      placeholder="e.g. 5"
+                      value={valueFor(r.product_id, r.min_stock_level)}
+                      onChange={(e) =>
+                        setEdits((prev) => ({
+                          ...prev,
+                          [r.product_id]: e.target.value,
+                        }))
+                      }
+                    />
+                  ) : (
+                    <span className="num font-medium">{r.min_stock_level}</span>
+                  )}
                 </div>
               </div>
-              <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
-                <span className="text-muted-foreground text-sm">
-                  Reorder at
-                </span>
-                {isAdmin ? (
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    aria-label={`Reorder level for ${r.sku}`}
-                    className="num w-24 text-right"
-                    placeholder="e.g. 5"
-                    value={valueFor(r.product_id, r.min_stock_level)}
-                    onChange={(e) =>
-                      setEdits((prev) => ({
-                        ...prev,
-                        [r.product_id]: e.target.value,
-                      }))
-                    }
-                  />
-                ) : (
-                  <span className="num font-medium">{r.min_stock_level}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ListShell>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SKU</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead className="text-right">In stock</TableHead>
-              <TableHead className="text-right">Reorder at</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <ListTable
+            widths={LOW_STOCK_WIDTHS}
+            minWidth={760}
+            head={
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">In stock</TableHead>
+                <TableHead className="text-right">Reorder at</TableHead>
+              </TableRow>
+            }
+          >
             {rows.map((r) => (
               <TableRow key={r.product_id}>
                 <TableCell className="num font-medium">{r.sku}</TableCell>
@@ -189,7 +194,7 @@ function LowStock() {
                 <TableCell className="num text-right font-semibold text-destructive">
                   {r.on_hand}
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="overflow-visible! text-right">
                   {isAdmin ? (
                     <Input
                       type="number"
@@ -212,8 +217,8 @@ function LowStock() {
                 </TableCell>
               </TableRow>
             ))}
-          </TableBody>
-        </Table>
+          </ListTable>
+        </ListShell>
       )}
     </div>
   )

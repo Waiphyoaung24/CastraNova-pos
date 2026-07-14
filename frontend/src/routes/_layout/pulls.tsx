@@ -1,23 +1,30 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   DashboardsService,
-  ProductsService,
   type ProjectPullCreate,
   type ProjectPullFulfill,
   type ProjectPullLinePublic,
   type ProjectPullPublic,
   ProjectPullsService,
-  ProjectsService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { PullCreatePanel } from "@/components/pos/PullCreatePanel"
 import { PullFulfillPanel } from "@/components/pos/PullFulfillPanel"
 import { PullQueue, type PullStateFilter } from "@/components/pos/PullQueue"
 import type { ScanFieldHandle } from "@/components/ScanField"
 import useCustomToast from "@/hooks/useCustomToast"
+import { usePagination } from "@/hooks/usePagination"
+import { useProductOptions } from "@/hooks/useProductOptions"
+import { useProjectOptions } from "@/hooks/useProjectOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import {
@@ -35,7 +42,9 @@ import {
   seedFulfillDraft,
   setLineFulfilledQty,
 } from "@/lib/pull-fulfill"
+import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
+import type { Queued } from "@/lib/sync-producer"
 
 export const Route = createFileRoute("/_layout/pulls")({
   component: Pulls,
@@ -60,30 +69,36 @@ function Pulls() {
   const [scanNotice, setScanNotice] = useState<string>("")
   const [isAddingItem, setIsAddingItem] = useState(false)
   const scanRef = useRef<ScanFieldHandle>(null)
+  const {
+    page,
+    pageSize,
+    skip,
+    limit,
+    setPage,
+    reset: resetPage,
+  } = usePagination()
 
-  const { data: pulls } = useQuery({
-    queryKey: ["project-pulls", stateFilter],
+  const { data: pullPage, isPlaceholderData } = useQuery({
+    queryKey: ["project-pulls", stateFilter, { skip, limit }],
     queryFn: () =>
       ProjectPullsService.readProjectPulls({
         state: stateFilter === "ALL" ? undefined : stateFilter,
+        skip,
+        limit,
       }),
+    placeholderData: keepPreviousData,
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   })
   // Admin-only: the full projects list feeds the create-pull picker. Staff never
   // open create mode and GET /projects/ is admin-gated, so gating the query keeps
   // staff from triggering a 403. Display labels come from the pull rows below.
-  const { data: projects } = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => ProjectsService.readProjects(),
-    staleTime: 5 * 60 * 1000,
-    enabled: isAdmin,
-  })
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: projects = [] } = useProjectOptions({ enabled: isAdmin })
+  const { data: products } = useProductOptions({ activeOnly: true })
+  const pulls = pullPage?.data ?? []
+  // isPlaceholderData only, not isFetching: this query polls every 30s, and a
+  // background poll must not pulse the loading bar.
+  const listLoading = isPlaceholderData
 
   // Built from the pull rows (each carries its project/customer labels) so staff,
   // who can't list projects, still render names instead of raw UUIDs.
@@ -100,10 +115,6 @@ function Pulls() {
   const customerLabels = useMemo(
     () => new Map((pulls ?? []).map((p) => [p.customer_id, p.customer_name])),
     [pulls],
-  )
-  const productNames = useMemo(
-    () => new Map((products ?? []).map((p) => [p.id, p.model_name])),
-    [products],
   )
   const selectedPull = useMemo(
     () => (pulls ?? []).find((p) => p.id === selectedPullId),
@@ -132,13 +143,11 @@ function Pulls() {
   const fulfillMutation = useMutation<
     ProjectPullPublic,
     Error,
-    { pullId: string; body: ProjectPullFulfill }
+    Queued<{ pullId: string; requestBody: ProjectPullFulfill }>
   >({
-    mutationFn: ({ pullId, body }) =>
-      ProjectPullsService.fulfillProjectPull({
-        pullId,
-        requestBody: body,
-      }),
+    // No mutationFn: inherit the persisted ["pull-fulfill"] default from
+    // query-client.ts so an offline fulfill is queued and replayed by key.
+    mutationKey: ["pull-fulfill"],
     onSuccess: (pull) => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
       showSuccessToast(
@@ -259,10 +268,15 @@ function Pulls() {
 
   const handleFulfill = useCallback(() => {
     if (!selectedPull) return
-    fulfillMutation.mutate({
-      pullId: selectedPull.id,
-      body: buildFulfillPayload(fulfillDraft),
-    })
+    fulfillMutation.mutate(
+      queued(
+        {
+          pullId: selectedPull.id,
+          requestBody: buildFulfillPayload(fulfillDraft),
+        },
+        crypto.randomUUID(),
+      ),
+    )
   }, [selectedPull, fulfillDraft, fulfillMutation])
 
   return (
@@ -309,7 +323,6 @@ function Pulls() {
             customerLabels.get(selectedPull.customer_id) ??
             selectedPull.customer_id
           }
-          productNames={productNames}
           draft={fulfillDraft}
           scanRef={scanRef}
           onScan={resolve}
@@ -326,18 +339,30 @@ function Pulls() {
         />
       ) : (
         <PullQueue
-          pulls={pulls ?? []}
+          loading={listLoading}
+          pulls={pulls}
           projectLabels={projectLabels}
           customerLabels={customerLabels}
           stateFilter={stateFilter}
           isAdmin={isAdmin}
-          onStateFilterChange={setStateFilter}
+          onStateFilterChange={(next) => {
+            setStateFilter(next)
+            resetPage()
+          }}
           onSelect={handleSelect}
           onCancel={(pullId) => cancelMutation.mutate(pullId)}
           onNew={handleNew}
           isCancelling={cancelMutation.isPending}
         />
       )}
+      {mode === "queue" && !selectedPull ? (
+        <PaginationControls
+          total={pullPage?.count ?? 0}
+          pageSize={pageSize}
+          page={page}
+          onPageChange={setPage}
+        />
+      ) : null}
     </div>
   )
 }

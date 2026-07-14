@@ -1,6 +1,7 @@
 import { ArrowLeft, Minus, Plus, Trash2 } from "lucide-react"
 import { useId, useState } from "react"
-import type { ProductPublic, ProjectPublic } from "@/client/types.gen"
+import type { ProductOption, ProjectOption } from "@/client/types.gen"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -23,12 +24,12 @@ import {
 import type { CreateLine } from "@/lib/pull-create"
 
 interface PullCreatePanelProps {
-  projects: ProjectPublic[]
+  projects: ProjectOption[]
   projectId: string
   onProjectChange: (value: string) => void
   adminNotes: string
   onNotesChange: (value: string) => void
-  products: ProductPublic[]
+  products: ProductOption[]
   onAddItem: (productId: string, qty: number) => void
   addNotice: string
   isAdding: boolean
@@ -57,7 +58,6 @@ export function PullCreatePanel({
   onBack,
   isPending,
 }: PullCreatePanelProps) {
-  const projectSelectId = useId()
   const notesId = useId()
   const itemSelectId = useId()
   const [selectedProductId, setSelectedProductId] = useState("")
@@ -73,23 +73,18 @@ export function PullCreatePanel({
       <h2 className="text-lg font-semibold">New stock request</h2>
 
       <div className="space-y-2">
-        <Label htmlFor={projectSelectId}>Project</Label>
-        <Select value={projectId} onValueChange={onProjectChange}>
-          <SelectTrigger id={projectSelectId} className="w-full">
-            <SelectValue placeholder="Select a project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.length ? (
-              projects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name} ({p.code})
-                </SelectItem>
-              ))
-            ) : (
-              <SelectEmpty>No projects available</SelectEmpty>
-            )}
-          </SelectContent>
-        </Select>
+        <Label>Project</Label>
+        <EntityCombobox
+          items={projects}
+          value={projectId}
+          onChange={(id) => onProjectChange(id ?? "")}
+          getKey={(project) => project.id}
+          getLabel={(project) => `${project.name} (${project.code})`}
+          placeholder="Select a project"
+          searchPlaceholder="Search projects…"
+          emptyText="No projects available"
+          ariaLabel="Project"
+        />
       </div>
 
       <div className="space-y-2">

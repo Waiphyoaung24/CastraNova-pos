@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useState } from "react"
 
 import { type SupplierPublic, SuppliersService } from "@/client"
+import { SupplierFieldset } from "@/components/suppliers/SupplierFieldset"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -11,8 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import useCustomToast from "@/hooks/useCustomToast"
 import {
   buildSupplierPayload,
@@ -29,9 +28,6 @@ export function SupplierEditDialog({
 }) {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
-  const nameId = useId()
-  const countryId = useId()
-  const contactId = useId()
   const [draft, setDraft] = useState<SupplierDraft>({
     name: supplier.name,
     country: supplier.country ?? "",
@@ -46,6 +42,7 @@ export function SupplierEditDialog({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["suppliers"] })
+      queryClient.invalidateQueries({ queryKey: ["supplier-countries"] })
       showSuccessToast("Supplier updated.")
       onClose()
     },
@@ -64,6 +61,12 @@ export function SupplierEditDialog({
   return (
     <Dialog
       open
+      // The Country field's popover combobox is portalled outside this
+      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
+      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
+      // keeps the overlay/close-on-outside-click behavior but drops the
+      // trap, letting the combobox actually receive focus and keystrokes.
+      modal={false}
       onOpenChange={(next) => {
         if (!next) onClose()
       }}
@@ -73,41 +76,10 @@ export function SupplierEditDialog({
           <DialogTitle>Edit supplier</DialogTitle>
           <DialogDescription>Update this supplier's details.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor={nameId}>Name</Label>
-            <Input
-              id={nameId}
-              value={draft.name}
-              placeholder="e.g. Acme Trading Co."
-              onChange={(e) =>
-                setDraft((d) => ({ ...d, name: e.target.value }))
-              }
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={countryId}>Country</Label>
-            <Input
-              id={countryId}
-              value={draft.country}
-              placeholder="e.g. Thailand"
-              onChange={(e) =>
-                setDraft((d) => ({ ...d, country: e.target.value }))
-              }
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={contactId}>Contact</Label>
-            <Input
-              id={contactId}
-              value={draft.contact}
-              placeholder="Phone, email, or contact person"
-              onChange={(e) =>
-                setDraft((d) => ({ ...d, contact: e.target.value }))
-              }
-            />
-          </div>
-        </div>
+        <SupplierFieldset
+          draft={draft}
+          onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
+        />
         <DialogFooter>
           <Button
             type="button"

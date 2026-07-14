@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { RefreshCw } from "lucide-react"
 import { useState } from "react"
@@ -8,6 +13,8 @@ import {
   SyncReviewService,
   type SyncReviewState,
 } from "@/client"
+import { ListShell } from "@/components/Common/ListShell"
+import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -20,14 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
 import { requireAdmin } from "@/lib/route-guards"
@@ -45,6 +45,9 @@ export const Route = createFileRoute("/_layout/sync-review")({
 
 const STATES: SyncReviewState[] = ["PENDING", "RESOLVED", "DISCARDED"]
 
+// Column widths in header order (When, Mutation, Reason, Actions); sum to 100%.
+const SYNC_REVIEW_WIDTHS = ["22%", "28%", "24%", "26%"]
+
 function SyncReview() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const queryClient = useQueryClient()
@@ -54,12 +57,16 @@ function SyncReview() {
   const {
     data,
     isPending: isLoading,
+    isPlaceholderData,
+    isFetching,
     isError,
   } = useQuery({
     queryKey: ["sync-review", state],
     // Review queue reads the full bounded window (backend caps at 500) — no pagination UI yet.
     queryFn: () => SyncReviewService.listSyncReviewItems({ state, limit: 500 }),
+    placeholderData: keepPreviousData,
   })
+  const listLoading = isPlaceholderData || isFetching
 
   const resolveMutation = useMutation({
     mutationFn: ({
@@ -133,71 +140,76 @@ function SyncReview() {
           No {state} items.
         </p>
       ) : isMobile ? (
-        <div className="space-y-3">
-          {rows.map((item) => (
-            <div key={item.id} className="bg-card rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{item.mutation_kind}</p>
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {new Date(item.created_at).toLocaleString()}
-                  </p>
-                </div>
-                <Badge variant="secondary" className="shrink-0">
-                  {item.reason}
-                </Badge>
-              </div>
-              <div className="mt-3 border-t pt-3">
-                {isResolvable(item.state) ? (
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="flex-1"
-                      disabled={resolveMutation.isPending}
-                      onClick={() =>
-                        resolveMutation.mutate({
-                          itemId: item.id,
-                          decision: "RESOLVED",
-                        })
-                      }
-                    >
-                      Keep
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="flex-1"
-                      disabled={resolveMutation.isPending}
-                      onClick={() =>
-                        resolveMutation.mutate({
-                          itemId: item.id,
-                          decision: "DISCARDED",
-                        })
-                      }
-                    >
-                      Discard
-                    </Button>
+        <ListShell loading={listLoading}>
+          <div className="space-y-3">
+            {rows.map((item) => (
+              <div key={item.id} className="bg-card rounded-lg border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{item.mutation_kind}</p>
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      {new Date(item.created_at).toLocaleString()}
+                    </p>
                   </div>
-                ) : (
-                  <Badge variant="secondary">{item.state}</Badge>
-                )}
+                  <Badge variant="secondary" className="shrink-0">
+                    {item.reason}
+                  </Badge>
+                </div>
+                <div className="mt-3 border-t pt-3">
+                  {isResolvable(item.state) ? (
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="flex-1"
+                        disabled={resolveMutation.isPending}
+                        onClick={() =>
+                          resolveMutation.mutate({
+                            itemId: item.id,
+                            decision: "RESOLVED",
+                          })
+                        }
+                      >
+                        Keep
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        disabled={resolveMutation.isPending}
+                        onClick={() =>
+                          resolveMutation.mutate({
+                            itemId: item.id,
+                            decision: "DISCARDED",
+                          })
+                        }
+                      >
+                        Discard
+                      </Button>
+                    </div>
+                  ) : (
+                    <Badge variant="secondary">{item.state}</Badge>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ListShell>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>When</TableHead>
-              <TableHead>Mutation</TableHead>
-              <TableHead>Reason</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <ListShell loading={listLoading}>
+          <ListTable
+            widths={SYNC_REVIEW_WIDTHS}
+            minWidth={780}
+            head={
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Mutation</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            }
+          >
             {rows.map((item) => (
               <TableRow key={item.id}>
                 <TableCell className="text-muted-foreground">
@@ -209,7 +221,7 @@ function SyncReview() {
                 <TableCell>
                   <Badge variant="secondary">{item.reason}</Badge>
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="overflow-visible! text-right">
                   {isResolvable(item.state) ? (
                     <div className="flex justify-end gap-2">
                       <Button
@@ -246,8 +258,8 @@ function SyncReview() {
                 </TableCell>
               </TableRow>
             ))}
-          </TableBody>
-        </Table>
+          </ListTable>
+        </ListShell>
       )}
     </div>
   )

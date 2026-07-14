@@ -3,14 +3,15 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AuditListAuditData, AuditListAuditResponse, CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersGetCustomerDashboardData, CustomersGetCustomerDashboardResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, DashboardsGetStockOnHandData, DashboardsGetStockOnHandResponse, DashboardsGetStockOnHandBatchesData, DashboardsGetStockOnHandBatchesResponse, DashboardsGetStockOnHandUnitsData, DashboardsGetStockOnHandUnitsResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenResponse, LoginLogoutResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, LowStockReadLowStockResponse, LowStockBulkSetMinStockLevelData, LowStockBulkSetMinStockLevelResponse, NotificationsReadNotificationPreferencesResponse, NotificationsUpdateNotificationPreferencesData, NotificationsUpdateNotificationPreferencesResponse, PricingOverridesCreatePricingOverrideData, PricingOverridesCreatePricingOverrideResponse, PricingOverridesListPricingOverridesData, PricingOverridesListPricingOverridesResponse, PricingOverridesDecidePricingOverrideData, PricingOverridesDecidePricingOverrideResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsReadPurchaseCostsResponse, ProductsReadSkuLabelData, ProductsReadSkuLabelResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsSetMinStockLevelData, ProductsSetMinStockLevelResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectPullsCreateProjectPullData, ProjectPullsCreateProjectPullResponse, ProjectPullsReadProjectPullsData, ProjectPullsReadProjectPullsResponse, ProjectPullsReadProjectPullData, ProjectPullsReadProjectPullResponse, ProjectPullsFulfillProjectPullData, ProjectPullsFulfillProjectPullResponse, ProjectPullsCancelProjectPullData, ProjectPullsCancelProjectPullResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsGetProjectDashboardData, ProjectsGetProjectDashboardResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, ReportsChannelMarginData, ReportsChannelMarginResponse, ReportsChannelMarginPdfData, ReportsChannelMarginPdfResponse, ReportsChannelMarginXlsxData, ReportsChannelMarginXlsxResponse, ReportsOverrideExceptionsData, ReportsOverrideExceptionsResponse, ReportsOverrideExceptionsPdfData, ReportsOverrideExceptionsPdfResponse, ReportsOverrideExceptionsXlsxData, ReportsOverrideExceptionsXlsxResponse, ReportsHoldingPeriodData, ReportsHoldingPeriodResponse, ReportsHoldingPeriodPdfData, ReportsHoldingPeriodPdfResponse, ReportsHoldingPeriodXlsxData, ReportsHoldingPeriodXlsxResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, SearchSearchSerialData, SearchSearchSerialResponse, SearchSearchSkuData, SearchSearchSkuResponse, ServiceTicketsOpenServiceTicketData, ServiceTicketsOpenServiceTicketResponse, ServiceTicketsReadServiceTicketData, ServiceTicketsReadServiceTicketResponse, ServiceTicketsAddServiceTicketPartData, ServiceTicketsAddServiceTicketPartResponse, ServiceTicketsCloseServiceTicketData, ServiceTicketsCloseServiceTicketResponse, StockAdjustmentsCreateStockAdjustmentData, StockAdjustmentsCreateStockAdjustmentResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, SyncReviewIngestSyncReviewItemData, SyncReviewIngestSyncReviewItemResponse, SyncReviewListSyncReviewItemsData, SyncReviewListSyncReviewItemsResponse, SyncReviewResolveSyncReviewItemData, SyncReviewResolveSyncReviewItemResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { AuditListAuditData, AuditListAuditResponse, CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersReadOptionsResponse, CustomersListCountriesResponse, CustomersGetCustomerDashboardData, CustomersGetCustomerDashboardResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, DashboardsGetStockOnHandData, DashboardsGetStockOnHandResponse, DashboardsGetStockOnHandBatchesData, DashboardsGetStockOnHandBatchesResponse, DashboardsGetStockOnHandUnitsData, DashboardsGetStockOnHandUnitsResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenResponse, LoginLogoutResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, LowStockReadLowStockResponse, LowStockBulkSetMinStockLevelData, LowStockBulkSetMinStockLevelResponse, NotificationsReadNotificationPreferencesResponse, NotificationsUpdateNotificationPreferencesData, NotificationsUpdateNotificationPreferencesResponse, PricingOverridesCreatePricingOverrideData, PricingOverridesCreatePricingOverrideResponse, PricingOverridesListPricingOverridesData, PricingOverridesListPricingOverridesResponse, PricingOverridesDecidePricingOverrideData, PricingOverridesDecidePricingOverrideResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsReadPurchaseCostsResponse, ProductsReadOptionsData, ProductsReadOptionsResponse, ProductsReadSkuLabelData, ProductsReadSkuLabelResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsSetMinStockLevelData, ProductsSetMinStockLevelResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectPullsCreateProjectPullData, ProjectPullsCreateProjectPullResponse, ProjectPullsReadProjectPullsData, ProjectPullsReadProjectPullsResponse, ProjectPullsReadProjectPullData, ProjectPullsReadProjectPullResponse, ProjectPullsFulfillProjectPullData, ProjectPullsFulfillProjectPullResponse, ProjectPullsCancelProjectPullData, ProjectPullsCancelProjectPullResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsReadOptionsResponse, ProjectsGetProjectDashboardData, ProjectsGetProjectDashboardResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, ReportsChannelMarginData, ReportsChannelMarginResponse, ReportsChannelMarginPdfData, ReportsChannelMarginPdfResponse, ReportsChannelMarginXlsxData, ReportsChannelMarginXlsxResponse, ReportsOverrideExceptionsData, ReportsOverrideExceptionsResponse, ReportsOverrideExceptionsPdfData, ReportsOverrideExceptionsPdfResponse, ReportsOverrideExceptionsXlsxData, ReportsOverrideExceptionsXlsxResponse, ReportsHoldingPeriodData, ReportsHoldingPeriodResponse, ReportsHoldingPeriodPdfData, ReportsHoldingPeriodPdfResponse, ReportsHoldingPeriodXlsxData, ReportsHoldingPeriodXlsxResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, SearchSearchSerialData, SearchSearchSerialResponse, SearchSearchSkuData, SearchSearchSkuResponse, ServiceTicketsRecordServiceTicketData, ServiceTicketsRecordServiceTicketResponse, ServiceTicketsReadServiceTicketData, ServiceTicketsReadServiceTicketResponse, StockAdjustmentsCreateStockAdjustmentData, StockAdjustmentsCreateStockAdjustmentResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersReadOptionsResponse, SuppliersListCountriesResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, SyncReviewIngestSyncReviewItemData, SyncReviewIngestSyncReviewItemResponse, SyncReviewListSyncReviewItemsData, SyncReviewListSyncReviewItemsResponse, SyncReviewResolveSyncReviewItemData, SyncReviewResolveSyncReviewItemResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadOptionsResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
 
 export class AuditService {
     /**
      * List Audit
      * Chronological (occurred_at DESC) audit trail over the append-only
      * unit_movement + part_movement ledgers, admin-only (FR-019). ``product_id``
-     * restricts to PART entries; ``unit_id`` restricts to UNIT entries.
+     * restricts to PART entries; ``unit_id`` restricts to UNIT entries; ``sku``
+     * scopes to a product across whichever ledger it uses.
      * @param data The data for the request.
      * @param data.eventType
      * @param data.fromDate ISO-8601 lower bound, inclusive
@@ -18,9 +19,10 @@ export class AuditService {
      * @param data.actorUserId Restrict to a single acting user
      * @param data.productId Restrict to PART entries for a product
      * @param data.unitId Restrict to UNIT entries for a unit
+     * @param data.sku Restrict to a product's SKU (spans UNIT + PART ledgers)
      * @param data.skip
      * @param data.limit
-     * @returns AuditEntryPublic Successful Response
+     * @returns AuditPublic Successful Response
      * @throws ApiError
      */
     public static listAudit(data: AuditListAuditData = {}): CancelablePromise<AuditListAuditResponse> {
@@ -34,6 +36,7 @@ export class AuditService {
                 actor_user_id: data.actorUserId,
                 product_id: data.productId,
                 unit_id: data.unitId,
+                sku: data.sku,
                 skip: data.skip,
                 limit: data.limit
             },
@@ -48,9 +51,12 @@ export class CustomersService {
     /**
      * Read Customers
      * @param data The data for the request.
+     * @param data.q Case-insensitive substring match on name
+     * @param data.country Exact match on country
+     * @param data.type
      * @param data.skip
      * @param data.limit
-     * @returns CustomerPublic Successful Response
+     * @returns CustomersPublic Successful Response
      * @throws ApiError
      */
     public static readCustomers(data: CustomersReadCustomersData = {}): CancelablePromise<CustomersReadCustomersResponse> {
@@ -58,6 +64,9 @@ export class CustomersService {
             method: 'GET',
             url: '/api/v1/customers/',
             query: {
+                q: data.q,
+                country: data.country,
+                type: data.type,
                 skip: data.skip,
                 limit: data.limit
             },
@@ -83,6 +92,30 @@ export class CustomersService {
             errors: {
                 422: 'Validation Error'
             }
+        });
+    }
+    
+    /**
+     * Read Options
+     * @returns CustomerOption Successful Response
+     * @throws ApiError
+     */
+    public static readOptions(): CancelablePromise<CustomersReadOptionsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/customers/options'
+        });
+    }
+    
+    /**
+     * List Countries
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static listCountries(): CancelablePromise<CustomersListCountriesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/customers/countries'
         });
     }
     
@@ -415,7 +448,7 @@ export class PricingOverridesService {
      * @param data.state
      * @param data.skip
      * @param data.limit
-     * @returns PricingOverridePublic Successful Response
+     * @returns PricingOverridesPublic Successful Response
      * @throws ApiError
      */
     public static listPricingOverrides(data: PricingOverridesListPricingOverridesData = {}): CancelablePromise<PricingOverridesListPricingOverridesResponse> {
@@ -484,9 +517,13 @@ export class ProductsService {
     /**
      * Read Products
      * @param data The data for the request.
+     * @param data.q Case-insensitive substring match on SKU or model name
+     * @param data.brand Case-insensitive substring match on brand
+     * @param data.category Case-insensitive substring match on category
+     * @param data.trackingMode
      * @param data.skip
      * @param data.limit
-     * @returns ProductPublic Successful Response
+     * @returns ProductsPublic Successful Response
      * @throws ApiError
      */
     public static readProducts(data: ProductsReadProductsData = {}): CancelablePromise<ProductsReadProductsResponse> {
@@ -494,6 +531,10 @@ export class ProductsService {
             method: 'GET',
             url: '/api/v1/products/',
             query: {
+                q: data.q,
+                brand: data.brand,
+                category: data.category,
+                tracking_mode: data.trackingMode,
                 skip: data.skip,
                 limit: data.limit
             },
@@ -533,6 +574,31 @@ export class ProductsService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/products/purchase-costs'
+        });
+    }
+    
+    /**
+     * Read Options
+     * Every product as a lightweight picker/lookup projection, ordered by SKU
+     * (FR-019 audit filter; sale/receive/tickets/pulls/pricing-overrides product
+     * selection). Deliberately unpaginated: no client parameter can amplify the
+     * response size, and it is far lighter than the full ProductPublic (no specs
+     * JSONB, no brand/category/timestamps).
+     * @param data The data for the request.
+     * @param data.activeOnly
+     * @returns ProductOption Successful Response
+     * @throws ApiError
+     */
+    public static readOptions(data: ProductsReadOptionsData = {}): CancelablePromise<ProductsReadOptionsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/products/options',
+            query: {
+                active_only: data.activeOnly
+            },
+            errors: {
+                422: 'Validation Error'
+            }
         });
     }
     
@@ -654,7 +720,7 @@ export class ProjectPullsService {
      * @param data.state
      * @param data.skip
      * @param data.limit
-     * @returns ProjectPullPublic Successful Response
+     * @returns ProjectPullsPublic Successful Response
      * @throws ApiError
      */
     public static readProjectPulls(data: ProjectPullsReadProjectPullsData = {}): CancelablePromise<ProjectPullsReadProjectPullsResponse> {
@@ -740,9 +806,12 @@ export class ProjectsService {
     /**
      * Read Projects
      * @param data The data for the request.
+     * @param data.q Case-insensitive substring match on code or name
+     * @param data.customerId Exact customer match
+     * @param data.status
      * @param data.skip
      * @param data.limit
-     * @returns ProjectPublic Successful Response
+     * @returns ProjectsPublic Successful Response
      * @throws ApiError
      */
     public static readProjects(data: ProjectsReadProjectsData = {}): CancelablePromise<ProjectsReadProjectsResponse> {
@@ -750,6 +819,9 @@ export class ProjectsService {
             method: 'GET',
             url: '/api/v1/projects/',
             query: {
+                q: data.q,
+                customer_id: data.customerId,
+                status: data.status,
                 skip: data.skip,
                 limit: data.limit
             },
@@ -775,6 +847,18 @@ export class ProjectsService {
             errors: {
                 422: 'Validation Error'
             }
+        });
+    }
+    
+    /**
+     * Read Options
+     * @returns ProjectOption Successful Response
+     * @throws ApiError
+     */
+    public static readOptions(): CancelablePromise<ProjectsReadOptionsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/projects/options'
         });
     }
     
@@ -889,11 +973,13 @@ export class ReceiptsService {
 export class ReportsService {
     /**
      * Channel Margin
-     * Monthly revenue/COGS/margin by derived channel for ``month`` (YYYY-MM),
-     * admin-only (FR-013, spec §8).
+     * Monthly revenue/COGS/margin grouped by ``group_by`` (channel default),
+     * optionally scoped to one ``channel``; admin-only (FR-013, spec §8).
      * @param data The data for the request.
      * @param data.month Reporting month in YYYY-MM (year 2000-2099)
-     * @returns ChannelMarginReport Successful Response
+     * @param data.groupBy
+     * @param data.channel
+     * @returns MarginBreakdownReport Successful Response
      * @throws ApiError
      */
     public static channelMargin(data: ReportsChannelMarginData): CancelablePromise<ReportsChannelMarginResponse> {
@@ -901,7 +987,9 @@ export class ReportsService {
             method: 'GET',
             url: '/api/v1/reports/channel-margin',
             query: {
-                month: data.month
+                month: data.month,
+                group_by: data.groupBy,
+                channel: data.channel
             },
             errors: {
                 422: 'Validation Error'
@@ -913,6 +1001,8 @@ export class ReportsService {
      * Channel Margin Pdf
      * @param data The data for the request.
      * @param data.month Reporting month in YYYY-MM (year 2000-2099)
+     * @param data.groupBy
+     * @param data.channel
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -921,7 +1011,9 @@ export class ReportsService {
             method: 'GET',
             url: '/api/v1/reports/channel-margin.pdf',
             query: {
-                month: data.month
+                month: data.month,
+                group_by: data.groupBy,
+                channel: data.channel
             },
             errors: {
                 422: 'Validation Error'
@@ -933,6 +1025,8 @@ export class ReportsService {
      * Channel Margin Xlsx
      * @param data The data for the request.
      * @param data.month Reporting month in YYYY-MM (year 2000-2099)
+     * @param data.groupBy
+     * @param data.channel
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -941,7 +1035,9 @@ export class ReportsService {
             method: 'GET',
             url: '/api/v1/reports/channel-margin.xlsx',
             query: {
-                month: data.month
+                month: data.month,
+                group_by: data.groupBy,
+                channel: data.channel
             },
             errors: {
                 422: 'Validation Error'
@@ -1165,16 +1261,18 @@ export class SearchService {
 
 export class ServiceTicketsService {
     /**
-     * Open Service Ticket
+     * Record Service Ticket
+     * Record a maintenance ticket in one atomic, idempotent call: open + parts +
+     * FIFO-consume + close (FR-008). Offline-replay-safe on idempotency_key.
      * @param data The data for the request.
      * @param data.requestBody
      * @returns ServiceTicketPublic Successful Response
      * @throws ApiError
      */
-    public static openServiceTicket(data: ServiceTicketsOpenServiceTicketData): CancelablePromise<ServiceTicketsOpenServiceTicketResponse> {
+    public static recordServiceTicket(data: ServiceTicketsRecordServiceTicketData): CancelablePromise<ServiceTicketsRecordServiceTicketResponse> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/v1/service-tickets',
+            url: '/api/v1/service-tickets/record',
             body: data.requestBody,
             mediaType: 'application/json',
             errors: {
@@ -1197,52 +1295,6 @@ export class ServiceTicketsService {
             path: {
                 ticket_id: data.ticketId
             },
-            errors: {
-                422: 'Validation Error'
-            }
-        });
-    }
-    
-    /**
-     * Add Service Ticket Part
-     * @param data The data for the request.
-     * @param data.ticketId
-     * @param data.requestBody
-     * @returns ServiceTicketPartPublic Successful Response
-     * @throws ApiError
-     */
-    public static addServiceTicketPart(data: ServiceTicketsAddServiceTicketPartData): CancelablePromise<ServiceTicketsAddServiceTicketPartResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/v1/service-tickets/{ticket_id}/parts',
-            path: {
-                ticket_id: data.ticketId
-            },
-            body: data.requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: 'Validation Error'
-            }
-        });
-    }
-    
-    /**
-     * Close Service Ticket
-     * @param data The data for the request.
-     * @param data.ticketId
-     * @param data.requestBody
-     * @returns ServiceTicketPublic Successful Response
-     * @throws ApiError
-     */
-    public static closeServiceTicket(data: ServiceTicketsCloseServiceTicketData): CancelablePromise<ServiceTicketsCloseServiceTicketResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/v1/service-tickets/{ticket_id}/close',
-            path: {
-                ticket_id: data.ticketId
-            },
-            body: data.requestBody,
-            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }
@@ -1278,9 +1330,11 @@ export class SuppliersService {
     /**
      * Read Suppliers
      * @param data The data for the request.
+     * @param data.q Case-insensitive substring match on name
+     * @param data.country Exact match on country
      * @param data.skip
      * @param data.limit
-     * @returns SupplierPublic Successful Response
+     * @returns SuppliersPublic Successful Response
      * @throws ApiError
      */
     public static readSuppliers(data: SuppliersReadSuppliersData = {}): CancelablePromise<SuppliersReadSuppliersResponse> {
@@ -1288,6 +1342,8 @@ export class SuppliersService {
             method: 'GET',
             url: '/api/v1/suppliers/',
             query: {
+                q: data.q,
+                country: data.country,
                 skip: data.skip,
                 limit: data.limit
             },
@@ -1313,6 +1369,30 @@ export class SuppliersService {
             errors: {
                 422: 'Validation Error'
             }
+        });
+    }
+    
+    /**
+     * Read Options
+     * @returns SupplierOption Successful Response
+     * @throws ApiError
+     */
+    public static readOptions(): CancelablePromise<SuppliersReadOptionsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/suppliers/options'
+        });
+    }
+    
+    /**
+     * List Countries
+     * @returns string Successful Response
+     * @throws ApiError
+     */
+    public static listCountries(): CancelablePromise<SuppliersListCountriesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/suppliers/countries'
         });
     }
     
@@ -1453,6 +1533,23 @@ export class UsersService {
             errors: {
                 422: 'Validation Error'
             }
+        });
+    }
+    
+    /**
+     * Read Options
+     * Every user as a lightweight projection for the audit User filter.
+     *
+     * Gated on `get_admin`, not `get_current_active_superuser` like the rest of this
+     * router: `/audit` is itself admin-gated, so a BKK_ADMIN who can read the ledger
+     * must be able to resolve and filter by its actors.
+     * @returns UserOption Successful Response
+     * @throws ApiError
+     */
+    public static readOptions(): CancelablePromise<UsersReadOptionsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/users/options'
         });
     }
     

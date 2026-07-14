@@ -1,19 +1,18 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Boxes, PackagePlus, Trash2 } from "lucide-react"
 import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
-  type ProductPublic,
-  ProductsService,
+  type ProductOption,
   type ReceiptsReceiveQuantityResponse,
   ReceiptsService,
   type ReceiveQuantityRequest,
   type ReceiveSerializedRequest,
   type ReceiveSerializedResponse,
-  SuppliersService,
   type UnitPublic,
 } from "@/client"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { EmptyState } from "@/components/EmptyState"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
@@ -23,14 +22,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectEmpty,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -42,6 +33,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useIsMobile } from "@/hooks/useMobile"
+import { useProductOptions } from "@/hooks/useProductOptions"
+import { useSupplierOptions } from "@/hooks/useSupplierOptions"
+import { queued } from "@/lib/query-client"
 import {
   addPiece,
   buildReceiveQuantityRequest,
@@ -53,6 +47,7 @@ import {
   removePiece,
 } from "@/lib/receive-form"
 import { requireAdmin } from "@/lib/route-guards"
+import type { Queued } from "@/lib/sync-producer"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/_layout/receive")({
@@ -140,16 +135,11 @@ function SerializedTab() {
   }
 
   // Reference data — same staleTime as other reference-data screens.
-  const { data: products = [], isPending: productsPending } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: suppliers = [], isPending: suppliersPending } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: () => SuppliersService.readSuppliers(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products = [], isPending: productsPending } = useProductOptions(
+    { activeOnly: true },
+  )
+  const { data: suppliers = [], isPending: suppliersPending } =
+    useSupplierOptions()
 
   const serializedProducts = products.filter(
     (p) => p.tracking_mode === "SERIALIZED",
@@ -161,7 +151,7 @@ function SerializedTab() {
   const mutation = useMutation<
     ReceiveSerializedResponse,
     Error,
-    ReceiveSerializedRequest
+    Queued<ReceiveSerializedRequest>
   >({
     mutationKey: ["receipts"],
     onSuccess: (data) => {
@@ -208,7 +198,7 @@ function SerializedTab() {
       supplierId,
       crypto.randomUUID(),
     )
-    mutation.mutate(request)
+    mutation.mutate(queued(request, request.idempotency_key))
   }
 
   const canSubmit = canSubmitSerialized(pieces, productId, supplierId)
@@ -227,27 +217,20 @@ function SerializedTab() {
               *
             </span>
           </Label>
-          <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger
-              id="receive-product"
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={productsPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a serialized product" />
-            </SelectTrigger>
-            <SelectContent>
-              {serializedProducts.length ? (
-                serializedProducts.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.model_name} ({p.sku})
-                  </SelectItem>
-                ))
-              ) : (
-                <SelectEmpty>No serialized products available</SelectEmpty>
-              )}
-            </SelectContent>
-          </Select>
+          <EntityCombobox
+            items={serializedProducts}
+            value={productId || undefined}
+            onChange={(value) => setProductId(value ?? "")}
+            getKey={(product) => product.id}
+            getLabel={(product) => `${product.model_name} (${product.sku})`}
+            placeholder="Select a serialized product"
+            searchPlaceholder="Search products…"
+            emptyText="No serialized products available"
+            disabled={productsPending || mutation.isPending}
+            ariaLabel="Product"
+            id="receive-product"
+            required
+          />
         </div>
 
         <div className="flex flex-col gap-2">
@@ -258,27 +241,20 @@ function SerializedTab() {
               *
             </span>
           </Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
-            <SelectTrigger
-              id="receive-supplier"
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={suppliersPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a supplier" />
-            </SelectTrigger>
-            <SelectContent>
-              {suppliers.length ? (
-                suppliers.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))
-              ) : (
-                <SelectEmpty>No suppliers available</SelectEmpty>
-              )}
-            </SelectContent>
-          </Select>
+          <EntityCombobox
+            items={suppliers}
+            value={supplierId || undefined}
+            onChange={(value) => setSupplierId(value ?? "")}
+            getKey={(supplier) => supplier.id}
+            getLabel={(supplier) => supplier.name}
+            placeholder="Select a supplier"
+            searchPlaceholder="Search suppliers…"
+            emptyText="No suppliers available"
+            disabled={suppliersPending || mutation.isPending}
+            ariaLabel="Supplier"
+            id="receive-supplier"
+            required
+          />
         </div>
       </div>
 
@@ -475,16 +451,11 @@ function QuantityTab() {
 
   // Reference data — keyed identically to the Serialized tab, so TanStack Query
   // serves both tabs from one shared cache entry (no duplicate fetch).
-  const { data: products = [], isPending: productsPending } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: suppliers = [], isPending: suppliersPending } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: () => SuppliersService.readSuppliers(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products = [], isPending: productsPending } = useProductOptions(
+    { activeOnly: true },
+  )
+  const { data: suppliers = [], isPending: suppliersPending } =
+    useSupplierOptions()
 
   const quantityProducts = products.filter(
     (p) => p.tracking_mode === "QUANTITY",
@@ -546,30 +517,20 @@ function QuantityTab() {
               *
             </span>
           </Label>
-          <Select
-            value={draft.productId}
-            onValueChange={(v) => patch("productId", v)}
-          >
-            <SelectTrigger
-              id={`${fieldId}-product`}
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={productsPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a quantity product" />
-            </SelectTrigger>
-            <SelectContent>
-              {quantityProducts.length ? (
-                quantityProducts.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.model_name} ({p.sku})
-                  </SelectItem>
-                ))
-              ) : (
-                <SelectEmpty>No quantity products available</SelectEmpty>
-              )}
-            </SelectContent>
-          </Select>
+          <EntityCombobox
+            items={quantityProducts}
+            value={draft.productId || undefined}
+            onChange={(value) => patch("productId", value ?? "")}
+            getKey={(product) => product.id}
+            getLabel={(product) => `${product.model_name} (${product.sku})`}
+            placeholder="Select a quantity product"
+            searchPlaceholder="Search products…"
+            emptyText="No quantity products available"
+            disabled={productsPending || mutation.isPending}
+            ariaLabel="Product"
+            id={`${fieldId}-product`}
+            required
+          />
         </div>
 
         <div className="flex flex-col gap-2">
@@ -580,30 +541,20 @@ function QuantityTab() {
               *
             </span>
           </Label>
-          <Select
-            value={draft.supplierId}
-            onValueChange={(v) => patch("supplierId", v)}
-          >
-            <SelectTrigger
-              id={`${fieldId}-supplier`}
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={suppliersPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a supplier" />
-            </SelectTrigger>
-            <SelectContent>
-              {suppliers.length ? (
-                suppliers.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))
-              ) : (
-                <SelectEmpty>No suppliers available</SelectEmpty>
-              )}
-            </SelectContent>
-          </Select>
+          <EntityCombobox
+            items={suppliers}
+            value={draft.supplierId || undefined}
+            onChange={(value) => patch("supplierId", value ?? "")}
+            getKey={(supplier) => supplier.id}
+            getLabel={(supplier) => supplier.name}
+            placeholder="Select a supplier"
+            searchPlaceholder="Search suppliers…"
+            emptyText="No suppliers available"
+            disabled={suppliersPending || mutation.isPending}
+            ariaLabel="Supplier"
+            id={`${fieldId}-supplier`}
+            required
+          />
         </div>
       </div>
 
@@ -786,7 +737,7 @@ function ReceivedBatchLabels({
   products,
 }: {
   batch: ReceiptsReceiveQuantityResponse
-  products: ProductPublic[]
+  products: ProductOption[]
 }) {
   const product = products.find((p) => p.id === batch.product_id)
   if (!product) return null

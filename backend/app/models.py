@@ -190,6 +190,17 @@ class UsersPublic(SQLModel):
     count: int
 
 
+class UserOption(SQLModel):
+    """Lightweight actor projection for the audit User filter. Deliberately
+    unpaginated: no client parameter can amplify the response size. `email` is the
+    label fallback because `full_name` is nullable. Includes deactivated users,
+    whose historical movements still appear in the append-only ledgers."""
+
+    id: uuid.UUID
+    full_name: str | None
+    email: EmailStr
+
+
 # --- Location -----------------------------------------------------------------
 
 
@@ -269,6 +280,11 @@ class SupplierPublic(SupplierBase):
     id: uuid.UUID
 
 
+class SupplierOption(SQLModel):
+    id: uuid.UUID
+    name: str
+
+
 # --- Customer -----------------------------------------------------------------
 
 
@@ -306,6 +322,11 @@ class CustomerUpdate(SQLModel):
 
 class CustomerPublic(CustomerBase):
     id: uuid.UUID
+
+
+class CustomerOption(SQLModel):
+    id: uuid.UUID
+    name: str
 
 
 # --- Project ------------------------------------------------------------------
@@ -353,6 +374,27 @@ class ProjectUpdate(SQLModel):
 
 class ProjectPublic(ProjectBase):
     id: uuid.UUID
+
+
+class ProjectOption(SQLModel):
+    id: uuid.UUID
+    code: str
+    name: str
+
+
+class CustomersPublic(SQLModel):
+    data: list[CustomerPublic]
+    count: int
+
+
+class SuppliersPublic(SQLModel):
+    data: list[SupplierPublic]
+    count: int
+
+
+class ProjectsPublic(SQLModel):
+    data: list[ProjectPublic]
+    count: int
 
 
 # --- Product ------------------------------------------------------------------
@@ -407,6 +449,25 @@ class ProductUpdate(SQLModel):
 
 class ProductPublic(ProductBase):
     id: uuid.UUID
+
+
+class ProductsPublic(SQLModel):
+    data: list[ProductPublic]
+    count: int
+
+
+class ProductOption(SQLModel):
+    """Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+    receive/tickets/pulls product selection). Omits `specs` (JSONB) and admin-only
+    catalog fields (brand, category, default_min_stock_level); prices are included
+    because GET /products already exposes them to the same authenticated audience."""
+
+    id: uuid.UUID
+    sku: str
+    model_name: str
+    tracking_mode: TrackingMode
+    retail_price_thb: Decimal
+    repair_price_thb: Decimal
 
 
 class ProductPurchaseCost(SQLModel):
@@ -498,13 +559,16 @@ class UnitBase(SQLModel):
 
 class Unit(UnitBase, table=True):
     # UNIQUE(castranova_barcode), UNIQUE(supplier_id, supplier_serial) — serials
-    # may collide across suppliers; index (current_state, product_id) for SOH (§4.8).
+    # may collide across suppliers; index (current_state, product_id) for SOH (§4.8);
+    # standalone product_id index for a state-agnostic lookup (audit SKU filter,
+    # FR-019 — (current_state, product_id) above doesn't serve a product_id-only scan).
     __table_args__ = (
         UniqueConstraint("castranova_barcode", name="uq_unit_castranova_barcode"),
         UniqueConstraint(
             "supplier_id", "supplier_serial", name="uq_unit_supplier_serial"
         ),
         Index("ix_unit_state_product", "current_state", "product_id"),
+        Index("ix_unit_product", "product_id"),
         CheckConstraint(
             "purchase_cost_thb >= 0", name="ck_unit_purchase_cost_nonneg"
         ),
@@ -620,6 +684,11 @@ class AuditEntryPublic(SQLModel):
     unit_supplier_serial: str | None = None
     customer_name: str | None = None  # source sale/ticket/pull customer, if any
     actor_full_name: str | None = None  # acting user's full_name, else email
+
+
+class AuditPublic(SQLModel):
+    data: list[AuditEntryPublic]
+    count: int
 
 
 # --- Serialized receive (FR-005) request/response -----------------------------
@@ -895,6 +964,7 @@ class PricingOverridePublic(SQLModel):
     id: uuid.UUID
     target_kind: OverrideTargetKind
     product_id: uuid.UUID
+    product_sku: str
     default_price_thb: Decimal
     requested_price_thb: Decimal
     deviation_pct: Decimal
@@ -1293,13 +1363,6 @@ class ServiceTicketPublic(SQLModel):
     parts: list[ServiceTicketPartPublic]
 
 
-class ServiceTicketCreate(SQLModel):
-    customer_id: uuid.UUID
-    issue: str = Field(min_length=1, max_length=512)
-    notes: str | None = Field(default=None, max_length=512)
-    idempotency_key: uuid.UUID
-
-
 class ServiceTicketPartCreate(SQLModel):
     sku: str = Field(max_length=64)
     quantity: int = Field(gt=0, le=1_000_000)
@@ -1308,8 +1371,16 @@ class ServiceTicketPartCreate(SQLModel):
     pricing_override_request_id: uuid.UUID | None = None
 
 
-class ServiceTicketClose(SQLModel):
+class ServiceTicketRecordRequest(SQLModel):
+    # One atomic submission: open + parts + FIFO-consume + close in a single
+    # transaction, idempotent on idempotency_key. There is no persistent
+    # open-ticket state (FR-008: opened and closed at the warehouse).
+    customer_id: uuid.UUID
+    issue: str = Field(min_length=1, max_length=512)
+    notes: str | None = Field(default=None, max_length=512)
     resolution: str | None = Field(default=None, max_length=512)
+    idempotency_key: uuid.UUID
+    parts: list[ServiceTicketPartCreate] = Field(default_factory=list)
 
 
 # --- Project pull (FR-009; M012) ----------------------------------------------
@@ -1406,6 +1477,8 @@ class ProjectPullLinePublic(SQLModel):
     id: uuid.UUID
     line_kind: SaleLineKind
     product_id: uuid.UUID
+    product_sku: str
+    model_name: str
     unit_serial: str | None
     requested_qty: int | None
     fulfilled_qty: int
@@ -1430,6 +1503,16 @@ class ProjectPullPublic(SQLModel):
     cancelled_at: datetime | None
     cancelled_by_user_id: uuid.UUID | None
     lines: list[ProjectPullLinePublic]
+
+
+class PricingOverridesPublic(SQLModel):
+    data: list[PricingOverridePublic]
+    count: int
+
+
+class ProjectPullsPublic(SQLModel):
+    data: list[ProjectPullPublic]
+    count: int
 
 
 # --- Notifications (FR-018; M007/M019) ----------------------------------------
@@ -1526,16 +1609,26 @@ class NotificationPreferencesUpdate(SQLModel):
 MoneyTHB = Annotated[Decimal, Field(decimal_places=2, max_digits=14)]
 
 
-class ChannelMarginRow(SQLModel):
-    channel: Channel
+class MarginDimension(str, enum.Enum):
+    CHANNEL = "channel"
+    PRODUCT = "product"
+    CUSTOMER = "customer"
+    PROJECT = "project"
+
+
+class MarginBreakdownRow(SQLModel):
+    key: str  # channel name, entity UUID as str, or "" for the (none) bucket
+    label: str
     revenue_thb: MoneyTHB
     cogs_thb: MoneyTHB
     margin_thb: MoneyTHB
 
 
-class ChannelMarginReport(SQLModel):
+class MarginBreakdownReport(SQLModel):
     month: str  # "YYYY-MM"
-    channels: list[ChannelMarginRow]  # always 3 rows: SALE, MAINTENANCE, PROJECT
+    group_by: MarginDimension
+    channel: Channel | None  # filter applied; None = all channels
+    rows: list[MarginBreakdownRow]
     total_revenue_thb: MoneyTHB
     total_cogs_thb: MoneyTHB
     total_margin_thb: MoneyTHB

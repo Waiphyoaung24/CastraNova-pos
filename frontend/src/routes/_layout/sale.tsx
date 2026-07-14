@@ -1,16 +1,15 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ShoppingCart } from "lucide-react"
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import {
-  type CustomerPublic,
-  CustomersService,
-  ProductsService,
-  type SaleCreateRequest,
-  type SalePublic,
-  type SaleStaffPublic,
+import type {
+  CustomerOption,
+  SaleCreateRequest,
+  SalePublic,
+  SaleStaffPublic,
 } from "@/client"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
@@ -18,17 +17,12 @@ import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectEmpty,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
+import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
 import {
   addScanToCart,
@@ -37,6 +31,7 @@ import {
   removeLine,
   setLineQuantity,
 } from "@/lib/sale-cart"
+import type { Queued } from "@/lib/sync-producer"
 
 export const Route = createFileRoute("/_layout/sale")({
   component: Sale,
@@ -46,15 +41,8 @@ export const Route = createFileRoute("/_layout/sale")({
   }),
 })
 
-const WALK_IN_RE = /walk[\s-]?in/i
-
-/** A walk-in customer is the default counter sale when no specific customer is chosen. */
-function findWalkIn(customers: CustomerPublic[]): CustomerPublic | undefined {
-  return customers.find((c) => WALK_IN_RE.test(c.name))
-}
-
 interface CheckoutPanelProps {
-  customers: CustomerPublic[]
+  customers: CustomerOption[]
   customerId: string
   onCustomerChange: (value: string) => void
   canCheckout: boolean
@@ -79,28 +67,21 @@ function CheckoutPanel({
   isPaused,
   isPending,
 }: CheckoutPanelProps) {
-  const customerSelectId = useId()
-
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor={customerSelectId}>Customer</Label>
-        <Select value={customerId} onValueChange={onCustomerChange}>
-          <SelectTrigger id={customerSelectId} className="w-full">
-            <SelectValue placeholder="Select a customer" />
-          </SelectTrigger>
-          <SelectContent>
-            {customers.length ? (
-              customers.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))
-            ) : (
-              <SelectEmpty>No customers available</SelectEmpty>
-            )}
-          </SelectContent>
-        </Select>
+        <Label>Customer</Label>
+        <EntityCombobox
+          items={customers}
+          value={customerId || undefined}
+          onChange={(value) => onCustomerChange(value ?? "")}
+          getKey={(customer) => customer.id}
+          getLabel={(customer) => customer.name}
+          placeholder="Select a customer"
+          searchPlaceholder="Search customers…"
+          emptyText="No customers available"
+          ariaLabel="Customer"
+        />
         <CustomerCreateDialog onCreated={(c) => onCustomerChange(c.id)} />
       </div>
 
@@ -130,31 +111,14 @@ function Sale() {
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
   const scanRef = useRef<ScanFieldHandle>(null)
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
-    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions({ activeOnly: true })
+  const { data: customers } = useCustomerOptions()
 
   const priceMap = useMemo(
     () =>
       new Map((products ?? []).map((p) => [p.id, Number(p.retail_price_thb)])),
     [products],
   )
-
-  // Default-select the walk-in customer once customers load, if one exists.
-  useEffect(() => {
-    if (!customers || customerId) return
-    const walkIn = findWalkIn(customers)
-    if (walkIn) setCustomerId(walkIn.id)
-  }, [customers, customerId])
 
   const { resolve, result, isSearching, notFound, isError, reset } =
     useScanLookup()
@@ -173,7 +137,7 @@ function Sale() {
   const mutation = useMutation<
     SalePublic | SaleStaffPublic,
     Error,
-    SaleCreateRequest
+    Queued<SaleCreateRequest>
   >({
     // No mutationFn here on purpose: inherit the persisted ["sales"] default from
     // query-client.ts so offline mutations are queued and replayed by key.
@@ -206,7 +170,7 @@ function Sale() {
     // One idempotency key per attempt, captured into the variables passed to
     // mutate — an offline replay reuses the same key so the backend dedupes.
     const request = buildSaleRequest(lines, customerId, crypto.randomUUID())
-    mutation.mutate(request)
+    mutation.mutate(queued(request, request.idempotency_key))
   }, [canCheckout, lines, customerId, mutation])
 
   return (

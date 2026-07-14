@@ -1,12 +1,12 @@
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypeVar, cast
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, case, func
+from sqlalchemy import ColumnElement, Select, case, func, or_
 from sqlalchemy import select as sa_select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, col, select
@@ -23,17 +23,20 @@ from app.models import (
     AuditEntryPublic,
     BatchDrillRow,
     Channel,
-    ChannelMarginReport,
-    ChannelMarginRow,
     CostLine,
     Customer,
     CustomerCreate,
+    CustomerOption,
+    CustomerType,
     CustomerUpdate,
     HoldingPeriodReport,
     HoldingPeriodRow,
     LineState,
     Location,
     LowStockItemPublic,
+    MarginBreakdownReport,
+    MarginBreakdownRow,
+    MarginDimension,
     MovementType,
     NotificationPreference,
     NotificationPreferenceUpdate,
@@ -48,9 +51,11 @@ from app.models import (
     PricingOverrideRequest,
     Product,
     ProductCreate,
+    ProductOption,
     ProductUpdate,
     Project,
     ProjectCreate,
+    ProjectOption,
     ProjectPull,
     ProjectPullCreate,
     ProjectPullFulfillLine,
@@ -67,6 +72,7 @@ from app.models import (
     SerialSearchResult,
     ServiceTicket,
     ServiceTicketPart,
+    ServiceTicketPartCreate,
     SkuBatchAdminPublic,
     SkuBatchPublic,
     SkuConsumptionDrawAdminPublic,
@@ -80,6 +86,7 @@ from app.models import (
     StockOnHandRow,
     Supplier,
     SupplierCreate,
+    SupplierOption,
     SupplierUpdate,
     SyncReviewItem,
     SyncReviewItemCreate,
@@ -92,6 +99,7 @@ from app.models import (
     UnitState,
     User,
     UserCreate,
+    UserOption,
     UserUpdate,
     get_datetime_utc,
 )
@@ -141,6 +149,15 @@ def count_active_superusers(*, session: Session) -> int:
         .with_for_update()
     )
     return len(session.exec(statement).all())
+
+
+def list_user_options(*, session: Session) -> list[UserOption]:
+    rows = session.exec(
+        select(col(User.id), col(User.full_name), col(User.email)).order_by(
+            func.coalesce(col(User.full_name), col(User.email))
+        )
+    ).all()
+    return [UserOption(id=row[0], full_name=row[1], email=row[2]) for row in rows]
 
 
 _T = TypeVar("_T", bound=SQLModel)
@@ -257,6 +274,16 @@ def seed_system_settings(*, session: Session) -> None:
     session.commit()
 
 
+def _ilike_term(q: str) -> str:
+    """Escape LIKE wildcards in user input before wrapping it as `%q%`.
+
+    Without this, a literal `%` or `_` typed into a catalog search box would
+    be interpreted as a SQL wildcard instead of a literal character.
+    """
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 # --- Supplier -----------------------------------------------------------------
 
 
@@ -272,17 +299,58 @@ def get_supplier(*, session: Session, supplier_id: Any) -> Supplier | None:
     return session.get(Supplier, supplier_id)
 
 
+_S = TypeVar("_S", bound=Select[Any])
+
+
+def _supplier_where(stmt: _S, *, q: str | None, country: str | None) -> _S:
+    if q and q.strip():
+        stmt = stmt.where(col(Supplier.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    if country and country.strip():
+        stmt = stmt.where(col(Supplier.country) == country.strip())
+    return stmt
+
+
 def list_suppliers(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Supplier]:
-    return list(
-        session.exec(
-            select(Supplier)
-            .order_by(col(Supplier.created_at).desc().nulls_last(), col(Supplier.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = _supplier_where(select(Supplier), q=q, country=country)
+    stmt = (
+        stmt.order_by(col(Supplier.created_at).desc().nulls_last(), col(Supplier.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def list_supplier_options(*, session: Session) -> list[SupplierOption]:
+    rows = session.exec(
+        select(col(Supplier.id), col(Supplier.name)).order_by(col(Supplier.name))
+    ).all()
+    return [SupplierOption(id=row[0], name=row[1]) for row in rows]
+
+
+def list_supplier_countries(*, session: Session) -> list[str]:
+    rows = session.exec(
+        select(col(Supplier.country))
+        .where(col(Supplier.country).is_not(None))
+        .distinct()
+        .order_by(col(Supplier.country))
+    ).all()
+    return [row for row in rows if row]
+
+
+def count_suppliers(
+    *, session: Session, q: str | None = None, country: str | None = None
+) -> int:
+    stmt = _supplier_where(
+        select(func.count()).select_from(Supplier), q=q, country=country
+    )
+    return session.exec(stmt).one()
 
 
 def update_supplier(
@@ -311,17 +379,67 @@ def get_customer(*, session: Session, customer_id: Any) -> Customer | None:
     return session.get(Customer, customer_id)
 
 
+def _customer_filter_clauses(
+    *, q: str | None, country: str | None, type: CustomerType | None
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        clauses.append(col(Customer.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    if country and country.strip():
+        clauses.append(col(Customer.country) == country.strip())
+    if type is not None:
+        clauses.append(col(Customer.type) == type)
+    return clauses
+
+
 def list_customers(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    type: CustomerType | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Customer]:
-    return list(
-        session.exec(
-            select(Customer)
-            .order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Customer)
+    for clause in _customer_filter_clauses(q=q, country=country, type=type):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def list_customer_options(*, session: Session) -> list[CustomerOption]:
+    rows = session.exec(
+        select(col(Customer.id), col(Customer.name)).order_by(col(Customer.name))
+    ).all()
+    return [CustomerOption(id=row[0], name=row[1]) for row in rows]
+
+
+def list_customer_countries(*, session: Session) -> list[str]:
+    rows = session.exec(
+        select(col(Customer.country))
+        .where(col(Customer.country).is_not(None))
+        .distinct()
+        .order_by(col(Customer.country))
+    ).all()
+    return [row for row in rows if row]
+
+
+def count_customers(
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    type: CustomerType | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Customer)
+    for clause in _customer_filter_clauses(q=q, country=country, type=type):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
 
 
 def update_customer(
@@ -356,17 +474,68 @@ def get_project(*, session: Session, project_id: Any) -> Project | None:
     return session.get(Project, project_id)
 
 
+def _project_filter_clauses(
+    *,
+    q: str | None,
+    customer_id: uuid.UUID | None,
+    status: ProjectStatus | None,
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        term = _ilike_term(q.strip())
+        clauses.append(
+            or_(
+                col(Project.code).ilike(term, escape="\\"),
+                col(Project.name).ilike(term, escape="\\"),
+            )
+        )
+    if customer_id is not None:
+        clauses.append(col(Project.customer_id) == customer_id)
+    if status is not None:
+        clauses.append(col(Project.status) == status)
+    return clauses
+
+
 def list_projects(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    customer_id: uuid.UUID | None = None,
+    status: ProjectStatus | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Project]:
-    return list(
-        session.exec(
-            select(Project)
-            .order_by(col(Project.created_at).desc().nulls_last(), col(Project.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Project)
+    for clause in _project_filter_clauses(q=q, customer_id=customer_id, status=status):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Project.created_at).desc().nulls_last(), col(Project.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def list_project_options(*, session: Session) -> list[ProjectOption]:
+    rows = session.exec(
+        select(col(Project.id), col(Project.code), col(Project.name))
+        .where(Project.status == ProjectStatus.ACTIVE)
+        .order_by(col(Project.code))
+    ).all()
+    return [ProjectOption(id=row[0], code=row[1], name=row[2]) for row in rows]
+
+
+def count_projects(
+    *,
+    session: Session,
+    q: str | None = None,
+    customer_id: uuid.UUID | None = None,
+    status: ProjectStatus | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Project)
+    for clause in _project_filter_clauses(q=q, customer_id=customer_id, status=status):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
 
 
 def update_project(
@@ -405,17 +574,101 @@ def get_product(*, session: Session, product_id: Any) -> Product | None:
     return session.get(Product, product_id)
 
 
+def _product_filter_clauses(
+    *,
+    q: str | None,
+    brand: str | None,
+    category: str | None,
+    tracking_mode: TrackingMode | None,
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        term = _ilike_term(q.strip())
+        clauses.append(
+            or_(
+                col(Product.sku).ilike(term, escape="\\"),
+                col(Product.model_name).ilike(term, escape="\\"),
+            )
+        )
+    if brand and brand.strip():
+        clauses.append(col(Product.brand).ilike(_ilike_term(brand.strip()), escape="\\"))
+    if category and category.strip():
+        clauses.append(
+            col(Product.category).ilike(_ilike_term(category.strip()), escape="\\")
+        )
+    if tracking_mode is not None:
+        clauses.append(col(Product.tracking_mode) == tracking_mode)
+    return clauses
+
+
 def list_products(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    tracking_mode: TrackingMode | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Product]:
-    return list(
-        session.exec(
-            select(Product)
-            .order_by(col(Product.created_at).desc().nulls_last(), col(Product.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Product)
+    for clause in _product_filter_clauses(
+        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+    ):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Product.created_at).desc().nulls_last(), col(Product.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def count_products(
+    *,
+    session: Session,
+    q: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    tracking_mode: TrackingMode | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Product)
+    for clause in _product_filter_clauses(
+        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+    ):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
+
+
+def list_product_options(
+    *, session: Session, active_only: bool = False
+) -> list[ProductOption]:
+    """Every product as a lightweight {id, sku, model_name, tracking_mode, prices}
+    projection, ordered by SKU. Unpaginated single round-trip for pickers/lookups
+    across the app; includes inactive products, whose historical movements still
+    appear in the append-only ledgers."""
+    statement = select(  # type: ignore[call-overload]
+            col(Product.id),
+            col(Product.sku),
+            col(Product.model_name),
+            col(Product.tracking_mode),
+            col(Product.retail_price_thb),
+            col(Product.repair_price_thb),
+        ).order_by(col(Product.sku))
+    if active_only:
+        statement = statement.where(Product.is_active)
+    rows = session.exec(statement).all()
+    return [
+        ProductOption(
+            id=r[0],
+            sku=r[1],
+            model_name=r[2],
+            tracking_mode=r[3],
+            retail_price_thb=r[4],
+            repair_price_thb=r[5],
+        )
+        for r in rows
+    ]
 
 
 def latest_purchase_costs(*, session: Session) -> dict[uuid.UUID, Decimal]:
@@ -1019,6 +1272,15 @@ def list_pricing_overrides(
     return list(session.exec(stmt).all())
 
 
+def count_pricing_overrides(
+    *, session: Session, state: OverrideState | None = None
+) -> int:
+    statement = select(func.count()).select_from(PricingOverrideRequest)
+    if state is not None:
+        statement = statement.where(PricingOverrideRequest.state == state)
+    return session.exec(statement).one()
+
+
 def decide_pricing_override(
     *,
     session: Session,
@@ -1128,8 +1390,9 @@ def override_exceptions_report(
     *, session: Session, year: int, month: int
 ) -> OverrideExceptionsReport:
     """Monthly list of pricing overrides requested in [month_start, next) UTC,
-    with per-state counts (FR-010, spec §8). Grouped by created_at (request
-    date); each row carries the product SKU for readability."""
+    with per-state counts (FR-010, spec §8). Sorted by deviation size (largest
+    first); ties break by created_at ascending, then id for a total order. Each
+    row carries the product SKU for readability."""
     start = datetime(year, month, 1, tzinfo=timezone.utc)
     if month == 12:
         end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
@@ -1143,7 +1406,11 @@ def override_exceptions_report(
             col(PricingOverrideRequest.created_at) >= start,
             col(PricingOverrideRequest.created_at) < end,
         )
-        .order_by(col(PricingOverrideRequest.created_at))
+        .order_by(
+            col(PricingOverrideRequest.deviation_pct).desc(),
+            col(PricingOverrideRequest.created_at).asc(),
+            col(PricingOverrideRequest.id),
+        )
     ).all()
 
     counts: dict[OverrideState, int] = dict.fromkeys(OverrideState, 0)
@@ -2344,177 +2611,179 @@ def list_service_ticket_parts(
     )
 
 
-def open_service_ticket(
+def record_service_ticket(
     *,
     session: Session,
     customer_id: uuid.UUID,
     issue: str,
+    parts: list[ServiceTicketPartCreate],
     idempotency_key: uuid.UUID,
-    created_by_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
     notes: str | None = None,
+    resolution: str | None = None,
 ) -> ServiceTicket:
-    """Open a maintenance ticket. Idempotent on idempotency_key — replaying an
-    offline ticket-open returns the existing ticket without re-validating (FR-008,
-    S6). Customer existence is only checked on a genuine create."""
-    existing = session.exec(
+    """Record a maintenance ticket in one transaction (FR-008, Flow C): create the
+    ticket, add its parts, FIFO-consume each from stock (one
+    part_movement(MAINTENANCE_OUT) + cost_line[] per line), and stamp closed_at —
+    it is created already closed. Idempotent on idempotency_key: an offline replay
+    returns the existing ticket without re-consuming (S6). There is no persistent
+    open-ticket state.
+
+    Price defaults to the product's repair_price_thb; a different price requires an
+    approved SERVICE_TICKET_PART override (FR-010 / Flow C.3) — no free-form price
+    bypass. Insufficient stock on any line 409s and commits nothing. Mirrors
+    create_sale's atomic-idempotent shape."""
+    replay = session.exec(
         select(ServiceTicket).where(
             ServiceTicket.idempotency_key == idempotency_key
         )
     ).first()
-    if existing is not None:
+    if replay is not None:
         _assert_replay_actor(
-            stored_user_id=existing.created_by_user_id,
-            caller_user_id=created_by_user_id,
+            stored_user_id=replay.created_by_user_id,
+            caller_user_id=actor_user_id,
         )
-        return existing
+        return replay
+
     if not session.get(Customer, customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
-    ticket, replayed = get_or_replay(
-        session=session,
-        statement=select(ServiceTicket).where(
-            ServiceTicket.idempotency_key == idempotency_key
-        ),
-        build=lambda: ServiceTicket(
-            customer_id=customer_id,
-            issue=issue,
-            notes=notes,
-            created_by_user_id=created_by_user_id,
-            idempotency_key=idempotency_key,
-        ),
+
+    # Validate every line up front (fail fast, no orphan ticket). Each SKU
+    # resolves to a QUANTITY product; duplicate SKUs are rejected (the UI merges
+    # by SKU); an override may be cited on at most one line.
+    part_reqs: list[tuple[Product, int, uuid.UUID | None]] = []
+    seen_skus: set[str] = set()
+    seen_override_ids: set[uuid.UUID] = set()
+    for line in parts:
+        if line.sku in seen_skus:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Duplicate part line for SKU {line.sku}; merge into one",
+            )
+        seen_skus.add(line.sku)
+        oid = line.pricing_override_request_id
+        if oid is not None and oid in seen_override_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="An override may be applied to at most one line",
+            )
+        product = session.exec(
+            select(Product).where(Product.sku == line.sku)
+        ).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        if product.tracking_mode != TrackingMode.QUANTITY:
+            raise HTTPException(
+                status_code=400,
+                detail="Service part requires a QUANTITY-tracked product",
+            )
+        part_reqs.append((product, line.quantity, oid))
+        if oid is not None:
+            seen_override_ids.add(oid)
+
+    # Lock cited overrides FOR UPDATE in id order BEFORE consuming batches (lock
+    # order: overrides -> batches), matching create_sale / the old close path, so
+    # concurrent consumers cannot deadlock and a single-use override is serialized.
+    locked_overrides: dict[uuid.UUID, PricingOverrideRequest] = {
+        oid: _lock_override(session=session, override_id=oid)
+        for oid in sorted(seen_override_ids, key=str)
+    }
+
+    ygn_loc = None
+    customer_loc = None
+    if part_reqs:
+        ygn_loc = session.exec(
+            select(Location).where(Location.code == "YGN_WH")
+        ).first()
+        customer_loc = session.exec(
+            select(Location).where(Location.code == "CUSTOMER")
+        ).first()
+        if not ygn_loc or not customer_loc:
+            raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    ticket = ServiceTicket(
+        customer_id=customer_id,
+        issue=issue,
+        notes=notes,
+        resolution=resolution,
+        created_by_user_id=actor_user_id,
+        idempotency_key=idempotency_key,
+        closed_at=get_datetime_utc(),
     )
-    if replayed:
-        # Concurrent same-key writer won the UNIQUE race — still bind the actor.
-        _assert_replay_actor(
-            stored_user_id=ticket.created_by_user_id,
-            caller_user_id=created_by_user_id,
-        )
-    return ticket
+    session.add(ticket)
+    session.flush()
 
-
-def add_service_ticket_part(
-    *,
-    session: Session,
-    ticket_id: uuid.UUID,
-    sku: str,
-    quantity: int,
-    pricing_override_request_id: uuid.UUID | None = None,
-) -> ServiceTicketPart:
-    """Add a part line to an open ticket. Price defaults to the product's
-    repair_price_thb; a different price requires an approved pricing override
-    (FR-010 / Flow C.3) — there is no free-form price bypass. Rejected once the
-    ticket is closed (its parts are immutable then). The ticket row is locked FOR
-    UPDATE so this serializes against a concurrent close — a part can never be
-    inserted into a ticket that close has already consumed.
-
-    Lock order: ticket -> override. This path never locks units/batches (FIFO
-    consumption happens at close), so it cannot form a cycle with create_sale
-    (override -> units -> batches) or close (ticket -> batches). A future change
-    that adds batch consumption here must re-check that ordering."""
-    ticket = session.exec(
-        select(ServiceTicket)
-        .where(ServiceTicket.id == ticket_id)
-        .with_for_update()
-    ).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Service ticket not found")
-    if ticket.closed_at is not None:
-        raise HTTPException(status_code=409, detail="Service ticket is closed")
-    product = session.exec(select(Product).where(Product.sku == sku)).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    if product.tracking_mode != TrackingMode.QUANTITY:
-        raise HTTPException(
-            status_code=400, detail="Service part requires a QUANTITY-tracked product"
-        )
-    unit_price = product.repair_price_thb
-    if pricing_override_request_id is not None:
-        override = _lock_override(
-            session=session, override_id=pricing_override_request_id
-        )
-        unit_price = _apply_override_price(
-            session=session,
-            override=override,
-            target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
-            product_id=product.id,
-        )
-    part = ServiceTicketPart(
-        service_ticket_id=ticket.id,
-        product_id=product.id,
-        quantity=quantity,
-        unit_price_thb=unit_price,
-        pricing_override_request_id=pricing_override_request_id,
-    )
-    session.add(part)
-    session.commit()
-    session.refresh(part)
-    return part
-
-
-def close_service_ticket(
-    *,
-    session: Session,
-    ticket_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-    resolution: str | None = None,
-) -> ServiceTicket:
-    """Close a ticket: FIFO-consume each part line, writing one
-    part_movement(MAINTENANCE_OUT) + cost_line[] per line, and stamp closed_at —
-    all in one transaction (Flow C.4). The ticket row is locked FOR UPDATE and a
-    re-close is idempotent (already-closed tickets return unchanged, never
-    re-consume). 409 on insufficient stock leaves the ticket open."""
-    ticket = session.exec(
-        select(ServiceTicket)
-        .where(ServiceTicket.id == ticket_id)
-        .with_for_update()
-    ).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Service ticket not found")
-    if ticket.closed_at is not None:
-        return ticket  # idempotent: already closed, do not re-consume
-
-    customer_loc = session.exec(
-        select(Location).where(Location.code == "CUSTOMER")
-    ).first()
-    ygn_loc = session.exec(
-        select(Location).where(Location.code == "YGN_WH")
-    ).first()
-    if not customer_loc or not ygn_loc:
-        raise HTTPException(status_code=500, detail="Locations not seeded")
-
-    parts = session.exec(
-        select(ServiceTicketPart).where(
-            ServiceTicketPart.service_ticket_id == ticket_id
-        )
-    ).all()
     # Consume in deterministic product order so concurrent consumption (across
     # tickets/sales) acquires batch locks in the same order and cannot deadlock.
-    for part in sorted(parts, key=lambda p: str(p.product_id)):
+    for idx, (product, qty, oid) in enumerate(
+        sorted(part_reqs, key=lambda pr: str(pr[0].id))
+    ):
         cost_lines = consume_quantity_fifo(
-            session=session,
-            product_id=part.product_id,
-            quantity_needed=part.quantity,
+            session=session, product_id=product.id, quantity_needed=qty
         )
+        assert ygn_loc is not None and customer_loc is not None
         movement = PartMovement(
-            product_id=part.product_id,
+            product_id=product.id,
             event_type=MovementType.MAINTENANCE_OUT,
-            quantity=part.quantity,
+            quantity=qty,
             from_location_id=ygn_loc.id,
             to_location_id=customer_loc.id,
             service_ticket_id=ticket.id,
             actor_user_id=actor_user_id,
-            idempotency_key=uuid.uuid5(ticket.id, f"maint:{part.id}"),
+            idempotency_key=uuid.uuid5(
+                idempotency_key, f"maint:{idx}:{product.id}"
+            ),
         )
         session.add(movement)
         session.flush()
         for cost_line in cost_lines:
             cost_line.part_movement_id = movement.id
             session.add(cost_line)
+        unit_price = product.repair_price_thb
+        if oid is not None:
+            unit_price = _apply_override_price(
+                session=session,
+                override=locked_overrides[oid],
+                target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
+                product_id=product.id,
+            )
+        session.add(
+            ServiceTicketPart(
+                service_ticket_id=ticket.id,
+                product_id=product.id,
+                quantity=qty,
+                unit_price_thb=unit_price,
+                pricing_override_request_id=oid,
+            )
+        )
 
-    ticket.closed_at = get_datetime_utc()
-    if resolution is not None:
-        ticket.resolution = resolution
-    session.add(ticket)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        # session.info is NOT transactional: discard low-stock crossings recorded
+        # during the rolled-back consume so the route does not dispatch a
+        # duplicate alert (the winning request already alerts).
+        session.info["low_stock_crossed"] = set()
+        # A single-use-override unique violation is not an idempotency race —
+        # surface a clean 409 (the FOR UPDATE pre-lock normally prevents this).
+        if "pricing_override_request_id" in str(exc.orig):
+            raise HTTPException(
+                status_code=409, detail="Override already applied to a line"
+            ) from exc
+        # Otherwise: lost the idempotency race — return the winner's ticket.
+        winner = session.exec(
+            select(ServiceTicket).where(
+                ServiceTicket.idempotency_key == idempotency_key
+            )
+        ).first()
+        if winner is None:
+            raise
+        _assert_replay_actor(
+            stored_user_id=winner.created_by_user_id,
+            caller_user_id=actor_user_id,
+        )
+        return winner
     session.refresh(ticket)
     return ticket
 
@@ -2556,6 +2825,15 @@ def list_project_pulls(
         statement.order_by(col(ProjectPull.created_at).desc()).offset(skip).limit(limit)
     )
     return list(session.exec(statement).all())
+
+
+def count_project_pulls(
+    *, session: Session, state: ProjectPullState | None = None
+) -> int:
+    statement = select(func.count()).select_from(ProjectPull)
+    if state is not None:
+        statement = statement.where(ProjectPull.state == state)
+    return session.exec(statement).one()
 
 
 def create_project_pull(
@@ -2927,22 +3205,25 @@ def _q(value: Decimal | int) -> Decimal:
     return Decimal(value).quantize(_CENT, rounding=ROUND_HALF_UP)
 
 
-def channel_margin_report(
-    *, session: Session, year: int, month: int
-) -> ChannelMarginReport:
-    """Monthly revenue / COGS / margin by derived channel (SALE, MAINTENANCE,
-    PROJECT), read-only (FR-013, spec §8). Channel is derived from each source
-    record's own timestamp (sale.sold_at / service_ticket.closed_at /
-    project_pull.fulfilled_at) falling in [month_start, next_month_start) UTC.
-    COGS is the full snapshot: SALE uses sale.total_cogs_thb (already includes
-    serialized-unit + part cost); PROJECT adds pulled unit.purchase_cost_thb to
-    the part FIFO cost. All sums are set-based; amounts quantized to cents."""
+def _month_window(year: int, month: int) -> tuple[datetime, datetime]:
+    """[start, next-month-start) in UTC for a reporting month."""
     start = datetime(year, month, 1, tzinfo=timezone.utc)
     if month == 12:
         end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
     else:
         end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    return start, end
 
+
+def _channel_rows(
+    session: Session,
+    start: datetime,
+    end: datetime,
+    channel: Channel | None,
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per channel (SALE, MAINTENANCE, PROJECT), fixed order.
+    A channel filter narrows to that single channel; otherwise all three are
+    returned even when zero (parity with the legacy report)."""
     # --- SALE: sales sold_at in window. ---
     sale_rev, sale_cogs = session.exec(
         select(
@@ -3002,22 +3283,407 @@ def channel_margin_report(
         )
     ).one()
 
-    rows = [
-        (Channel.SALE, _q(sale_rev), _q(sale_cogs)),
-        (Channel.MAINTENANCE, _q(maint_rev), _q(maint_cogs)),
-        (Channel.PROJECT, _q(0), _q(proj_part_cogs + proj_unit_cogs)),
-    ]
-    channels = [
-        ChannelMarginRow(
-            channel=ch, revenue_thb=rev, cogs_thb=cogs, margin_thb=rev - cogs
+    totals = {
+        Channel.SALE: (_q(sale_rev), _q(sale_cogs)),
+        Channel.MAINTENANCE: (_q(maint_rev), _q(maint_cogs)),
+        Channel.PROJECT: (_q(0), _q(proj_part_cogs + proj_unit_cogs)),
+    }
+    wanted = [channel] if channel is not None else list(totals)
+    return [
+        MarginBreakdownRow(
+            key=ch.value,
+            label=ch.value,
+            revenue_thb=rev,
+            cogs_thb=cogs,
+            margin_thb=rev - cogs,
         )
-        for ch, rev, cogs in rows
+        for ch in wanted
+        for rev, cogs in [totals[ch]]
     ]
-    total_rev = sum((r.revenue_thb for r in channels), Decimal("0.00"))
-    total_cogs = sum((r.cogs_thb for r in channels), Decimal("0.00"))
-    return ChannelMarginReport(
+
+
+def _merge(
+    acc: dict[uuid.UUID, list[Decimal]], key: uuid.UUID, rev: Decimal, cogs: Decimal
+) -> None:
+    slot = acc.setdefault(key, [Decimal("0"), Decimal("0")])
+    slot[0] += rev
+    slot[1] += cogs
+
+
+def _product_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per product across the requested channel(s). A SALE line
+    for a SERIALIZED product carries ``unit_id`` not ``product_id``, so the
+    product is recovered via ``Unit``."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.SALE):
+        # SALE revenue: no rounding drift, product = COALESCE(SaleLine.product_id,
+        # Unit.product_id).
+        pid = func.coalesce(SaleLine.product_id, Unit.product_id)
+        for product_id, rev in session.exec(
+            select(
+                pid,
+                func.coalesce(
+                    func.sum(SaleLine.quantity * SaleLine.unit_price_thb), Decimal("0")
+                ),
+            )
+            .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
+            .join(Unit, col(SaleLine.unit_id) == col(Unit.id), isouter=True)
+            .where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
+            .group_by(pid)
+        ).all():
+            _merge(acc, product_id, rev, Decimal("0"))
+        # SALE COGS: exact sources (mirrors MAINTENANCE/PROJECT), not the rounded
+        # SaleLine.unit_cost_thb snapshot -- see create_sale's per-unit-average
+        # rounding comment (crud.py ~2244-2246).
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(Sale, col(PartMovement.sale_id) == col(Sale.id))
+            .where(
+                PartMovement.event_type == MovementType.SOLD,
+                col(Sale.sold_at) >= start,
+                col(Sale.sold_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+        for product_id, cogs in session.exec(
+            select(
+                Unit.product_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(Sale, col(UnitMovement.sale_id) == col(Sale.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.SOLD,
+                col(Sale.sold_at) >= start,
+                col(Sale.sold_at) < end,
+            )
+            .group_by(col(Unit.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+
+    if channel in (None, Channel.MAINTENANCE):
+        # revenue by ServiceTicketPart.product_id
+        for product_id, rev in session.exec(
+            select(
+                ServiceTicketPart.product_id,
+                func.coalesce(
+                    func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                    Decimal("0"),
+                ),
+            )
+            .join(
+                ServiceTicket,
+                col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
+            .group_by(col(ServiceTicketPart.product_id))
+        ).all():
+            _merge(acc, product_id, rev, Decimal("0"))
+        # COGS by PartMovement.product_id (MAINTENANCE_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(
+                ServiceTicket,
+                col(PartMovement.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(
+                PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+                col(ServiceTicket.closed_at) >= start,
+                col(ServiceTicket.closed_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+
+    if channel in (None, Channel.PROJECT):
+        # part COGS by PartMovement.product_id (PROJECT_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+        # unit COGS by Unit.product_id (PROJECT_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                Unit.product_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(Unit.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+
+    labels = _product_labels(session, list(acc))
+    return _sorted_rows(
+        (str(pid), labels[pid], _q(rev), _q(cogs)) for pid, (rev, cogs) in acc.items()
+    )
+
+
+def _product_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        p.id: f"{p.sku} — {p.model_name}"
+        for p in session.exec(select(Product).where(col(Product.id).in_(ids))).all()
+    }
+
+
+def _customer_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per customer across the requested channel(s). Every SALE,
+    ServiceTicket, and ProjectPull carries a non-null customer_id, so there is
+    no walk-in/None bucket."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.SALE):
+        # Sale-level authoritative totals: both revenue and COGS are exact
+        # here (no per-line rounding drift), unlike the PRODUCT grouping's
+        # SaleLine-based reconstruction.
+        for cust_id, rev, cogs in session.exec(
+            select(
+                Sale.customer_id,
+                func.coalesce(func.sum(Sale.total_thb), Decimal("0")),
+                func.coalesce(func.sum(Sale.total_cogs_thb), Decimal("0")),
+            )
+            .where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
+            .group_by(col(Sale.customer_id))
+        ).all():
+            _merge(acc, cust_id, rev, cogs)
+
+    if channel in (None, Channel.MAINTENANCE):
+        for cust_id, rev in session.exec(
+            select(
+                ServiceTicket.customer_id,
+                func.coalesce(
+                    func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                    Decimal("0"),
+                ),
+            )
+            .join(
+                ServiceTicketPart,
+                col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
+            .group_by(col(ServiceTicket.customer_id))
+        ).all():
+            _merge(acc, cust_id, rev, Decimal("0"))
+        for cust_id, cogs in session.exec(
+            select(
+                ServiceTicket.customer_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ServiceTicket, col(PartMovement.service_ticket_id) == col(ServiceTicket.id))
+            .where(
+                PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+                col(ServiceTicket.closed_at) >= start,
+                col(ServiceTicket.closed_at) < end,
+            )
+            .group_by(col(ServiceTicket.customer_id))
+        ).all():
+            _merge(acc, cust_id, Decimal("0"), cogs)
+
+    if channel in (None, Channel.PROJECT):
+        for cust_id, cogs in session.exec(
+            select(
+                ProjectPull.customer_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.customer_id))
+        ).all():
+            _merge(acc, cust_id, Decimal("0"), cogs)
+        for cust_id, cogs in session.exec(
+            select(
+                ProjectPull.customer_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.customer_id))
+        ).all():
+            _merge(acc, cust_id, Decimal("0"), cogs)
+
+    labels = _customer_labels(session, list(acc))
+    return _sorted_rows(
+        (str(cid), labels[cid], _q(rev), _q(cogs)) for cid, (rev, cogs) in acc.items()
+    )
+
+
+def _customer_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        c.id: c.name
+        for c in session.exec(select(Customer).where(col(Customer.id).in_(ids))).all()
+    }
+
+
+def _project_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        p.id: f"{p.code} — {p.name}"
+        for p in session.exec(select(Project).where(col(Project.id).in_(ids))).all()
+    }
+
+
+def _project_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per project (cost-only, mirroring the PROJECT channel).
+    Only PROJECT_OUT movements carry a project, so SALE + MAINTENANCE money
+    has no project home; when ``channel`` is unscoped, that remainder is
+    rolled into a single reconciling ``(not project work)`` bucket so totals
+    still match the channel view."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.PROJECT):
+        for proj_id, cogs in session.exec(
+            select(
+                ProjectPull.project_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.project_id))
+        ).all():
+            _merge(acc, proj_id, Decimal("0"), cogs)
+        for proj_id, cogs in session.exec(
+            select(
+                ProjectPull.project_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.project_id))
+        ).all():
+            _merge(acc, proj_id, Decimal("0"), cogs)
+
+    labels = _project_labels(session, list(acc))
+    rows = list(
+        _sorted_rows(
+            (str(pid), labels[pid], _q(rev), _q(cogs)) for pid, (rev, cogs) in acc.items()
+        )
+    )
+
+    if channel is None:
+        # SALE + MAINTENANCE have no project -> single reconciling bucket.
+        remainder = [
+            r
+            for r in _channel_rows(session, start, end, None)
+            if r.key in (Channel.SALE.value, Channel.MAINTENANCE.value)
+        ]
+        rev = sum((r.revenue_thb for r in remainder), Decimal("0.00"))
+        cogs = sum((r.cogs_thb for r in remainder), Decimal("0.00"))
+        if rev or cogs:
+            rows.append(
+                MarginBreakdownRow(
+                    key="",
+                    label="(not project work)",
+                    revenue_thb=_q(rev),
+                    cogs_thb=_q(cogs),
+                    margin_thb=_q(rev - cogs),
+                )
+            )
+    return rows
+
+
+def _sorted_rows(
+    triples: Iterable[tuple[str, str, Decimal, Decimal]],
+) -> list[MarginBreakdownRow]:
+    rows = [
+        MarginBreakdownRow(
+            key=key, label=label, revenue_thb=rev, cogs_thb=cogs, margin_thb=rev - cogs
+        )
+        for key, label, rev, cogs in triples
+    ]
+    rows.sort(key=lambda r: (-r.revenue_thb, -r.margin_thb, r.label))
+    return rows
+
+
+def margin_report(
+    *,
+    session: Session,
+    year: int,
+    month: int,
+    group_by: MarginDimension = MarginDimension.CHANNEL,
+    channel: Channel | None = None,
+) -> MarginBreakdownReport:
+    """Monthly revenue/COGS/margin, grouped by ``group_by`` and optionally
+    scoped to one ``channel`` (FR-013 drill-down, spec §8). Read-only; all sums
+    set-based and cent-quantized. For any fixed (month, channel) the row sums
+    reconcile across every grouping."""
+    start, end = _month_window(year, month)
+    if group_by == MarginDimension.CHANNEL:
+        rows = _channel_rows(session, start, end, channel)
+    elif group_by == MarginDimension.PRODUCT:
+        rows = _product_rows(session, start, end, channel)
+    elif group_by == MarginDimension.CUSTOMER:
+        rows = _customer_rows(session, start, end, channel)
+    else:
+        rows = _project_rows(session, start, end, channel)
+    total_rev = sum((r.revenue_thb for r in rows), Decimal("0.00"))
+    total_cogs = sum((r.cogs_thb for r in rows), Decimal("0.00"))
+    return MarginBreakdownReport(
         month=f"{year:04d}-{month:02d}",
-        channels=channels,
+        group_by=group_by,
+        channel=channel,
+        rows=rows,
         total_revenue_thb=total_rev,
         total_cogs_thb=total_cogs,
         total_margin_thb=total_rev - total_cogs,
@@ -3032,7 +3698,7 @@ def get_customer_dashboard(
 ) -> dict[str, Any]:
     """Admin-superset dashboard for one customer: transactions, projects, and
     lifetime SALE / MAINTENANCE revenue·COGS·margin + PROJECT COGS. Mirrors the
-    join shapes of channel_margin_report() but scoped by customer (no date
+    join shapes of margin_report() but scoped by customer (no date
     window). The route picks the staff or admin schema by role; redacted fields
     are physically absent from the staff JSON."""
     customer = session.get(Customer, customer_id)
@@ -3272,6 +3938,7 @@ def list_audit(
     actor_user_id: uuid.UUID | None = None,
     product_id: uuid.UUID | None = None,
     unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[AuditEntryPublic]:
@@ -3280,14 +3947,25 @@ def list_audit(
 
     Filter semantics: ``product_id`` only ever matches PART rows and ``unit_id``
     only ever matches UNIT rows, so supplying one restricts the result to that
-    ledger (supplying both yields nothing, since no row is in both). The shared
-    filters (event_type, [from_date, to_date), actor_user_id) apply to both.
+    ledger (supplying both yields nothing, since no row is in both). ``sku``
+    resolves to a product and spans whichever ledger it uses (a product is one
+    tracking mode, so exactly one ledger yields rows); an unknown SKU returns no
+    rows. The shared filters (event_type, [from_date, to_date), actor_user_id)
+    apply to both.
 
     Implementation: each ledger is queried filtered + ordered DESC and bounded
     to ``skip + limit`` rows, the two bounded sets are merge-sorted in Python,
     then sliced — never an unbounded fetch.
     """
     bound = skip + limit
+
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return []  # unknown SKU matches nothing
 
     audit_unit = product_id is None
     audit_part = unit_id is None
@@ -3306,6 +3984,14 @@ def list_audit(
             u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
         if unit_id is not None:
             u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
         u_stmt = u_stmt.order_by(
             col(UnitMovement.occurred_at).desc(), col(UnitMovement.id).desc()
         ).limit(bound)
@@ -3340,6 +4026,10 @@ def list_audit(
             p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
         if product_id is not None:
             p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
         p_stmt = p_stmt.order_by(
             col(PartMovement.occurred_at).desc(), col(PartMovement.id).desc()
         ).limit(bound)
@@ -3365,6 +4055,79 @@ def list_audit(
     rows.sort(key=lambda e: (e.occurred_at, e.id), reverse=True)
     page = rows[skip : skip + limit]
     return _hydrate_audit(session=session, rows=page)
+
+
+def count_audit(
+    *,
+    session: Session,
+    event_type: MovementType | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    product_id: uuid.UUID | None = None,
+    unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
+) -> int:
+    """Total row count for the same filter set as list_audit, across both ledgers,
+    for the pagination envelope (GET /audit). Mirrors list_audit's WHERE-clause
+    construction exactly, so the count and the page it describes can never
+    disagree about what "matches" — a deliberate, small duplication rather than
+    a shared filter-builder abstraction, which would be a larger restructure of
+    the read path than this fix warrants."""
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return 0
+
+    audit_unit = product_id is None
+    audit_part = unit_id is None
+
+    total = 0
+
+    if audit_unit:
+        u_stmt = select(func.count()).select_from(UnitMovement)
+        if event_type is not None:
+            u_stmt = u_stmt.where(UnitMovement.event_type == event_type)
+        if from_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
+        if unit_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
+        total += session.exec(u_stmt).one()
+
+    if audit_part:
+        p_stmt = select(func.count()).select_from(PartMovement)
+        if event_type is not None:
+            p_stmt = p_stmt.where(PartMovement.event_type == event_type)
+        if from_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
+        if product_id is not None:
+            p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
+        total += session.exec(p_stmt).one()
+
+    return total
 
 
 def _hydrate_audit(

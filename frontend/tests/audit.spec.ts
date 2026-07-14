@@ -15,6 +15,7 @@ test("buildAuditQuery drops blank filters", () => {
       fromDate: "",
       toDate: "",
       actorUserId: "",
+      sku: "",
     }),
   ).toEqual({})
 })
@@ -26,12 +27,14 @@ test("buildAuditQuery includes set filters", () => {
       fromDate: "2026-06-01",
       toDate: "2026-07-01",
       actorUserId: "u-1",
+      sku: "ABC-123",
     }),
   ).toEqual({
     eventType: "SOLD",
     fromDate: "2026-06-01",
     toDate: "2026-07-01",
     actorUserId: "u-1",
+    sku: "ABC-123",
   })
 })
 

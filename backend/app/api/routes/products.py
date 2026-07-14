@@ -9,8 +9,10 @@ from app.models import (
     MinStockLevelUpdate,
     PriceChangePublic,
     ProductCreate,
+    ProductOption,
     ProductPublic,
     ProductPurchaseCost,
+    ProductsPublic,
     ProductUpdate,
     TrackingMode,
 )
@@ -20,14 +22,45 @@ router = APIRouter(prefix="/products", tags=["products"])
 
 
 @router.get(
-    "/", response_model=list[ProductPublic], dependencies=[Depends(get_current_user)]
+    "/", response_model=ProductsPublic, dependencies=[Depends(get_current_user)]
 )
 def read_products(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=255,
+            description="Case-insensitive substring match on SKU or model name",
+        ),
+    ] = None,
+    brand: Annotated[
+        str | None,
+        Query(max_length=255, description="Case-insensitive substring match on brand"),
+    ] = None,
+    category: Annotated[
+        str | None,
+        Query(
+            max_length=128, description="Case-insensitive substring match on category"
+        ),
+    ] = None,
+    tracking_mode: TrackingMode | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[ProductPublic]:
-    return crud.list_products(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+) -> ProductsPublic:
+    return ProductsPublic(
+        data=crud.list_products(
+            session=session,
+            q=q,
+            brand=brand,
+            category=category,
+            tracking_mode=tracking_mode,
+            skip=skip,
+            limit=limit,
+        ),
+        count=crud.count_products(
+            session=session, q=q, brand=brand, category=category, tracking_mode=tracking_mode
+        ),
+    )
 
 
 @router.get(
@@ -43,6 +76,20 @@ def read_purchase_costs(session: SessionDep) -> list[ProductPurchaseCost]:
         ProductPurchaseCost(product_id=pid, latest_purchase_cost_thb=cost)
         for pid, cost in costs.items()
     ]
+
+
+@router.get(
+    "/options",
+    response_model=list[ProductOption],
+    dependencies=[Depends(get_current_user)],
+)
+def read_options(session: SessionDep, active_only: bool = False) -> list[ProductOption]:
+    """Every product as a lightweight picker/lookup projection, ordered by SKU
+    (FR-019 audit filter; sale/receive/tickets/pulls/pricing-overrides product
+    selection). Deliberately unpaginated: no client parameter can amplify the
+    response size, and it is far lighter than the full ProductPublic (no specs
+    JSONB, no brand/category/timestamps)."""
+    return crud.list_product_options(session=session, active_only=active_only)
 
 
 # Shared-team access (mirrors the serialized unit-label endpoint): any

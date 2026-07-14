@@ -9,7 +9,10 @@ from app.models import (
     CustomerCreate,
     CustomerDashboardAdminPublic,
     CustomerDashboardStaffPublic,
+    CustomerOption,
     CustomerPublic,
+    CustomersPublic,
+    CustomerType,
     CustomerUpdate,
 )
 
@@ -18,15 +21,42 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 
 @router.get(
     "/",
-    response_model=list[CustomerPublic],
+    response_model=CustomersPublic,
     dependencies=[Depends(get_current_user)],
 )
 def read_customers(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(max_length=255, description="Case-insensitive substring match on name"),
+    ] = None,
+    country: Annotated[
+        str | None, Query(max_length=64, description="Exact match on country")
+    ] = None,
+    type: CustomerType | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[CustomerPublic]:
-    return crud.list_customers(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+) -> CustomersPublic:
+    return CustomersPublic(
+        data=crud.list_customers(
+            session=session, q=q, country=country, type=type, skip=skip, limit=limit
+        ),
+        count=crud.count_customers(session=session, q=q, country=country, type=type),
+    )
+
+
+@router.get(
+    "/options", response_model=list[CustomerOption], dependencies=[Depends(get_current_user)]
+)
+def read_options(session: SessionDep) -> list[CustomerOption]:
+    return crud.list_customer_options(session=session)
+
+
+@router.get(
+    "/countries", response_model=list[str], dependencies=[Depends(get_current_user)]
+)
+def list_countries(session: SessionDep) -> list[str]:
+    return crud.list_customer_countries(session=session)
 
 
 @router.post(

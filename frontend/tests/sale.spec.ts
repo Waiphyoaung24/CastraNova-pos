@@ -35,8 +35,9 @@ interface SeededUnit {
 
 /**
  * Seed one sellable serialized UNIT end-to-end: product (SERIALIZED) + supplier
- * + a walk-in-named customer (so the Sale screen auto-selects it) + a received
- * piece. Returns the unit's scannable castranova_barcode and the customer name.
+ * + a customer + a received piece. Returns the unit's scannable
+ * castranova_barcode and the customer name (which the Sale screen requires the
+ * operator to select explicitly — nothing is auto-selected).
  */
 async function seedSellableUnit(): Promise<SeededUnit> {
   const r = rand()
@@ -52,8 +53,7 @@ async function seedSellableUnit(): Promise<SeededUnit> {
   const supplier = await SuppliersService.createSupplier({
     requestBody: { name: `Supplier ${r}` },
   })
-  // Name matches the Sale screen's /walk[\s-]?in/i default-select pattern.
-  const customerName = `Walk-in ${r}`
+  const customerName = `Customer ${r}`
   await CustomersService.createCustomer({ requestBody: { name: customerName } })
   const recv: ReceiveSerializedResponse =
     await ReceiptsService.receiveSerialized({
@@ -145,6 +145,33 @@ test.describe("Sale screen", () => {
     await authSeedClient()
   })
 
+  test("sale: no customer is auto-selected and checkout is blocked until one is chosen (FR-007)", async ({
+    page,
+  }) => {
+    const { barcode } = await seedSellableUnit()
+
+    await page.goto("/sale")
+    await expect(
+      page.getByRole("heading", { name: "Sale", exact: true }),
+    ).toBeVisible()
+
+    // PRD FR-007: no walk-in / anonymous sales. The Customer field must start
+    // empty (placeholder showing) — nothing is auto-selected on load.
+    await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(
+      "Select a customer",
+    )
+
+    // Even with a unit in the cart, checkout stays disabled until a customer
+    // is explicitly chosen.
+    await scanBarcode(page, barcode)
+    await expect(
+      page.getByRole("cell", { name: barcode, exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Complete sale" }),
+    ).toBeDisabled()
+  })
+
   test("sale online: scan a serialized unit and complete the sale → unit is SOLD", async ({
     page,
   }) => {
@@ -155,8 +182,7 @@ test.describe("Sale screen", () => {
       page.getByRole("heading", { name: "Sale", exact: true }),
     ).toBeVisible()
 
-    // The seeded customer is named "Walk-in …" so the screen auto-selects it;
-    // make that explicit (and robust if multiple walk-ins exist in shared DB).
+    // No customer is auto-selected — the operator must choose one explicitly.
     await page.getByRole("combobox", { name: "Customer" }).click()
     await page.getByRole("option", { name: customerName, exact: true }).click()
     await expect(page.getByRole("combobox", { name: "Customer" })).toHaveText(
@@ -248,5 +274,118 @@ test.describe("Sale screen", () => {
     // SOLD movement (the idempotency key dedupes any second delivery).
     const res = await SearchService.searchSerial({ barcode })
     expect(res.movements.filter((m) => m.event_type === "SOLD")).toHaveLength(1)
+  })
+
+  // Task 3 — offline < 12h: the access token expired during the outage but the
+  // refresh token is still valid, so reconnect refreshes silently and the queued
+  // sale replays with the fresh token — no re-login, no data loss. The harness
+  // is cross-site (SameSite=lax withholds the refresh cookie), so we mock
+  // /login/refresh-token with a real minted token; the real cookie exchange is
+  // covered by backend test_auth_refresh.py.
+  test("offline < 12h → reconnect refreshes silently → sale replays once", async ({
+    page,
+  }) => {
+    const { barcode, customerName } = await seedSellableUnit()
+    const fresh = await LoginService.loginAccessToken({
+      formData: {
+        username: firstSuperuser,
+        password: firstSuperuserPassword,
+      },
+    })
+    await page.route("**/api/v1/login/refresh-token", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: fresh.access_token }),
+      }),
+    )
+
+    await page.goto("/sale")
+    await page.getByRole("combobox", { name: "Customer" }).click()
+    await page.getByRole("option", { name: customerName, exact: true }).click()
+    await scanBarcode(page, barcode)
+    await expect(
+      page.getByRole("cell", { name: barcode, exact: true }),
+    ).toBeVisible()
+
+    // Queue the sale offline.
+    await page.evaluate(() => window.dispatchEvent(new Event("offline")))
+    await page.getByRole("button", { name: "Complete sale" }).click()
+    await expect(page.getByText(/Offline — 1 change queued/i)).toBeVisible()
+    await waitForPersistedPausedMutation(page)
+
+    // Simulate the access token expiring during the outage (the refresh cookie
+    // is still valid → the mock stands in for it). Reconnect via reload.
+    await page.evaluate(() =>
+      localStorage.setItem("access_token", "not-a-valid-jwt"),
+    )
+    await page.reload()
+
+    // Stayed logged in; the replay committed exactly once with the fresh token.
+    await expect
+      .poll(
+        async () =>
+          (await SearchService.searchSerial({ barcode })).current_state,
+        { timeout: 15_000, intervals: [500, 1_000] },
+      )
+      .toBe("SOLD")
+    await expect(page).not.toHaveURL(/\/login/)
+    const okRes = await SearchService.searchSerial({ barcode })
+    expect(okRes.movements.filter((m) => m.event_type === "SOLD")).toHaveLength(
+      1,
+    )
+  })
+
+  // Task 3 — offline > 12h: the refresh token has also expired, so reconnect
+  // can't revive the session → redirect to /login. But the queued sale stays
+  // PAUSED (never fired, never errored), survives the forced logout, and replays
+  // after re-login (idempotency dedupes) — re-auth required, zero data loss.
+  test("offline > 12h → reconnect forces re-login → queue survives → replays once", async ({
+    page,
+  }) => {
+    const { barcode, customerName } = await seedSellableUnit()
+
+    await page.goto("/sale")
+    await page.getByRole("combobox", { name: "Customer" }).click()
+    await page.getByRole("option", { name: customerName, exact: true }).click()
+    await scanBarcode(page, barcode)
+    await expect(
+      page.getByRole("cell", { name: barcode, exact: true }),
+    ).toBeVisible()
+
+    await page.evaluate(() => window.dispatchEvent(new Event("offline")))
+    await page.getByRole("button", { name: "Complete sale" }).click()
+    await expect(page.getByText(/Offline — 1 change queued/i)).toBeVisible()
+    await waitForPersistedPausedMutation(page)
+
+    // Simulate 12h idle: the refresh cookie is gone AND the access token is
+    // dead, so refresh can't revive the session. Reconnect via reload.
+    await page.context().clearCookies()
+    await page.evaluate(() =>
+      localStorage.setItem("access_token", "not-a-valid-jwt"),
+    )
+    await page.reload()
+
+    // Forced re-login; the queued mutation is still persisted (not errored out).
+    await expect(page).toHaveURL(/\/login/)
+    await waitForPersistedPausedMutation(page)
+
+    // Log back in; login() flushes the paused queue with the new token.
+    await page.getByTestId("email-input").fill(firstSuperuser)
+    await page.getByTestId("password-input").fill(firstSuperuserPassword)
+    await page.getByRole("button", { name: "Log In" }).click()
+    await page.waitForURL("/")
+
+    await expect
+      .poll(
+        async () =>
+          (await SearchService.searchSerial({ barcode })).current_state,
+        { timeout: 15_000, intervals: [500, 1_000] },
+      )
+      .toBe("SOLD")
+    const okRes = await SearchService.searchSerial({ barcode })
+    expect(okRes.movements.filter((m) => m.event_type === "SOLD")).toHaveLength(
+      1,
+    )
   })
 })

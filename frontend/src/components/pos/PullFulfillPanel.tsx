@@ -26,8 +26,6 @@ interface PullFulfillPanelProps {
   pull: ProjectPullPublic
   projectLabel: string
   customerLabel: string
-  /** product_id -> model name, for PART line labels. */
-  productNames: Map<string, string>
   draft: FulfillDraft
   scanRef: Ref<ScanFieldHandle>
   onScan: (code: string) => void
@@ -41,19 +39,15 @@ interface PullFulfillPanelProps {
   isPending: boolean
 }
 
-function lineLabel(
-  line: ProjectPullLinePublic,
-  productNames: Map<string, string>,
-): string {
+function lineLabel(line: ProjectPullLinePublic): string {
   if (line.line_kind === "UNIT") return line.unit_serial ?? "(no serial)"
-  return productNames.get(line.product_id) ?? line.product_id
+  return `${line.model_name} (${line.product_sku})`
 }
 
 export function PullFulfillPanel({
   pull,
   projectLabel,
   customerLabel,
-  productNames,
   draft,
   scanRef,
   onScan,
@@ -144,7 +138,7 @@ export function PullFulfillPanel({
             return (
               <TableRow key={line.id}>
                 <TableCell className="num font-medium">
-                  {lineLabel(line, productNames)}
+                  {lineLabel(line)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
                   {line.line_kind}
@@ -157,7 +151,7 @@ export function PullFulfillPanel({
                       size="icon"
                       className="size-11"
                       disabled={!canFulfill || qty <= 0}
-                      aria-label={`Decrease ${lineLabel(line, productNames)}`}
+                      aria-label={`Decrease ${lineLabel(line)}`}
                       onClick={() => onQtyChange(line, qty - 1)}
                     >
                       <Minus />
@@ -166,7 +160,7 @@ export function PullFulfillPanel({
                       {qty} / {cap}
                     </span>
                     <span className="sr-only" aria-live="polite">
-                      {`${lineLabel(line, productNames)} ${qty} of ${cap}`}
+                      {`${lineLabel(line)} ${qty} of ${cap}`}
                     </span>
                     <Button
                       type="button"
@@ -174,7 +168,7 @@ export function PullFulfillPanel({
                       size="icon"
                       className="size-11"
                       disabled={!canFulfill || qty >= cap}
-                      aria-label={`Increase ${lineLabel(line, productNames)}`}
+                      aria-label={`Increase ${lineLabel(line)}`}
                       onClick={() => onQtyChange(line, qty + 1)}
                     >
                       <Plus />

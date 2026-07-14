@@ -222,6 +222,8 @@ def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> s
             f"Project pull {payload.get('pull_id')} settled SHORT "
             f"({payload.get('short_line_count')} line(s) short)."
         )
+    if event_type == NotificationEvent.PULL_FULFILLED:
+        return f"Project pull {payload.get('pull_id')} fulfilled."
     if event_type == NotificationEvent.LOW_STOCK:
         return (
             f"Low stock: {payload.get('sku')} — {payload.get('on_hand')} left "
@@ -259,6 +261,26 @@ def notify_pull_short(
     return notify(
         session=session,
         event_type=NotificationEvent.PULL_SHORT,
+        recipients=recipients,
+        payload=payload,
+    )
+
+
+def notify_pull_fulfilled(
+    *, session: Session, pull: ProjectPull
+) -> list[NotificationLog]:
+    """Notify every BKK_ADMIN that a project pull was fully fulfilled (FR-018)."""
+    recipients = list(
+        session.exec(select(User).where(User.role == UserRole.BKK_ADMIN)).all()
+    )
+    payload: dict[str, Any] = {
+        "pull_id": str(pull.id),
+        "project_id": str(pull.project_id),
+        "customer_id": str(pull.customer_id),
+    }
+    return notify(
+        session=session,
+        event_type=NotificationEvent.PULL_FULFILLED,
         recipients=recipients,
         payload=payload,
     )
@@ -375,3 +397,19 @@ def notify_pull_short_bg(*, pull_id: uuid.UUID) -> None:
             notify_pull_short(session=session, pull=pull)
     except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
         logger.exception("notify_pull_short_bg failed for pull_id=%s", pull_id)
+
+
+def notify_pull_fulfilled_bg(*, pull_id: uuid.UUID) -> None:
+    """BackgroundTasks entrypoint: notify off the request hot path.
+
+    Opens its OWN session and can never raise out of the background task — a
+    notify failure must not affect the already-committed fulfill.
+    """
+    try:
+        with Session(engine) as session:
+            pull = session.get(ProjectPull, pull_id)
+            if pull is None:
+                return
+            notify_pull_fulfilled(session=session, pull=pull)
+    except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
+        logger.exception("notify_pull_fulfilled_bg failed for pull_id=%s", pull_id)

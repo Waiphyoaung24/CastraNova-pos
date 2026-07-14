@@ -16,6 +16,8 @@ export interface AuditFilter {
   toDate: string
   /** UUID of a single acting user, or "" for all users. */
   actorUserId: string
+  /** Product SKU to scope to (spans both ledgers), or "" for all. */
+  sku: string
 }
 
 export function buildAuditQuery(f: AuditFilter): AuditListAuditData {
@@ -24,6 +26,7 @@ export function buildAuditQuery(f: AuditFilter): AuditListAuditData {
   if (f.fromDate) q.fromDate = f.fromDate
   if (f.toDate) q.toDate = f.toDate
   if (f.actorUserId) q.actorUserId = f.actorUserId
+  if (f.sku) q.sku = f.sku
   return q
 }
 

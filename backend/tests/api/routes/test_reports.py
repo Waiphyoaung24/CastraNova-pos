@@ -26,6 +26,7 @@ from app.models import (
     SaleLineInput,
     SaleLineKind,
     ServiceTicket,
+    ServiceTicketPartCreate,
     SupplierCreate,
     TrackingMode,
 )
@@ -37,7 +38,7 @@ TARGET = datetime(2026, 3, 15, 12, 0, tzinfo=timezone.utc)
 
 
 def _channel(report: dict[str, Any], name: str) -> dict[str, Any]:
-    return next(c for c in report["channels"] if c["channel"] == name)
+    return next(r for r in report["rows"] if r["key"] == name)
 
 
 def _pull_lines(db: Session, pull_id: uuid.UUID) -> list[ProjectPullLine]:
@@ -177,17 +178,14 @@ def test_mixed_channel_hand_calc(
 
     # --- MAINTENANCE: ticket, one part qty 2 @ repair 20, FIFO over 3@10+4@12.
     maint_part = seed["make_part"]("100.00", "20.00", [(3, "10.00"), (4, "12.00")])
-    ticket = crud.open_service_ticket(
+    ticket = crud.record_service_ticket(
         session=db,
         customer_id=customer.id,
         issue="noisy",
+        parts=[ServiceTicketPartCreate(sku=maint_part.sku, quantity=2)],
         idempotency_key=uuid.uuid4(),
-        created_by_user_id=admin.id,
+        actor_user_id=admin.id,
     )
-    crud.add_service_ticket_part(
-        session=db, ticket_id=ticket.id, sku=maint_part.sku, quantity=2
-    )
-    crud.close_service_ticket(session=db, ticket_id=ticket.id, actor_user_id=admin.id)
     _pin_ticket(db, ticket.id, TARGET)
     # revenue = 2 * 20 = 40 ; cogs = 2 @ 10 (oldest batch) = 20
     maint_rev = Decimal("40.00")
@@ -277,7 +275,7 @@ def test_channels_always_three_rows_in_order(
         headers=superuser_token_headers,
     )
     assert r.status_code == 200, r.text
-    channels = [c["channel"] for c in r.json()["channels"]]
+    channels = [row["key"] for row in r.json()["rows"]]
     assert channels == [Channel.SALE, Channel.MAINTENANCE, Channel.PROJECT]
 
 
@@ -291,7 +289,7 @@ def test_empty_month_all_zero(
     )
     assert r.status_code == 200, r.text
     report = r.json()
-    for row in report["channels"]:
+    for row in report["rows"]:
         assert Decimal(row["revenue_thb"]) == Decimal("0.00")
         assert Decimal(row["cogs_thb"]) == Decimal("0.00")
         assert Decimal(row["margin_thb"]) == Decimal("0.00")
@@ -416,3 +414,58 @@ def test_short_pull_counted(
     # 3 @ 10 consumed = 30 COGS, revenue 0.
     assert Decimal(proj_row["cogs_thb"]) == Decimal("30.00")
     assert Decimal(proj_row["revenue_thb"]) == Decimal("0.00")
+
+
+def test_http_reconciles_across_groupings(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed: dict[str, Any],
+) -> None:
+    from tests.api.routes.test_margin_report import _seed_full_month
+
+    # Dedicated month (2026-12): unused by every other margin/reports test.
+    when = datetime(2026, 12, 15, 12, 0, tzinfo=timezone.utc)
+    _seed_full_month(db, seed, when=when)
+
+    def total(group_by: str) -> str:
+        resp = client.get(
+            f"{PREFIX}/reports/channel-margin?month=2026-12&group_by={group_by}",
+            headers=superuser_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()["total_margin_thb"]
+
+    base = total("channel")
+    for group_by in ("product", "customer", "project"):
+        assert total(group_by) == base
+
+
+def test_http_channel_filter_scopes_rows(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed: dict[str, Any],
+) -> None:
+    from tests.api.routes.test_margin_report import _seed_full_month
+
+    # Dedicated month (2027-01): unused by every other margin/reports test.
+    when = datetime(2027, 1, 15, 12, 0, tzinfo=timezone.utc)
+    _seed_full_month(db, seed, when=when)
+    r = client.get(
+        f"{PREFIX}/reports/channel-margin?month=2027-01&group_by=product&channel=SALE",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["rows"]) == 2
+
+
+def test_http_rejects_bad_group_by(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+) -> None:
+    r = client.get(
+        f"{PREFIX}/reports/channel-margin?month=2026-03&group_by=bogus",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 422
