@@ -13,6 +13,8 @@ import {
   CustomersService,
   type CustomerType,
 } from "@/client"
+import { CountryCombobox } from "@/components/Common/CountryCombobox"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -79,6 +81,9 @@ const TYPE_LABEL: Record<CustomerType, string> = {
 // Column widths in header order (Name, Type, Contact, Country, edit); sum to 100%.
 const CUSTOMER_WIDTHS = ["32%", "13%", "26%", "17%", "12%"]
 
+// Radix Select forbids an empty-string item value, so "all types" needs a sentinel.
+const ALL_TYPES = "__all__"
+
 /** The full customer field set, shared by the create card and the edit dialog. */
 function CustomerFieldset({
   draft,
@@ -132,12 +137,11 @@ function CustomerFieldset({
       </div>
       <div className="space-y-2">
         <Label htmlFor={countryId}>Country</Label>
-        <Input
+        <CountryCombobox
           id={countryId}
+          ariaLabel="Country"
           value={draft.country}
-          maxLength={64}
-          placeholder="e.g. Thailand"
-          onChange={(e) => onChange({ country: e.target.value })}
+          onChange={(country) => onChange({ country })}
         />
       </div>
       <div className="space-y-2">
@@ -170,6 +174,7 @@ function CustomerCreateDialog() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] })
+      queryClient.invalidateQueries({ queryKey: ["customer-countries"] })
       showSuccessToast("Customer created.")
       setOpen(false)
       setDraft(EMPTY_DRAFT)
@@ -183,6 +188,12 @@ function CustomerCreateDialog() {
   return (
     <Dialog
       open={open}
+      // The Country field's popover combobox is portalled outside this
+      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
+      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
+      // keeps the overlay/close-on-outside-click behavior but drops the
+      // trap, letting the combobox actually receive focus and keystrokes.
+      modal={false}
       onOpenChange={(next) => {
         setOpen(next)
         if (!next) setDraft(EMPTY_DRAFT)
@@ -241,6 +252,7 @@ function CustomerEditDialog({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] })
+      queryClient.invalidateQueries({ queryKey: ["customer-countries"] })
       showSuccessToast("Customer updated.")
       onClose()
     },
@@ -253,6 +265,12 @@ function CustomerEditDialog({
   return (
     <Dialog
       open
+      // The Country field's popover combobox is portalled outside this
+      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
+      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
+      // keeps the overlay/close-on-outside-click behavior but drops the
+      // trap, letting the combobox actually receive focus and keystrokes.
+      modal={false}
       onOpenChange={(next) => {
         if (!next) onClose()
       }}
@@ -281,27 +299,41 @@ function CustomerEditDialog({
 
 function Customers() {
   const isMobile = useIsMobile()
+  const countryFilterId = useId()
   const [editing, setEditing] = useState<CustomerPublic | null>(null)
   const [search, setSearch] = useState("")
+  const [country, setCountry] = useState("")
+  const [type, setType] = useState("")
   const debouncedSearch = useDebouncedValue(search)
   const pagination = usePagination()
+
+  const { data: countryOptions } = useQuery({
+    queryKey: ["customer-countries"],
+    queryFn: () => CustomersService.listCountries(),
+  })
 
   const {
     data: customersResponse,
     isPlaceholderData,
     isFetching,
   } = useQuery({
-    queryKey: ["customers", { page: pagination.page, q: debouncedSearch }],
+    queryKey: [
+      "customers",
+      { page: pagination.page, q: debouncedSearch, country, type },
+    ],
     queryFn: () =>
       CustomersService.readCustomers({
         skip: pagination.skip,
         limit: pagination.limit,
         q: debouncedSearch || undefined,
+        country: country || undefined,
+        type: (type || undefined) as CustomerType | undefined,
       }),
     placeholderData: keepPreviousData,
   })
   const customers = customersResponse?.data ?? []
   const listLoading = isPlaceholderData || isFetching
+  const hasFilters = debouncedSearch || country || type
 
   return (
     <div className="flex flex-col gap-6">
@@ -311,15 +343,56 @@ function Customers() {
         actions={<CustomerCreateDialog />}
       />
 
-      <Input
-        value={search}
-        onChange={(e) => {
-          setSearch(e.target.value)
-          pagination.reset()
-        }}
-        placeholder="Search name…"
-        className="w-full sm:w-64"
-      />
+      <div className="flex flex-wrap items-end gap-3">
+        <Input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            pagination.reset()
+          }}
+          placeholder="Search name…"
+          className="w-full sm:w-64"
+        />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={countryFilterId}>Country</Label>
+          <div className="w-full sm:w-56">
+            <EntityCombobox
+              id={countryFilterId}
+              items={countryOptions ?? []}
+              value={country || undefined}
+              onChange={(next) => {
+                setCountry(next ?? "")
+                pagination.reset()
+              }}
+              getKey={(c) => c}
+              getLabel={(c) => c}
+              placeholder="All countries"
+              searchPlaceholder="Search country…"
+              emptyText="No countries in use."
+              ariaLabel="Country filter"
+              allowClear
+            />
+          </div>
+        </div>
+        <Select
+          value={type === "" ? ALL_TYPES : type}
+          onValueChange={(v) => {
+            setType(v === ALL_TYPES ? "" : v)
+            pagination.reset()
+          }}
+        >
+          <SelectTrigger className="w-full sm:w-40" aria-label="Type filter">
+            <SelectValue placeholder="All types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_TYPES}>All types</SelectItem>
+            <SelectItem value="END_CUSTOMER">
+              {TYPE_LABEL.END_CUSTOMER}
+            </SelectItem>
+            <SelectItem value="DEALER">{TYPE_LABEL.DEALER}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="space-y-2">
         <ListShell loading={listLoading}>
@@ -327,8 +400,8 @@ function Customers() {
             <p className="text-muted-foreground py-6 text-center text-sm">
               {!customersResponse
                 ? "Loading…"
-                : debouncedSearch
-                  ? `No customers match "${debouncedSearch}".`
+                : hasFilters
+                  ? "No customers match the current filters."
                   : "No customers yet."}
             </p>
           ) : isMobile ? (

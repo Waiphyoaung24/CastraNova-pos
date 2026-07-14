@@ -27,6 +27,7 @@ from app.models import (
     Customer,
     CustomerCreate,
     CustomerOption,
+    CustomerType,
     CustomerUpdate,
     HoldingPeriodReport,
     HoldingPeriodRow,
@@ -378,12 +379,31 @@ def get_customer(*, session: Session, customer_id: Any) -> Customer | None:
     return session.get(Customer, customer_id)
 
 
+def _customer_filter_clauses(
+    *, q: str | None, country: str | None, type: CustomerType | None
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        clauses.append(col(Customer.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    if country and country.strip():
+        clauses.append(col(Customer.country) == country.strip())
+    if type is not None:
+        clauses.append(col(Customer.type) == type)
+    return clauses
+
+
 def list_customers(
-    *, session: Session, q: str | None = None, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    type: CustomerType | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Customer]:
     stmt = select(Customer)
-    if q and q.strip():
-        stmt = stmt.where(col(Customer.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    for clause in _customer_filter_clauses(q=q, country=country, type=type):
+        stmt = stmt.where(clause)
     stmt = (
         stmt.order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
         .offset(skip)
@@ -399,10 +419,26 @@ def list_customer_options(*, session: Session) -> list[CustomerOption]:
     return [CustomerOption(id=row[0], name=row[1]) for row in rows]
 
 
-def count_customers(*, session: Session, q: str | None = None) -> int:
+def list_customer_countries(*, session: Session) -> list[str]:
+    rows = session.exec(
+        select(col(Customer.country))
+        .where(col(Customer.country).is_not(None))
+        .distinct()
+        .order_by(col(Customer.country))
+    ).all()
+    return [row for row in rows if row]
+
+
+def count_customers(
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    type: CustomerType | None = None,
+) -> int:
     stmt = select(func.count()).select_from(Customer)
-    if q and q.strip():
-        stmt = stmt.where(col(Customer.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    for clause in _customer_filter_clauses(q=q, country=country, type=type):
+        stmt = stmt.where(clause)
     return session.exec(stmt).one()
 
 

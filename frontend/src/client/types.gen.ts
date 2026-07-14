@@ -971,12 +971,17 @@ export type AuditListAuditData = {
 export type AuditListAuditResponse = (AuditPublic);
 
 export type CustomersReadCustomersData = {
+    /**
+     * Exact match on country
+     */
+    country?: (string | null);
     limit?: number;
     /**
      * Case-insensitive substring match on name
      */
     q?: (string | null);
     skip?: number;
+    type?: (CustomerType | null);
 };
 
 export type CustomersReadCustomersResponse = (CustomersPublic);
@@ -988,6 +993,8 @@ export type CustomersCreateCustomerData = {
 export type CustomersCreateCustomerResponse = (CustomerPublic);
 
 export type CustomersReadOptionsResponse = (Array<CustomerOption>);
+
+export type CustomersListCountriesResponse = (Array<(string)>);
 
 export type CustomersGetCustomerDashboardData = {
     customerId: string;

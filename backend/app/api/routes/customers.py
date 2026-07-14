@@ -12,6 +12,7 @@ from app.models import (
     CustomerOption,
     CustomerPublic,
     CustomersPublic,
+    CustomerType,
     CustomerUpdate,
 )
 
@@ -29,12 +30,18 @@ def read_customers(
         str | None,
         Query(max_length=255, description="Case-insensitive substring match on name"),
     ] = None,
+    country: Annotated[
+        str | None, Query(max_length=64, description="Exact match on country")
+    ] = None,
+    type: CustomerType | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> CustomersPublic:
     return CustomersPublic(
-        data=crud.list_customers(session=session, q=q, skip=skip, limit=limit),
-        count=crud.count_customers(session=session, q=q),
+        data=crud.list_customers(
+            session=session, q=q, country=country, type=type, skip=skip, limit=limit
+        ),
+        count=crud.count_customers(session=session, q=q, country=country, type=type),
     )
 
 
@@ -43,6 +50,13 @@ def read_customers(
 )
 def read_options(session: SessionDep) -> list[CustomerOption]:
     return crud.list_customer_options(session=session)
+
+
+@router.get(
+    "/countries", response_model=list[str], dependencies=[Depends(get_current_user)]
+)
+def list_countries(session: SessionDep) -> list[str]:
+    return crud.list_customer_countries(session=session)
 
 
 @router.post(

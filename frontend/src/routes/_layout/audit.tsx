@@ -49,7 +49,6 @@ export const Route = createFileRoute("/_layout/audit")({
 })
 
 const ALL = "ALL"
-const PAGE_SIZE = 100
 const EVENT_TYPES: MovementType[] = [
   "RECEIVED",
   "SOLD",
@@ -84,7 +83,7 @@ function Audit() {
     limit,
     setPage,
     reset: resetPage,
-  } = usePagination({ pageSize: PAGE_SIZE })
+  } = usePagination()
 
   const { data, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["audit", filter, page],
