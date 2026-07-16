@@ -306,6 +306,36 @@ endpoint, and the picker still works without it (just larger, and showing dead r
 
 ---
 
+## Product active/inactive is now settable from the UI (2026-07-17)
+
+> **DONE 2026-07-17** on branch `feat/product-active-toggle` (off `dev`). Frontend only —
+> no backend, schema, migration, or SDK change: `ProductUpdate.is_active`,
+> `ProductPublic.is_active` and the `activeOnly` pickers already existed, only the control
+> was missing. An admin can now retire/reactivate a product from the Edit dialog
+> (`Checkbox`, mirroring `EditUser`), and the catalog gained a **Status** column
+> (dot + Active/Inactive, mirroring `Admin/columns.tsx`). Before this, `is_active` was
+> reachable only by a hand-written `PATCH /products/{id}`, and retired products were
+> listed with nothing to distinguish them. Design:
+> `docs/superpowers/specs/2026-07-17-product-active-toggle-design.md`.
+
+**Behaviour note (from the 2026-07-17 branch review):** `buildProductUpdate` now *always*
+sends `is_active`, so the retire flag has the same **last-write-wins** semantics the other
+edit-dialog fields already have. Concretely: if admin A has the Edit dialog open on an
+active product, admin B retires it, and A then saves an unrelated price change, A's PATCH
+carries `is_active: true` and silently reactivates it. Accepted deliberately — the design
+treats retiring as an ordinary edit, the dialog re-seeds from the product each time it
+opens, and the window is single-shop/admin-only. Revisit only if concurrent admin editing
+becomes real (the general fix is optimistic concurrency on the whole dialog, not a special
+case for this one field).
+
+Deliberately **not** built (see the design's Rejected alternatives): no confirmation dialog
+(reversible; `EditUser` sets the precedent), **no stock guard on retire** — retiring a
+product *with* stock on hand is required, since adjustments are the documented drain path
+for discontinued stock — and no status filter on the catalog (revisit if the list gets
+noisy; the list still shows every product).
+
+---
+
 ## List & picker UI polish (2026-07-12)
 
 > **DONE 2026-07-12** on branch `feat/list-ui-polish`. Frontend only — no backend, schema,
