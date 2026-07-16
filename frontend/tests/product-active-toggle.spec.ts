@@ -2,12 +2,15 @@ import { expect, test } from "@playwright/test"
 
 // Browser E2E for retiring a product from the catalog (admin-only):
 //   1. Create a throwaway SERIALIZED product — it starts Active.
-//   2. Retire it via the Edit dialog's Active checkbox.
-//   3. The catalog Status column must read Inactive.
-//   4. It must vanish from Receive's serialized picker, which fetches
+//   2. Positive control: the active-only serialized picker on Receive must
+//      offer it while still active, so the later absence assertion proves
+//      something.
+//   3. Retire it via the Edit dialog's Active checkbox.
+//   4. The catalog Status column must read Inactive.
+//   5. It must vanish from Receive's serialized picker, which fetches
 //      { activeOnly: true } — proving the flag reaches the real picker and
 //      not just the form.
-//   5. Reactivating brings it back (the flag is not one-way).
+//   6. Reactivating brings it back (the flag is not one-way).
 // Runs against the shared dev DB (reset by global.setup), authed as the
 // seeded superuser via storageState — no explicit login needed.
 
@@ -39,7 +42,24 @@ test("an admin can retire a product and bring it back", async ({ page }) => {
   // A new product starts active.
   await expect(row.getByText("Active", { exact: true })).toBeVisible()
 
+  // Positive control: prove the active-only serialized picker on Receive
+  // actually offers this product *before* it's retired, using the exact
+  // same combobox/search/option selectors as the post-retire absence
+  // assertion below. Without this baseline, that later toHaveCount(0) would
+  // also pass for the wrong reason — a broken search box, a selector that
+  // silently matches nothing, or the product never populating the picker's
+  // list in the first place. Do not delete this as "redundant" with the
+  // absence check — it's what makes the absence check meaningful.
+  await page.goto("/receive")
+  await page.getByRole("combobox", { name: "Product" }).click()
+  await page.getByPlaceholder("Search products…").fill(sku)
+  const pickerOption = page.getByRole("option", { name: new RegExp(sku) })
+  await expect(pickerOption).toHaveCount(1)
+  await expect(pickerOption).toBeVisible()
+  await page.keyboard.press("Escape")
+
   // Retire it via the Edit dialog.
+  await page.goto("/products")
   await row.getByRole("button", { name: "Edit" }).click()
   const dialog = page.getByRole("dialog", { name: /Edit product/ })
   await expect(dialog).toBeVisible()
