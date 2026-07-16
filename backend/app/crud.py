@@ -768,6 +768,16 @@ def _units_by_movement_key(
     }
 
 
+def _require_active_product(product: Product) -> None:
+    """Inactive (discontinued) products can't be transacted. Mirrors the
+    active-only pickers at the API boundary — typed SKUs, scanned barcodes,
+    and offline replays all bypass the picker filter."""
+    if not product.is_active:
+        raise HTTPException(
+            status_code=400, detail=f"Product {product.sku} is inactive"
+        )
+
+
 def receive_serialized(
     *,
     session: Session,
@@ -780,8 +790,10 @@ def receive_serialized(
     """Receive SERIALIZED pieces: one unit + one RECEIVED movement each, in one
     transaction. Idempotent per request — replaying the same idempotency_key
     returns the already-created units without inserting duplicates (FR-005, S5)."""
-    if not session.get(Product, product_id):
+    product = session.get(Product, product_id)
+    if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    _require_active_product(product)
     if not session.get(Supplier, supplier_id):
         raise HTTPException(status_code=404, detail="Supplier not found")
     ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
@@ -951,6 +963,7 @@ def receive_quantity(
     product = session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    _require_active_product(product)
     if product.tracking_mode != TrackingMode.QUANTITY:
         raise HTTPException(
             status_code=400, detail="Product is not QUANTITY-tracked"
@@ -2398,6 +2411,7 @@ def create_sale(
             ).first()
             if not product:
                 raise HTTPException(status_code=404, detail="Product not found")
+            _require_active_product(product)
             if product.tracking_mode != TrackingMode.QUANTITY:
                 raise HTTPException(
                     status_code=400,
@@ -2463,6 +2477,7 @@ def create_sale(
             )
         product = session.get(Product, unit.product_id)
         assert product is not None  # FK guarantees existence
+        _require_active_product(product)
         unit_price = product.retail_price_thb
         override_id = unit_override_by_barcode.get(barcode)
         if override_id is not None:
@@ -2672,6 +2687,7 @@ def record_service_ticket(
         ).first()
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
+        _require_active_product(product)
         if product.tracking_mode != TrackingMode.QUANTITY:
             raise HTTPException(
                 status_code=400,
@@ -2865,6 +2881,7 @@ def create_project_pull(
         product = session.get(Product, line.product_id)
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
+        _require_active_product(product)
         if line.line_kind == SaleLineKind.UNIT:
             if not line.unit_serial:
                 raise HTTPException(
