@@ -26,6 +26,7 @@ const draft = (over: Partial<ProductEditDraft> = {}): ProductEditDraft => ({
   minStock: "5",
   retailPrice: "1800",
   repairPrice: "300",
+  isActive: true,
   ...over,
 })
 
@@ -37,6 +38,7 @@ test("productToDraft maps a product to editable strings", () => {
     minStock: "5",
     retailPrice: "1800.00",
     repairPrice: "300.00",
+    isActive: true,
   })
 })
 
@@ -72,6 +74,7 @@ test("buildProductUpdate trims and sends prices as strings", () => {
     retail_price_thb: "1999",
     repair_price_thb: "350",
     default_min_stock_level: 5,
+    is_active: true,
   })
 })
 
@@ -85,6 +88,7 @@ test("buildProductUpdate sends null for cleared brand/category/min-stock", () =>
     retail_price_thb: "1800",
     repair_price_thb: "300",
     default_min_stock_level: null,
+    is_active: true,
   })
 })
 
@@ -98,4 +102,27 @@ test("buildProductUpdate preserves a zero min-stock", () => {
   expect(
     buildProductUpdate(draft({ minStock: "0" })).default_min_stock_level,
   ).toBe(0)
+})
+
+test("productToDraft carries is_active through", () => {
+  expect(productToDraft({ ...baseProduct, is_active: false }).isActive).toBe(
+    false,
+  )
+  expect(productToDraft({ ...baseProduct, is_active: true }).isActive).toBe(true)
+})
+
+test("productToDraft defaults a missing is_active to true", () => {
+  // ProductPublic types is_active as optional (it has a server-side default),
+  // so a missing value must read as active — never silently as retired.
+  expect(productToDraft(baseProduct).isActive).toBe(true)
+})
+
+test("buildProductUpdate round-trips is_active", () => {
+  expect(buildProductUpdate(draft({ isActive: false })).is_active).toBe(false)
+  expect(buildProductUpdate(draft({ isActive: true })).is_active).toBe(true)
+})
+
+test("canSaveProduct allows saving a retired product", () => {
+  // Retiring must not make the form unsavable.
+  expect(canSaveProduct(draft({ isActive: false }))).toBe(true)
 })
