@@ -304,6 +304,17 @@ is a live bug; the filter fixes it, and also shrinks the picker payload.
 If either should stay permitted, drop that filter — it is a one-line `where` clause per
 endpoint, and the picker still works without it (just larger, and showing dead records).
 
+> **CONFIRMED + HARDENED 2026-07-15/16** on `dev-kwg`. Owner confirmed both restrictions
+> are wanted — and then manual QA proved the filter was **picker-deep only**: typing an
+> inactive product's SKU straight into `/sale`'s scan input sold it anyway (two SOLD
+> ledger rows for inactive TST-006 in the audit trail). The backend now enforces it:
+> `crud._require_active_product()` rejects inactive products with
+> `400 "Product <SKU> is inactive"` at all six resolution sites — sale PART + UNIT lines,
+> service-ticket parts, quantity + serialized receipts, and project-pull creation.
+> Deliberately **not** enforced on pull *fulfillment* or stock adjustments (draining a
+> discontinued item must stay possible). The audit-SKU exception above is preserved.
+> 7 API tests (`test_inactive_product_guard.py`), TDD'd; FIFO concurrency suite green.
+
 ---
 
 ## List & picker UI polish (2026-07-12)
@@ -698,6 +709,18 @@ delivered.
   **not** the quantity — quantity stays total shop stock (asymmetric with the supplier
   filter, which narrows both). `read_customers` is open to any authed user
   (`customers.py:22`), so unlike supplier this filter *could* be shown to staff.
+  > **FIXED 2026-07-16** on `dev-kwg`. Admin-only customer `EntityCombobox` added to
+  > `/stock` beside the supplier filter (`stock.tsx`, `useCustomerOptions`, same
+  > `isAdmin` gate — owner chose admin-only over staff-visible for consistency).
+  > Semantics preserved exactly as noted above: filtering by a customer narrows *which
+  > products* show; quantity stays total shop stock (verified manually — after selling
+  > 1× TST-002, the filtered row shows 19 on hand, not 1). Playwright spec
+  > `stock-customer-filter.spec.ts` pins the flow (fresh zero-history customer →
+  > `?customer=` request → empty list → clearing restores); backend semantics already
+  > pinned by `test_customer_dashboard.py`. Owner ran the full manual flow 2026-07-16 —
+  > all steps passed. Design doc:
+  > `docs/superpowers/specs/2026-07-16-stock-customer-filter-design.md`. The "and at
+  > what cost" PRD wording clause above remains open (documentation drift, unchanged).
   > **FLAGGED — PRD self-contradiction (the "at what cost" clause), 2026-07-11.**
   > FR-012 (PRD line 237) says the FIFO batch drill-down shows "how many units in each
   > batch, when they were received, **and at what cost**." That is **impossible to honor
@@ -777,6 +800,20 @@ delivered.
   > decided. Whatever is chosen, confirm the real client IP actually reaches the key_func
   > (e.g. log it, or hit login 6× from one host and confirm only *that* host is limited)
   > before trusting the limit in production.
+  >
+  > **FIXED 2026-07-16** on `dev-kwg` (`compose.yml` + comment refresh in `limiter.py`).
+  > Current topology (Traefik as sole ingress; backend service publishes **no** ports) is
+  > enough to act on: `FORWARDED_ALLOW_IPS=*` is now set on the backend service, so
+  > uvicorn resolves `X-Forwarded-For` into `request.client` *before* slowapi keys on it.
+  > The spoofing risk flagged above is closed by Traefik's default `forwardedHeaders`
+  > behavior — client-supplied `X-Forwarded-*` headers are stripped and rewritten
+  > (verified: no `trustedIPs`/`insecure` overrides in `compose.traefik.yml`). Verified
+  > empirically in both directions against a live uvicorn: with trust off, 5 wrong
+  > passwords from 5 forged client IPs 429'd a 6th client holding the *correct* password
+  > (the shop-wide lockout); with the fix, that client logs in while a single hammering
+  > IP still hits 429 at its own 6th attempt. Fix covers every limit sharing the
+  > `limiter` instance. **Re-verify if Cloudflare is later added in front** — its extra
+  > hop re-opens the trusted-proxy question exactly as described above.
 
 ## Not gaps — judgment calls
 
@@ -862,5 +899,5 @@ permanent-failure logging, not a stub.
 **Current top priorities (as of 2026-07-12):**
 1. **List truncation at 100** (see the bug section above) — customer pickers block checkout;
    the audit ledger hides all but the latest 100 movements.
-2. **§8.2 rate limiting behind the proxy** — a live self-DoS: 5 failed logins from anyone
-   locks out every user for 15 minutes.
+2. ~~**§8.2 rate limiting behind the proxy**~~ (FIXED 2026-07-16 on `dev-kwg` —
+   `FORWARDED_ALLOW_IPS=*` in `compose.yml`; see the §8.2 entry above).
