@@ -315,6 +315,24 @@ endpoint, and the picker still works without it (just larger, and showing dead r
 > discontinued item must stay possible). The audit-SKU exception above is preserved.
 > 7 API tests (`test_inactive_product_guard.py`), TDD'd; FIFO concurrency suite green.
 
+> **FOLLOW-UP HARDENING 2026-07-16** on `dev-kwg` (design:
+> `docs/superpowers/specs/2026-07-16-qa-followup-hardening-design.md`). A verification pass
+> found the guard above **broke `receive_serialized`'s own documented idempotency**: it ran
+> *before* the replay lookup, so replaying a receipt made while the product was active
+> returned `400 "... is inactive"` instead of the already-created units — the S5 offline
+> path (FR-005). The guard now sits immediately after the replay-return block, mirroring
+> `receive_quantity`. Fresh receives of an inactive product still `400` (unchanged).
+> Two tests appended: the replay regression (watched failing first, with exactly that
+> `400`) and one pinning the stock-adjustment exception.
+>
+> **OPEN (owner decision, 2026-07-16 database review):** the adjustment exemption is
+> *broader than the justification above*. `create_stock_adjustment` skips the guard for
+> **both** signs of `quantity_delta`; a **positive** delta creates an `is_adjustment`
+> `PartBatch` + `RECEIVED` movement — i.e. it **restocks a retired product**, which is not
+> "draining". Undecided and untested; the new test pins the *drain* direction only. Either
+> narrow the exemption to `quantity_delta < 0`, or confirm restock-while-inactive is
+> intentional and widen the wording here + the `crud.py:2065` comment to say so.
+
 ---
 
 ## List & picker UI polish (2026-07-12)
