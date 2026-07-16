@@ -793,7 +793,6 @@ def receive_serialized(
     product = session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    _require_active_product(product)
     if not session.get(Supplier, supplier_id):
         raise HTTPException(status_code=404, detail="Supplier not found")
     ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
@@ -819,6 +818,11 @@ def receive_serialized(
             caller_user_id=received_by_user_id,
         )
         return [replay[key] for key in move_keys]
+
+    # Guarded after the replay lookup (as in receive_quantity): a replay of a
+    # receipt made while the product was active must still return its units,
+    # even if the product has since been retired.
+    _require_active_product(product)
 
     state = assert_unit_transition(UnitState.RECEIVED, MovementType.RECEIVED)
     units: list[Unit] = []

@@ -256,3 +256,90 @@ def test_sale_error_names_the_offending_sku(
     )
     assert r.status_code == 400, r.text
     assert inactive_ctx["part_sku"] in r.json()["detail"]
+
+
+def test_receive_serialized_replay_survives_deactivation(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    """S5 offline replay must outlive the product's retirement: a receipt made
+    while the product was active still returns its units on replay, even after
+    the product goes inactive (FR-005 idempotency, per receive_serialized's own
+    docstring). Guards the ordering — the guard must sit *after* the replay
+    lookup, as it does in receive_quantity."""
+    if not db.exec(select(Location).where(Location.code == "YGN_WH")).first():
+        crud.seed_locations(session=db)
+    supplier = crud.create_supplier(
+        session=db, supplier_in=SupplierCreate(name="Replay Supplier")
+    )
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"RPRB-S-{uuid.uuid4().hex[:8]}",
+            model_name="Retired Mid-Sync Compressor",
+            tracking_mode=TrackingMode.SERIALIZED,
+            retail_price_thb="500.00",
+            repair_price_thb="50.00",
+        ),
+    )
+    payload = {
+        "product_id": str(product.id),
+        "supplier_id": str(supplier.id),
+        "pieces": [
+            {"supplier_serial": "SN-REPLAY", "purchase_cost_thb": "300.00"}
+        ],
+        "idempotency_key": str(uuid.uuid4()),
+    }
+
+    # Received while the product is still active.
+    first = client.post(
+        f"{PREFIX}/receipts/serialized",
+        headers=superuser_token_headers,
+        json=payload,
+    )
+    assert first.status_code == 200, first.text
+    original_ids = [u["id"] for u in first.json()["units"]]
+    assert original_ids
+
+    # The product is retired before the offline client gets to sync.
+    product.is_active = False
+    db.add(product)
+    db.commit()
+
+    # Same idempotency_key: the client must get its units back, not a 400.
+    replay = client.post(
+        f"{PREFIX}/receipts/serialized",
+        headers=superuser_token_headers,
+        json=payload,
+    )
+    assert replay.status_code == 200, replay.text
+    assert [u["id"] for u in replay.json()["units"]] == original_ids
+
+
+def test_stock_adjustment_allowed_on_inactive_product(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    inactive_ctx: dict[str, Any],
+) -> None:
+    """Draining a discontinued product's residual stock via a negative
+    adjustment is the reconciliation path, so it is deliberately NOT guarded.
+    Pins that decision (notes.md + the create_stock_adjustment comment).
+
+    Scope: pins the *drain* direction only. `create_stock_adjustment` also
+    skips the guard for a POSITIVE delta, which restocks a retired product
+    rather than draining it — that is undecided, not pinned here (see the
+    open follow-up from the 2026-07-16 database review)."""
+    r = client.post(
+        f"{PREFIX}/stock-adjustments",
+        headers=superuser_token_headers,
+        json={
+            "target_kind": "QUANTITY",
+            "sku": inactive_ctx["part_sku"],
+            "quantity_delta": -1,
+            "reason": "Draining discontinued stock",
+            "idempotency_key": str(uuid.uuid4()),
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["quantity_delta"] == -1
