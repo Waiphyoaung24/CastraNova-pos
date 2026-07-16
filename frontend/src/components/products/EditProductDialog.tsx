@@ -4,6 +4,7 @@ import { useId, useState } from "react"
 
 import { type ProductPublic, ProductsService } from "@/client"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogClose,
@@ -59,6 +60,35 @@ function EditField({
         {...(numeric ? { inputMode: "decimal" as const } : {})}
         {...(type === "number" ? { min: 0 } : {})}
       />
+    </div>
+  )
+}
+
+/** The active/retired toggle plus its consequence note. Spans the grid. */
+function ActiveField({
+  checked,
+  onChange,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  const id = useId()
+  return (
+    <div className="space-y-2 sm:col-span-2">
+      <div className="flex items-center gap-3">
+        <Checkbox
+          id={id}
+          checked={checked}
+          onCheckedChange={(v) => onChange(v === true)}
+        />
+        <Label htmlFor={id} className="font-normal">
+          Active
+        </Label>
+      </div>
+      <p className="text-muted-foreground text-xs">
+        Retired products can't be sold, received, or used on tickets. Existing
+        stock stays and can still be drained via Adjust.
+      </p>
     </div>
   )
 }
@@ -167,6 +197,10 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
             type="number"
             numeric
             placeholder="0.00"
+          />
+          <ActiveField
+            checked={draft.isActive}
+            onChange={(v) => setDraft((prev) => ({ ...prev, isActive: v }))}
           />
         </div>
         <DialogFooter>
