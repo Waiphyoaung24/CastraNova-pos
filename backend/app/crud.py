@@ -2058,6 +2058,8 @@ def create_stock_adjustment(
     ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    # No _require_active_product here, deliberately: adjustments are the
+    # reconciliation path for draining an inactive product's residual stock.
     if product.tracking_mode != TrackingMode.QUANTITY:
         raise HTTPException(
             status_code=400,
