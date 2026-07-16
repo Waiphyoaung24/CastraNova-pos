@@ -198,9 +198,11 @@ def test_stock_on_hand_filter_by_customer(
     )
     assert sale.status_code == 200, sale.text
 
+    # The customer filter is admin-only (see test_customer_filter_is_admin_only);
+    # this test pins its row semantics, so it reads as admin.
     r = client.get(
         f"{settings.API_V1_STR}/dashboards/stock-on-hand",
-        headers=staff_token_headers,
+        headers=superuser_token_headers,
         params={"customer": str(customer.id)},
     )
     assert r.status_code == 200, r.text
@@ -435,3 +437,49 @@ def test_stock_on_hand_is_single_pass_not_n_plus_one(
     assert r.status_code == 200
     assert len(r.json()["rows"]) >= 50
     assert counter["n"] < 15
+
+
+def test_customer_filter_is_admin_only(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    bkk_admin_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    """FR-012's ?customer= filter reveals what a customer has bought or had
+    serviced, so it is admin-only (recorded owner decision). The UI gate alone
+    is not enough — a staff token must be rejected at the API. Both admin
+    subtypes is_admin() accepts (superuser and BKK_ADMIN) must get through."""
+    customer = crud.create_customer(
+        session=db,
+        customer_in=CustomerCreate(name=f"Gate Cust {uuid.uuid4().hex[:8]}"),
+    )
+    params = {"customer": str(customer.id)}
+
+    staff = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand",
+        headers=staff_token_headers,
+        params=params,
+    )
+    assert staff.status_code == 403, staff.text
+    assert "admin-only" in staff.json()["detail"].lower()
+
+    for headers in (superuser_token_headers, bkk_admin_token_headers):
+        admin = client.get(
+            f"{settings.API_V1_STR}/dashboards/stock-on-hand",
+            headers=headers,
+            params=params,
+        )
+        assert admin.status_code == 200, admin.text
+
+
+def test_stock_on_hand_without_customer_filter_stays_open_to_staff(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+) -> None:
+    """The admin gate must not regress the plain staff stock view."""
+    r = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand",
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200, r.text
