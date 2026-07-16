@@ -112,6 +112,11 @@ services:
       - POSTGRES_APP_USER=${POSTGRES_APP_USER}
       - POSTGRES_APP_PASSWORD=${POSTGRES_APP_PASSWORD}
       - SENTRY_DSN=${SENTRY_DSN}
+      # Trust X-Forwarded-For so the login rate limit keys on the real client,
+      # not Traefik's container IP (which made the 5/15min limit shop-global).
+      # "*" is safe here: this service publishes no ports — only Traefik can
+      # reach it over the docker network.
+      - FORWARDED_ALLOW_IPS=*
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/utils/health-check/"]
