@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useIsMobile } from "@/hooks/useMobile"
 import { useRole } from "@/hooks/useRole"
@@ -57,6 +58,7 @@ function StockOnHand() {
   const [category, setCategory] = useState("")
   const [query, setQuery] = useState("")
   const [supplierId, setSupplierId] = useState("")
+  const [customerId, setCustomerId] = useState("")
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const {
@@ -64,16 +66,18 @@ function StockOnHand() {
     isPlaceholderData,
     isFetching,
   } = useQuery({
-    queryKey: ["stock-on-hand", supplierId],
+    queryKey: ["stock-on-hand", supplierId, customerId],
     queryFn: () =>
       DashboardsService.getStockOnHand({
         supplier: supplierId || undefined,
+        customer: customerId || undefined,
       }),
     placeholderData: keepPreviousData,
   })
   const listLoading = isPlaceholderData || isFetching
-  // Suppliers list is admin-gated; only fetch it for the admin supplier filter.
+  // Both filters are admin-only; only fetch their option lists for admins.
   const { data: suppliers } = useSupplierOptions({ enabled: isAdmin })
+  const { data: customers } = useCustomerOptions({ enabled: isAdmin })
 
   const allRows = stock?.rows ?? []
   const categories = useMemo(() => deriveCategories(allRows), [allRows])
@@ -137,6 +141,25 @@ function StockOnHand() {
               emptyText="No suppliers available"
               allowClear
               ariaLabel="Supplier filter"
+            />
+          </div>
+        ) : null}
+        {isAdmin ? (
+          <div className="w-full sm:w-48">
+            {/* FR-012: restricts rows to products the customer has ever
+                bought or had serviced (see docs/superpowers/specs/
+                2026-07-16-stock-customer-filter-design.md). */}
+            <EntityCombobox
+              items={customers ?? []}
+              value={customerId || undefined}
+              onChange={(value) => setCustomerId(value ?? "")}
+              getKey={(customer) => customer.id}
+              getLabel={(customer) => customer.name}
+              placeholder="All customers"
+              searchPlaceholder="Search customers…"
+              emptyText="No customers available"
+              allowClear
+              ariaLabel="Customer filter"
             />
           </div>
         ) : null}
