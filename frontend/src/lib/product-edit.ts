@@ -3,6 +3,7 @@ import type { ProductPublic, ProductUpdate } from "@/client/types.gen"
 // Pure form logic for the admin product EDIT dialog. Mirrors product-create.ts:
 // model name + both prices are required; prices are non-negative numbers sent as
 // trimmed strings. Cleared optionals are sent as null so the change persists.
+// is_active is always sent: retiring/reactivating is an ordinary edit here.
 
 export interface ProductEditDraft {
   modelName: string
@@ -11,6 +12,7 @@ export interface ProductEditDraft {
   minStock: string
   retailPrice: string
   repairPrice: string
+  isActive: boolean
 }
 
 function isValidPrice(value: string): boolean {
@@ -31,6 +33,8 @@ export function productToDraft(p: ProductPublic): ProductEditDraft {
         : "",
     retailPrice: String(p.retail_price_thb),
     repairPrice: String(p.repair_price_thb),
+    // Optional on ProductPublic (server-side default), so absence means active.
+    isActive: p.is_active ?? true,
   }
 }
 
@@ -57,5 +61,6 @@ export function buildProductUpdate(d: ProductEditDraft): ProductUpdate {
       minStock !== "" && Number.isFinite(minStockNum) && minStockNum >= 0
         ? minStockNum
         : null,
+    is_active: d.isActive,
   }
 }

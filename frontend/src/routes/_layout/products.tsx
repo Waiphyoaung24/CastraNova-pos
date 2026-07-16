@@ -42,6 +42,7 @@ import { usePagination } from "@/hooks/usePagination"
 import { trackingModeLabel } from "@/lib/labels"
 import { formatThb } from "@/lib/reports"
 import { requireAdmin } from "@/lib/route-guards"
+import { cn } from "@/lib/utils"
 
 // Radix Select forbids an empty-string item value, so "all" uses a sentinel.
 const ALL = "__all__"
@@ -56,16 +57,17 @@ export const Route = createFileRoute("/_layout/products")({
 })
 
 // Column widths in header order (SKU, Model, Brand, Category, Tracking,
-// Purchase, Retail, Repair, History); sum to 100%.
+// Status, Purchase, Retail, Repair, History); sum to 100%.
 const PRODUCT_WIDTHS = [
-  "12%",
-  "16%",
-  "9%",
-  "10%",
-  "10%",
+  "11%",
+  "15%",
+  "8%",
   "9%",
   "9%",
-  "9%",
+  "8%",
+  "8%",
+  "8%",
+  "8%",
   "16%",
 ]
 
@@ -207,7 +209,7 @@ function Products() {
           ) : (
             <ListTable
               widths={PRODUCT_WIDTHS}
-              minWidth={1040}
+              minWidth={1140}
               head={
                 <TableRow>
                   <TableHead>SKU</TableHead>
@@ -215,6 +217,7 @@ function Products() {
                   <TableHead>Brand</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Tracking</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead className="text-right">Purchase</TableHead>
                   <TableHead className="text-right">Retail</TableHead>
                   <TableHead className="text-right">Repair</TableHead>
@@ -236,6 +239,21 @@ function Products() {
                     <Badge variant="secondary">
                       {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "size-2 rounded-full",
+                          p.is_active ? "bg-green-500" : "bg-gray-400",
+                        )}
+                      />
+                      <span
+                        className={p.is_active ? "" : "text-muted-foreground"}
+                      >
+                        {p.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell className="num text-right">
                     {costByProductId.has(p.id)
