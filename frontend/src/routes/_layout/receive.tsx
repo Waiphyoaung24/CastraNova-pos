@@ -4,6 +4,7 @@ import { Boxes, PackagePlus, Trash2 } from "lucide-react"
 import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
+  type ApiError,
   type ProductOption,
   type ReceiptsReceiveQuantityResponse,
   ReceiptsService,
@@ -49,6 +50,7 @@ import {
 import { requireAdmin } from "@/lib/route-guards"
 import type { Queued } from "@/lib/sync-producer"
 import { cn } from "@/lib/utils"
+import { handleError } from "@/utils"
 
 export const Route = createFileRoute("/_layout/receive")({
   component: Receive,
@@ -150,7 +152,7 @@ function SerializedTab() {
   // mutations replay after an offline reload.
   const mutation = useMutation<
     ReceiveSerializedResponse,
-    Error,
+    ApiError,
     Queued<ReceiveSerializedRequest>
   >({
     mutationKey: ["receipts"],
@@ -163,9 +165,11 @@ function SerializedTab() {
       showSuccessToast(`Received ${data.units.length} unit(s).`)
       serialInputRef.current?.focus()
     },
-    onError: () => {
+    onError: (err) => {
       announceMessage("Receive failed.")
-      showErrorToast("Could not receive units. Please retry.")
+      // Surface the server reason (e.g. "Product X is inactive") rather than a
+      // generic retry prompt — retrying will never clear it.
+      handleError.call(showErrorToast, err)
     },
   })
 
@@ -466,7 +470,7 @@ function QuantityTab() {
   // receiveSerialized only). No mutationKey here.
   const mutation = useMutation<
     ReceiptsReceiveQuantityResponse,
-    Error,
+    ApiError,
     ReceiveQuantityRequest
   >({
     mutationFn: (body) =>
@@ -479,9 +483,11 @@ function QuantityTab() {
       )
       showSuccessToast(`Received batch ${batch.batch_no}.`)
     },
-    onError: () => {
+    onError: (err) => {
       announceMessage("Receive failed.")
-      showErrorToast("Could not receive batch. Please retry.")
+      // Surface the server reason (e.g. "Product X is inactive") rather than a
+      // generic retry prompt — retrying will never clear it.
+      handleError.call(showErrorToast, err)
     },
   })
 
