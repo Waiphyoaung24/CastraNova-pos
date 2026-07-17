@@ -365,6 +365,75 @@ noisy; the list still shows every product).
 
 ---
 
+## Sale/Tickets/Receive swallowed the server's error reason (2026-07-18)
+
+> **MERGED 2026-07-18** — PR #12 (`fix/surface-server-error-detail` → `dev`,
+> https://github.com/Waiphyoaung24/CastraNova-pos/pull/12, merge `ade8d39`). Frontend
+> display fix + a local-only seeder. No backend, schema, migration, or SDK change.
+
+**Found while verifying PR #10/#11 in the browser.** The PR #10 inactive-product guard
+works exactly as designed — selling a retired product returns `400 "Product <SKU> is
+inactive"` and writes **zero** ledger rows — but `/sale` showed the cashier *"Could not
+complete the sale. Please try again."*, advice that can never succeed. The `onError`
+handlers on all four mutations took **no parameter**, so the server's `detail` was
+thrown away for a hardcoded string.
+
+**Fix.** `sale.tsx`, `tickets.tsx`, and `receive.tsx` (×2 mutations) now use the house
+pattern `handleError.bind(showErrorToast)` from `utils.ts` — already used by AddUser,
+EditUser, DeleteUser, EditProductDialog, ChangePassword. `extractErrorMessage` unwraps
+`err.body.detail`, including Pydantic's array-shaped 422 detail (`errDetail[0].msg`),
+which the inline variant in `stock-adjustment.tsx` does not. `receive.tsx` keeps its
+`announceMessage("Receive failed.")` a11y call and uses `handleError.call(...)`.
+
+Each mutation's error generic went **`Error` → `ApiError`**. Hardcoding `Error` was the
+actual lock-out: the five working components pass no generic, so `TError` is inferred as
+`ApiError` from the callback. These mutations all go through the generated client, which
+throws `ApiError`; `handleError` stays runtime-safe for plain network errors regardless
+(`instanceof AxiosError` guard + optional chaining).
+
+**Blast radius beyond the inactive case** — every one of these was collapsing to *"please
+try again"*: `"Unit already SOLD"`, `"Duplicate PART line for SKU X; merge into one"`,
+`"PART line requires a QUANTITY-tracked product"`, `"Customer not found"`, and
+insufficient-stock 409s.
+
+**Verified.** `/sale` end-to-end in the browser against retired `OLD-CBL-MICRO` — toast
+now reads *"Product OLD-CBL-MICRO is inactive"*; `bun run build` green (tsc + vite).
+`tickets.tsx` and `receive.tsx` got the identical fix and compile clean but were **not**
+browser-driven (Receive's pickers are active-only, so its inactive path isn't reachable
+from the UI at all).
+
+**Also added `backend/app/seed_demo.py`** — a local-only demo seeder. It drives real
+`crud` operations rather than INSERTing, so the derived ledgers (`part_batch`, `unit`,
+`*_movement`, `cost_line`, `price_change`) are produced the way production produces them
+and reconcile against their own movements (verified `batch.remaining_qty == received_qty
+- Σ cost_line.quantity` across all batches, FIFO consuming oldest-first). Populates every
+domain table (incl. the retired `OLD-CBL-MICRO`, so the inactive guard is testable out of
+the box). Because it TRUNCATEs on the **admin** connection — deliberately bypassing the
+app role's inability to TRUNCATE the append-only ledgers (hardening spec §4.2.3) — **and**
+ships inside the backend image (`Dockerfile` COPYs `./backend/app`), it calls
+`require_local()` and refuses to run unless `ENVIRONMENT == "local"`. Verified both
+directions: refuses on staging (data intact), seeds on local. Run with
+`docker compose exec backend python app/seed_demo.py`.
+
+### Out-of-scope findings flagged in the PR (not fixed here)
+
+1. **Prod rate-limit fix never reached production.** The §8.2 `FORWARDED_ALLOW_IPS=*` fix
+   (2026-07-16) lives only in `compose.yml:122` (dev). `compose.dokploy.yml` — the actual
+   Dokploy deploy file, which publishes `8099:8000` — has **no** `FORWARDED_ALLOW_IPS`, so
+   uvicorn won't resolve `X-Forwarded-For` and slowapi keys on the proxy IP again: the
+   shop-wide-lockout defect the §8.2 note claims fixed is **still live in prod**. Add the
+   var (and re-confirm the trusted-proxy story) on `compose.dokploy.yml`.
+2. **Retired stock is invisible on the stock dashboard.** `crud.stock_on_hand`
+   (`crud.py:4343`) hardcodes `.where(col(Product.is_active).is_(True))`, so a discontinued
+   product with residual on-hand stock silently drops off `/stock` — yet adjustments are
+   the *documented* drain path for exactly that stock (see the 2026-07-17 active-toggle
+   note). An admin can't see what's left to drain. Decide: show inactive rows (perhaps
+   admin-only), or confirm the omission is intended.
+3. **Staff cost-redaction on `/products/` and `/project-pulls` was not re-verified** during
+   this pass — noted for a future check, not investigated here.
+
+---
+
 ## List & picker UI polish (2026-07-12)
 
 > **DONE 2026-07-12** on branch `feat/list-ui-polish`. Frontend only — no backend, schema,
