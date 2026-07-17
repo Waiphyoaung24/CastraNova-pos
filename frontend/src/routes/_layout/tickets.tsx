@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { Wrench } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
-import type { CustomerOption, ServiceTicketPublic } from "@/client"
+import type { ApiError, CustomerOption, ServiceTicketPublic } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
@@ -32,6 +32,7 @@ import {
   type TicketPartLine,
   type TicketSubmission,
 } from "@/lib/ticket-parts"
+import { handleError } from "@/utils"
 
 export const Route = createFileRoute("/_layout/tickets")({
   component: Tickets,
@@ -141,7 +142,7 @@ function Tickets() {
 
   const mutation = useMutation<
     ServiceTicketPublic,
-    Error,
+    ApiError,
     Queued<TicketSubmission>
   >({
     // No mutationFn here on purpose: inherit the persisted ["tickets"] default
@@ -162,9 +163,9 @@ function Tickets() {
       showSuccessToast("Ticket closed.")
       scanRef.current?.focus()
     },
-    onError: () => {
-      showErrorToast("Could not close the ticket. Please try again.")
-    },
+    // Surface the server reason (e.g. "Product X is inactive", insufficient
+    // stock on a part line) — retrying will never clear these.
+    onError: handleError.bind(showErrorToast),
   })
 
   const canClose =

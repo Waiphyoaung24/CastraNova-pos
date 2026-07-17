@@ -4,6 +4,7 @@ import { ShoppingCart } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
+  ApiError,
   CustomerOption,
   SaleCreateRequest,
   SalePublic,
@@ -32,6 +33,7 @@ import {
   setLineQuantity,
 } from "@/lib/sale-cart"
 import type { Queued } from "@/lib/sync-producer"
+import { handleError } from "@/utils"
 
 export const Route = createFileRoute("/_layout/sale")({
   component: Sale,
@@ -136,7 +138,7 @@ function Sale() {
 
   const mutation = useMutation<
     SalePublic | SaleStaffPublic,
-    Error,
+    ApiError,
     Queued<SaleCreateRequest>
   >({
     // No mutationFn here on purpose: inherit the persisted ["sales"] default from
@@ -153,9 +155,10 @@ function Sale() {
       // Return focus to the scan field so the next sale can begin immediately.
       scanRef.current?.focus()
     },
-    onError: () => {
-      showErrorToast("Could not complete the sale. Please try again.")
-    },
+    // Surface the server reason (e.g. "Product X is inactive", "Unit already
+    // SOLD", insufficient stock) — these are user-actionable and retrying will
+    // never clear them. Falls back to a generic message.
+    onError: handleError.bind(showErrorToast),
   })
 
   // Gating on !isPending intentionally locks checkout while a sale is in flight
