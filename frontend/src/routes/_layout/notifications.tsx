@@ -22,7 +22,7 @@ import { useIsMobile } from "@/hooks/useMobile"
 import { channelLabel } from "@/lib/labels"
 import { requireAuth } from "@/lib/route-guards"
 
-// Both roles (FR-018): per-user opt-in for LINE/Viber/Telegram notification events.
+// Both roles (FR-018): per-user opt-in for LINE/Telegram notification events.
 export const Route = createFileRoute("/_layout/notifications")({
   component: Notifications,
   beforeLoad: requireAuth,
@@ -42,10 +42,10 @@ function rowKey(p: { channel: string; event_type: string }): string {
   return `${p.channel}-${p.event_type}`
 }
 
-const CHANNEL_ORDER: NotificationChannel[] = ["TELEGRAM", "LINE", "VIBER"]
+const CHANNEL_ORDER: NotificationChannel[] = ["TELEGRAM", "LINE"]
 
-// Column widths in header order (Event, Telegram, LINE, Viber); sum to 100%.
-const NOTIFICATION_WIDTHS = ["40%", "20%", "20%", "20%"]
+// Column widths in header order (Event, Telegram, LINE); sum to 100%.
+const NOTIFICATION_WIDTHS = ["40%", "30%", "30%"]
 
 type EventGrid = {
   eventType: string
@@ -154,16 +154,16 @@ function Notifications() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Notifications"
-        description="Choose which events get sent to you on Telegram, LINE, or Viber."
+        description="Choose which events get sent to you on Telegram or LINE."
       />
 
       <Alert>
         <Bell />
         <AlertTitle>Get notified your way</AlertTitle>
         <AlertDescription>
-          Turn on the events you want pushed to Telegram, LINE, or Viber — low
-          stock, stock requests, and more. A channel's switches are disabled
-          until it's connected. Make your changes, then Save.
+          Turn on the events you want pushed to Telegram or LINE — low stock,
+          stock requests, and more. A channel's switches are disabled until it's
+          connected. Make your changes, then Save.
         </AlertDescription>
       </Alert>
 
@@ -204,7 +204,7 @@ function Notifications() {
         <ListShell loading={listLoading}>
           <ListTable
             widths={NOTIFICATION_WIDTHS}
-            minWidth={560}
+            minWidth={480}
             head={
               <TableRow>
                 <TableHead>Event</TableHead>

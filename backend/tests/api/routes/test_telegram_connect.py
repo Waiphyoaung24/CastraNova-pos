@@ -18,7 +18,16 @@ from sqlmodel import Session, select
 from app import crud
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.models import NotificationLog, TelegramConnectCode, User, get_datetime_utc
+from app.models import (
+    NotificationChannel,
+    NotificationEvent,
+    NotificationLog,
+    NotificationPreference,
+    NotificationStatus,
+    TelegramConnectCode,
+    User,
+    get_datetime_utc,
+)
 from app.services import notify
 from tests.utils.user import authentication_token_from_email
 from tests.utils.utils import random_email
@@ -490,6 +499,107 @@ def test_test_message_rate_limited(
     finally:
         limiter.enabled = False
         limiter.reset()
+
+
+# --- disconnect ---------------------------------------------------------------
+
+
+def test_disconnect_clears_only_telegram_identity_and_preserves_records(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+) -> None:
+    user, headers = user_and_headers
+    user.telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    user.telegram_username = "winthiha"
+    preference = NotificationPreference(
+        user_id=user.id,
+        channel=NotificationChannel.TELEGRAM,
+        event_type=NotificationEvent.LOW_STOCK,
+        enabled=True,
+    )
+    notification_log = NotificationLog(
+        channel=NotificationChannel.TELEGRAM,
+        event_type=NotificationEvent.LOW_STOCK,
+        target_user_id=user.id,
+        payload={},
+        status=NotificationStatus.SENT,
+        attempts=1,
+    )
+    db.add(user)
+    db.add(preference)
+    db.add(notification_log)
+    db.commit()
+
+    response = client.delete(
+        f"{PREFIX}/notifications/telegram/disconnect", headers=headers
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"message": "Telegram disconnected"}
+    db.expire_all()
+    refreshed = crud.get_user_by_email(session=db, email=user.email)
+    assert refreshed is not None
+    assert refreshed.telegram_chat_id is None
+    assert refreshed.telegram_username is None
+    assert db.get(NotificationPreference, preference.id) is not None
+    assert db.get(NotificationLog, notification_log.id) is not None
+    status = client.get(
+        f"{PREFIX}/notifications/telegram/status", headers=headers
+    )
+    assert status.status_code == 200, status.text
+    assert status.json()["connected"] is False
+    assert status.json()["telegram_username"] is None
+
+
+def test_disconnect_is_idempotent(
+    client: TestClient, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    _user, headers = user_and_headers
+
+    first = client.delete(
+        f"{PREFIX}/notifications/telegram/disconnect", headers=headers
+    )
+    second = client.delete(
+        f"{PREFIX}/notifications/telegram/disconnect", headers=headers
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+
+
+def test_disconnect_requires_authentication(client: TestClient) -> None:
+    response = client.delete(f"{PREFIX}/notifications/telegram/disconnect")
+
+    assert response.status_code == 401, response.text
+
+
+def test_disconnect_does_not_change_another_user(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+) -> None:
+    _user, headers = user_and_headers
+    other_email = random_email()
+    authentication_token_from_email(client=client, email=other_email, db=db)
+    other_user = crud.get_user_by_email(session=db, email=other_email)
+    assert other_user is not None
+    other_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    other_user.telegram_chat_id = other_chat_id
+    other_user.telegram_username = "other-user"
+    db.add(other_user)
+    db.commit()
+
+    response = client.delete(
+        f"{PREFIX}/notifications/telegram/disconnect", headers=headers
+    )
+
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    untouched = crud.get_user_by_email(session=db, email=other_email)
+    assert untouched is not None
+    assert untouched.telegram_chat_id == other_chat_id
+    assert untouched.telegram_username == "other-user"
 
 
 # --- status --------------------------------------------------------------------

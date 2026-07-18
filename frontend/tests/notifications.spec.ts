@@ -1,7 +1,14 @@
 import { expect, type Page, test } from "@playwright/test"
 
+const gridRow = (
+  channel: string,
+  event_type: string,
+  enabled: boolean,
+  channel_connected: boolean,
+) => ({ id: null, channel, event_type, enabled, channel_connected })
+
 // The grid is pivoted: one row per event, one checkbox column per channel
-// (Telegram, LINE, Viber). A channel's checkboxes are disabled until the user
+// (Telegram, LINE). A channel's checkboxes are disabled until the user
 // has an address configured for it -- editing them can never actually
 // deliver. Edits are local until Save is clicked: a single PATCH batches
 // everything changed, rather than firing one request per checkbox.
@@ -9,24 +16,36 @@ import { expect, type Page, test } from "@playwright/test"
 // Which account holds the real Telegram connection is mutable dev-DB state,
 // so anything that depends on a *specific* connected/disconnected state stubs
 // it at the network boundary. Tests that hit the real backend assert only
-// what holds regardless (LINE/Viber have no enrollment path, so they are
+// what holds regardless (LINE has no enrollment path, so it is
 // always disconnected).
 
-// Against the real backend. LINE and Viber have no enrollment path yet (they
+// Against the real backend. LINE has no enrollment path yet (it
 // need an inbound follow/subscribe webhook), so no account in this
-// environment has an address for them -- their switches must always be
+// environment has an address for it -- its switches must always be
 // disabled, since a preference enabled there could never deliver.
-test("channels with no address configured have disabled switches", async ({
-  page,
-}) => {
+test("only Telegram and LINE channels are shown", async ({ page }) => {
+  await page.route("**/notifications/preferences", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        gridRow("TELEGRAM", "LOW_STOCK", false, true),
+        gridRow("LINE", "LOW_STOCK", false, false),
+        gridRow("VIBER", "LOW_STOCK", false, true),
+      ]),
+    })
+  })
   await page.goto("/notifications")
 
   await expect(
+    page.getByRole("checkbox", { name: "Telegram Low stock" }),
+  ).toBeVisible()
+  await expect(
     page.getByRole("checkbox", { name: "LINE Low stock" }),
   ).toBeDisabled()
-  await expect(
-    page.getByRole("checkbox", { name: "Viber Low stock" }),
-  ).toBeDisabled()
+  await expect(page.getByRole("checkbox", { name: /Viber/ })).toHaveCount(0)
+  await expect(page.getByRole("columnheader", { name: "Viber" })).toHaveCount(0)
 })
 
 // Whether any given channel is connected is mutable dev-DB state (an
@@ -37,13 +56,6 @@ test("channels with no address configured have disabled switches", async ({
 test("edits are local until Save, which sends exactly one batched request", async ({
   page,
 }) => {
-  const gridRow = (
-    channel: string,
-    event_type: string,
-    enabled: boolean,
-    channel_connected: boolean,
-  ) => ({ id: null, channel, event_type, enabled, channel_connected })
-
   await page.route("**/notifications/preferences", async (route) => {
     if (route.request().method() !== "GET") return route.fallback()
     return route.fulfill({
@@ -168,9 +180,7 @@ const connectButton = (page: Page) =>
   page.getByRole("button", { name: /^(Connect Telegram|Reconnect)$/ })
 
 // Exercises the real connect endpoint end-to-end, including a genuine
-// server-rendered QR image. Deliberately never clicks "Send test message":
-// TELEGRAM_BOT_TOKEN is configured for real in this dev environment, so that
-// would deliver an actual message to a real person on every test run.
+// server-rendered QR image.
 test("connect card mints a real QR + deep link", async ({ page }) => {
   await page.goto("/notifications")
 
@@ -233,7 +243,50 @@ test("a Telegram already linked elsewhere shows a real error, not a generic time
 // stale binding visible ("Connected as @who?") rather than a meaningless
 // chat id, and delivery_failing is the passive rot warning for a binding
 // that broke (bot blocked, chat deleted) since the last send.
-test("connected state shows the username, and surfaces a failing binding", async ({
+test("connected state can disconnect and refreshes the card", async ({
+  page,
+}) => {
+  let connected = true
+  await page.route("**/notifications/telegram/status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        connected,
+        telegram_username: connected ? "winthiha" : null,
+        delivery_failing: false,
+        last_error: null,
+      }),
+    }),
+  )
+  let disconnectCalls = 0
+  await page.route("**/notifications/telegram/disconnect", (route) => {
+    expect(route.request().method()).toBe("DELETE")
+    disconnectCalls += 1
+    connected = false
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Telegram disconnected" }),
+    })
+  })
+
+  await page.goto("/notifications")
+
+  await expect(page.getByText("Connected as @winthiha")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Send test message" }),
+  ).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Disconnect" }).click()
+
+  await expect(page.getByText("Telegram disconnected.")).toBeVisible()
+  await expect(page.getByText("Not connected.")).toBeVisible()
+  expect(disconnectCalls).toBe(1)
+})
+
+test("failed disconnect keeps the connection and shows an error", async ({
   page,
 }) => {
   await page.route("**/notifications/telegram/status", (route) =>
@@ -243,20 +296,20 @@ test("connected state shows the username, and surfaces a failing binding", async
       body: JSON.stringify({
         connected: true,
         telegram_username: "winthiha",
-        delivery_failing: true,
-        last_error: "Forbidden: bot was blocked by the user",
+        delivery_failing: false,
+        last_error: null,
       }),
     }),
   )
+  await page.route("**/notifications/telegram/disconnect", (route) =>
+    route.fulfill({ status: 500, body: "Server error" }),
+  )
 
   await page.goto("/notifications")
+  await page.getByRole("button", { name: "Disconnect" }).click()
 
+  await expect(
+    page.getByText("Could not disconnect Telegram. Try again."),
+  ).toBeVisible()
   await expect(page.getByText("Connected as @winthiha")).toBeVisible()
-  await expect(
-    page.getByRole("button", { name: "Send test message" }),
-  ).toBeVisible()
-  await expect(page.getByText("Telegram delivery is failing")).toBeVisible()
-  await expect(
-    page.getByText("Forbidden: bot was blocked by the user"),
-  ).toBeVisible()
 })

@@ -5,6 +5,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.core.config import settings
 from app.core.limiter import TELEGRAM_TEST_RATE_LIMIT, limiter
 from app.models import (
+    Message,
     NotificationPreferencePublic,
     NotificationPreferencesUpdate,
     NotificationStatus,
@@ -107,6 +108,14 @@ def confirm_telegram(
             ),
         )
     return TelegramConfirmResult(connected=False)
+
+
+@router.delete("/telegram/disconnect", response_model=Message)
+def disconnect_telegram(
+    *, session: SessionDep, current_user: CurrentUser
+) -> Message:
+    crud.disconnect_telegram(session=session, user=current_user)
+    return Message(message="Telegram disconnected")
 
 
 @router.post("/telegram/test", response_model=TelegramTestResult)
