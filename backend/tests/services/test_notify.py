@@ -243,6 +243,129 @@ def test_send_telegram_transport_error_retryable(
         notify.send_telegram(to="123456789", text="hi")
 
 
+def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+        calls.append({"url": url, "headers": headers, "json": json})
+        return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    result = notify.get_telegram_updates()
+
+    assert result == [{"update_id": 1}]
+    assert calls[0]["url"] == f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    # Never acknowledging updates (no poller, no offset state) means the
+    # request must never carry an offset -- Telegram would stop re-sending
+    # already-seen updates the moment one is.
+    assert "offset" not in calls[0]["json"]
+
+
+def test_get_telegram_updates_5xx_raises_retryable_single_raw_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        attempts["n"] += 1
+        return _resp(503)
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates()
+    assert attempts["n"] == 1
+
+
+def test_get_telegram_updates_429_is_retryable_not_permanent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        return _resp(429, {"ok": False, "parameters": {"retry_after": 1}})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates()
+
+
+def test_get_telegram_updates_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        return _resp(401, {"ok": False, "description": "Unauthorized"})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.get_telegram_updates()
+
+
+def test_get_telegram_updates_transport_error_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(notify, "_post", boom)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates()
+
+
+def test_get_telegram_updates_unset_token_raises_permanent_no_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", None)
+    calls: list[Any] = []
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: calls.append(1))
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.get_telegram_updates()
+    assert calls == []
+
+
+def test_get_telegram_updates_never_logs_the_token_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(500))
+    try:
+        notify.get_telegram_updates()
+    except notify.RetryableNotifyError as exc:
+        assert TELEGRAM_TOKEN not in str(exc)
+    else:
+        pytest.fail("expected RetryableNotifyError")
+
+
+def test_parse_start_code_extracts_chat_id_username_and_code() -> None:
+    update = {
+        "update_id": 123456,
+        "message": {
+            "chat": {"id": 847392015, "username": "winthiha", "type": "private"},
+            "text": "/start A7X2K9examplecode",
+        },
+    }
+    assert notify.parse_start_code(update) == (
+        "847392015",
+        "winthiha",
+        "A7X2K9examplecode",
+    )
+
+
+def test_parse_start_code_handles_missing_username() -> None:
+    update = {"message": {"chat": {"id": 1}, "text": "/start CODE123"}}
+    assert notify.parse_start_code(update) == ("1", None, "CODE123")
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"update_id": 1},  # no message at all
+        {"message": {"chat": {"id": 1}, "text": "just chatting"}},  # not /start
+        {"message": {"chat": {"id": 1}, "text": "/start"}},  # no code after it
+        {"message": {"text": "/start CODE"}},  # no chat
+        {"message": {"chat": {}, "text": "/start CODE"}},  # chat has no id
+    ],
+)
+def test_parse_start_code_ignores_unrelated_messages(update: dict[str, Any]) -> None:
+    assert notify.parse_start_code(update) is None
+
+
 def test_send_viber_status_zero_success(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
