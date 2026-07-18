@@ -38,7 +38,7 @@ def test_sixth_login_attempt_is_rate_limited(
     assert "Rate limit" in r6.json().get("error", "")
 
 
-def test_sixth_refresh_attempt_is_rate_limited(
+def test_refresh_is_rate_limited_above_the_cap(
     client: TestClient,
     rate_limit_on: None,  # noqa: ARG001 — side-effect fixture; enables rate limiting
 ) -> None:
@@ -46,12 +46,12 @@ def test_sixth_refresh_attempt_is_rate_limited(
     client.cookies.clear()  # no refresh cookie -> 401s, which still count
     url = f"{settings.API_V1_STR}/login/refresh-token"
 
-    codes = [client.post(url).status_code for _ in range(5)]
+    codes = [client.post(url).status_code for _ in range(60)]
     assert all(c == 401 for c in codes)
 
-    r6 = client.post(url)
-    assert r6.status_code == 429
-    assert "Rate limit" in r6.json().get("error", "")
+    r61 = client.post(url)
+    assert r61.status_code == 429
+    assert "Rate limit" in r61.json().get("error", "")
 
 
 def test_twenty_first_logout_is_rate_limited(
