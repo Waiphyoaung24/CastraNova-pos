@@ -52,6 +52,8 @@ export function channelLabel(channel: string): string {
       return "LINE"
     case "VIBER":
       return "Viber"
+    case "TELEGRAM":
+      return "Telegram"
     default:
       return channel
   }
