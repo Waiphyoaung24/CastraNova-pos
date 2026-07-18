@@ -44,6 +44,9 @@ def read_products(
         ),
     ] = None,
     tracking_mode: TrackingMode | None = None,
+    is_active: Annotated[
+        bool | None, Query(description="Filter by active/inactive status")
+    ] = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ProductsPublic:
@@ -54,11 +57,17 @@ def read_products(
             brand=brand,
             category=category,
             tracking_mode=tracking_mode,
+            is_active=is_active,
             skip=skip,
             limit=limit,
         ),
         count=crud.count_products(
-            session=session, q=q, brand=brand, category=category, tracking_mode=tracking_mode
+            session=session,
+            q=q,
+            brand=brand,
+            category=category,
+            tracking_mode=tracking_mode,
+            is_active=is_active,
         ),
     )
 
