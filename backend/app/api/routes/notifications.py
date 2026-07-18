@@ -8,6 +8,7 @@ from app.models import (
     NotificationPreferencePublic,
     NotificationPreferencesUpdate,
     NotificationStatus,
+    TelegramConfirmOutcome,
     TelegramConfirmRequest,
     TelegramConfirmResult,
     TelegramConnectResponse,
@@ -88,16 +89,24 @@ def confirm_telegram(
         return TelegramConfirmResult(connected=False)
 
     chat_id, username, _ = match
-    connected = crud.confirm_telegram_connect_code(
+    outcome = crud.confirm_telegram_connect_code(
         session=session,
         user=current_user,
         code=payload.code,
         chat_id=chat_id,
         username=username,
     )
-    return TelegramConfirmResult(
-        connected=connected, telegram_username=username if connected else None
-    )
+    if outcome is TelegramConfirmOutcome.CONNECTED:
+        return TelegramConfirmResult(connected=True, telegram_username=username)
+    if outcome is TelegramConfirmOutcome.CHAT_ALREADY_LINKED:
+        return TelegramConfirmResult(
+            connected=False,
+            error=(
+                "This Telegram account is already connected to another user. "
+                "Disconnect it there first, or use a different Telegram account."
+            ),
+        )
+    return TelegramConfirmResult(connected=False)
 
 
 @router.post("/telegram/test", response_model=TelegramTestResult)

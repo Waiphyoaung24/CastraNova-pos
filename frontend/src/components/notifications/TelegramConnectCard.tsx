@@ -28,6 +28,7 @@ export function TelegramConnectCard() {
   const [activeCode, setActiveCode] = useState<string | null>(null)
   const [pollStartedAt, setPollStartedAt] = useState<number | null>(null)
   const [pollTimedOut, setPollTimedOut] = useState(false)
+  const [confirmError, setConfirmError] = useState<string | null>(null)
 
   const connectMutation = useMutation({
     mutationFn: () => NotificationsService.connectTelegram(),
@@ -35,6 +36,7 @@ export function TelegramConnectCard() {
       setActiveCode(data.code)
       setPollStartedAt(Date.now())
       setPollTimedOut(false)
+      setConfirmError(null)
     },
     onError: () =>
       showErrorToast("Could not start connecting Telegram. Try again."),
@@ -67,6 +69,18 @@ export function TelegramConnectCard() {
     // showSuccessToast is a stable helper from useCustomToast; the actual
     // trigger is confirmQuery.data flipping to connected.
   }, [confirmQuery.data, queryClient, showSuccessToast])
+
+  // A terminal failure (e.g. this Telegram already backs another account).
+  // Stop polling immediately rather than letting it run out the clock into a
+  // generic timeout -- more polling cannot resolve it, and the user needs to
+  // know that rather than being told to just try again.
+  useEffect(() => {
+    const error = confirmQuery.data?.error
+    if (!error) return
+    setActiveCode(null)
+    setPollStartedAt(null)
+    setConfirmError(error)
+  }, [confirmQuery.data])
 
   // Give up client-side after POLL_TIMEOUT_MS so the card doesn't poll
   // forever if the user never taps Start.
@@ -175,7 +189,15 @@ export function TelegramConnectCard() {
         </div>
       )}
 
-      {pollTimedOut && (
+      {confirmError && (
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>Couldn't connect this Telegram account</AlertTitle>
+          <AlertDescription>{confirmError}</AlertDescription>
+        </Alert>
+      )}
+
+      {pollTimedOut && !confirmError && (
         <p className="text-muted-foreground text-sm">
           Didn't detect a connection — tap Reconnect to try again.
         </p>

@@ -4284,6 +4284,17 @@ export const TelegramConfirmResultSchema = {
                 }
             ],
             title: 'Telegram Username'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
         }
     },
     type: 'object',

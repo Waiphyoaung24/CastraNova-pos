@@ -97,6 +97,7 @@ from app.models import (
     SyncReviewItemCreate,
     SyncReviewState,
     SystemSetting,
+    TelegramConfirmOutcome,
     TelegramConnectCode,
     TrackingMode,
     Unit,
@@ -3258,13 +3259,13 @@ def create_telegram_connect_code(
     not a correlation key, so the code must be unguessable -- never a short
     or sequential value.
 
-    token_hex, not token_urlsafe: Telegram's deep-link start parameter only
-    allows [A-Za-z0-9_] (https://core.telegram.org/bots/features#deep-linking).
-    token_urlsafe's '-' fails that silently -- the Telegram client just drops
-    the whole parameter and sends a bare "/start", so parse_start_code never
-    finds a match and confirm hangs forever. token_hex(16) is 32 lowercase hex
-    characters, entirely within the allowed set, and matches the code column's
-    existing max_length=32 exactly.
+    token_hex gives 32 lowercase hex characters -- 128 bits of entropy (same
+    as token_urlsafe(16)) and exactly the code column's max_length=32.
+
+    Telegram's deep-link start parameter allows A-Z, a-z, 0-9, '_' and '-'
+    (https://core.telegram.org/bots/features#deep-linking), so token_urlsafe
+    would be equally valid here; hex is just unambiguous in a URL. Do NOT
+    switch to plain base64 -- its '+', '/' and '=' are outside that set.
     """
     record = TelegramConnectCode(
         user_id=user_id,
@@ -3279,7 +3280,7 @@ def create_telegram_connect_code(
 
 def confirm_telegram_connect_code(
     *, session: Session, user: User, code: str, chat_id: str, username: str | None
-) -> bool:
+) -> TelegramConfirmOutcome:
     """Validate and atomically consume a pending connect code for `user`,
     binding `chat_id`/`username` on success. The caller (the confirm route)
     is responsible for resolving `chat_id`/`username` via
@@ -3289,6 +3290,11 @@ def confirm_telegram_connect_code(
 
     ``FOR UPDATE`` makes the consumed_at check-then-set atomic against a
     racing second confirm for the same code.
+
+    Returns PENDING for anything the caller should keep polling through (no
+    such code, wrong owner, expired, already consumed) and
+    CHAT_ALREADY_LINKED for the one terminal case, so the UI can say
+    something true instead of timing out with a generic message.
     """
     record = session.exec(
         select(TelegramConnectCode)
@@ -3299,9 +3305,21 @@ def confirm_telegram_connect_code(
         .with_for_update()
     ).first()
     if record is None or record.consumed_at is not None:
-        return False
+        return TelegramConfirmOutcome.PENDING
     if record.expires_at < get_datetime_utc():
-        return False
+        return TelegramConfirmOutcome.PENDING
+
+    # Checked up front for a clear answer in the common case; the
+    # IntegrityError below still backstops a racing bind between here and
+    # commit. Deliberately does NOT consume the code -- the user can unlink
+    # the other account and retry within the TTL.
+    incumbent = session.exec(
+        select(User).where(
+            User.telegram_chat_id == chat_id, User.id != user.id
+        )
+    ).first()
+    if incumbent is not None:
+        return TelegramConfirmOutcome.CHAT_ALREADY_LINKED
 
     record.consumed_at = get_datetime_utc()
     session.add(record)
@@ -3311,10 +3329,12 @@ def confirm_telegram_connect_code(
     try:
         session.commit()
     except IntegrityError:
-        # e.g. this chat is already bound to a different account.
+        # Lost the race: someone bound this chat between the check above and
+        # the commit. The rollback also discards consumed_at, so the code
+        # stays usable if the winner later unlinks.
         session.rollback()
-        return False
-    return True
+        return TelegramConfirmOutcome.CHAT_ALREADY_LINKED
+    return TelegramConfirmOutcome.CONNECTED
 
 
 def get_latest_telegram_notification_log(

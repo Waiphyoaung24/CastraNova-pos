@@ -1703,9 +1703,26 @@ class TelegramConfirmRequest(SQLModel):
     code: str
 
 
+class TelegramConfirmOutcome(str, enum.Enum):
+    """Why a confirm attempt ended. PENDING is the ordinary "the user hasn't
+    tapped Start yet" case and must stay distinguishable from the terminal
+    failures below, or the client would abort a poll that just needs more
+    time -- or, worse, keep polling forever on something polling can't fix."""
+
+    CONNECTED = "CONNECTED"
+    PENDING = "PENDING"
+    # This Telegram chat already backs a different account (UNIQUE
+    # telegram_chat_id). Terminal: retrying cannot resolve it.
+    CHAT_ALREADY_LINKED = "CHAT_ALREADY_LINKED"
+
+
 class TelegramConfirmResult(SQLModel):
     connected: bool
     telegram_username: str | None = None
+    # Human-readable reason, set only on a terminal failure the user must act
+    # on. None on both success and PENDING -- the client keeps polling while
+    # this is null and stops as soon as it isn't.
+    error: str | None = None
 
 
 class TelegramTestResult(SQLModel):

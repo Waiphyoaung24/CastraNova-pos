@@ -82,15 +82,17 @@ def test_connect_code_is_unguessably_long(
 def test_connect_code_only_uses_telegrams_allowed_start_parameter_charset(
     client: TestClient, user_and_headers: tuple[User, dict[str, str]]
 ) -> None:
-    """Telegram's deep-link start parameter only allows [A-Za-z0-9_] -- any
-    other character (e.g. secrets.token_urlsafe's '-') makes the client treat
-    the whole parameter as invalid and drop it, so the user's Telegram just
-    sends a bare "/start" with no code. parse_start_code would never find a
-    match and confirm would hang forever."""
+    """Telegram's deep-link start parameter allows A-Z, a-z, 0-9, '_' and '-'
+    (https://core.telegram.org/bots/features#deep-linking). Both token_hex and
+    token_urlsafe satisfy that; this guards against switching to something
+    that doesn't -- plain base64's '+', '/' and '=' being the likely mistake,
+    since it looks interchangeable with base64url at a glance."""
     r = client.post(f"{PREFIX}/notifications/telegram/connect", headers=user_and_headers[1])
     assert r.status_code == 200, r.text
     code = r.json()["code"]
-    assert re.fullmatch(r"[A-Za-z0-9_]+", code), code
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", code), code
+    # Telegram caps the start payload at 64 characters.
+    assert len(code) <= 64
 
 
 # --- confirm ---------------------------------------------------------------
@@ -136,7 +138,11 @@ def test_confirm_binds_chat_id_and_username_on_match(
         json={"code": code},
     )
     assert r.status_code == 200, r.text
-    assert r.json() == {"connected": True, "telegram_username": "winthiha"}
+    assert r.json() == {
+        "connected": True,
+        "telegram_username": "winthiha",
+        "error": None,
+    }
 
     db.expire_all()
     refreshed = crud.get_user_by_email(session=db, email=user.email)
@@ -279,6 +285,112 @@ def test_confirm_cannot_be_completed_by_a_different_user(
     other_user = crud.get_user_by_email(session=db, email=other_email)
     assert other_user is not None
     assert other_user.telegram_chat_id is None
+
+
+def test_confirm_reports_a_chat_already_linked_to_another_account(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Telegram chat can only back one account (UNIQUE telegram_chat_id).
+    Without a distinct error this is indistinguishable from "not yet" and the
+    UI shows a generic timeout -- misleading, because reconnecting can never
+    resolve it. The user has to unlink the other account first."""
+    taken_chat_id = _unique_chat_id()
+    incumbent, _ = user_and_headers
+    incumbent.telegram_chat_id = taken_chat_id
+    db.add(incumbent)
+    db.commit()
+
+    newcomer_email = random_email()
+    newcomer_headers = authentication_token_from_email(
+        client=client, email=newcomer_email, db=db
+    )
+    r_connect = client.post(
+        f"{PREFIX}/notifications/telegram/connect", headers=newcomer_headers
+    )
+    code = r_connect.json()["code"]
+    _stub_updates(
+        monkeypatch,
+        {"message": {"chat": {"id": int(taken_chat_id)}, "text": f"/start {code}"}},
+    )
+
+    r = client.post(
+        f"{PREFIX}/notifications/telegram/confirm",
+        headers=newcomer_headers,
+        json={"code": code},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["connected"] is False
+    assert body["error"] is not None
+    assert "already" in body["error"].lower()
+
+    newcomer = crud.get_user_by_email(session=db, email=newcomer_email)
+    assert newcomer is not None
+    assert newcomer.telegram_chat_id is None
+
+
+def test_confirm_does_not_consume_the_code_when_the_chat_is_taken(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The user can fix this (unlink the other account) and retry, so the
+    code must survive a rejected attempt rather than being burned."""
+    taken_chat_id = _unique_chat_id()
+    incumbent, _ = user_and_headers
+    incumbent.telegram_chat_id = taken_chat_id
+    db.add(incumbent)
+    db.commit()
+
+    newcomer_headers = authentication_token_from_email(
+        client=client, email=random_email(), db=db
+    )
+    code = client.post(
+        f"{PREFIX}/notifications/telegram/connect", headers=newcomer_headers
+    ).json()["code"]
+    _stub_updates(
+        monkeypatch,
+        {"message": {"chat": {"id": int(taken_chat_id)}, "text": f"/start {code}"}},
+    )
+    client.post(
+        f"{PREFIX}/notifications/telegram/confirm",
+        headers=newcomer_headers,
+        json={"code": code},
+    )
+
+    db.expire_all()
+    row = db.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.code == code)
+    ).first()
+    assert row is not None
+    assert row.consumed_at is None
+
+
+def test_confirm_pending_has_no_error(
+    client: TestClient,
+    user_and_headers: tuple[User, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"Not yet" must stay error-free, or the UI would abort a poll that
+    simply hasn't seen the user tap Start."""
+    _user, headers = user_and_headers
+    code = client.post(
+        f"{PREFIX}/notifications/telegram/connect", headers=headers
+    ).json()["code"]
+    _stub_updates(monkeypatch)
+
+    r = client.post(
+        f"{PREFIX}/notifications/telegram/confirm",
+        headers=headers,
+        json={"code": code},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["connected"] is False
+    assert r.json()["error"] is None
 
 
 # --- test message ------------------------------------------------------------

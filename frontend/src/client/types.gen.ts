@@ -843,6 +843,7 @@ export type TelegramConfirmRequest = {
 export type TelegramConfirmResult = {
     connected: boolean;
     telegram_username?: (string | null);
+    error?: (string | null);
 };
 
 export type TelegramConnectResponse = {

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, type Page, test } from "@playwright/test"
 
 // The grid is pivoted: one row per event, one checkbox column per channel
 // (Telegram, LINE, Viber). A channel's checkboxes are disabled until the user
@@ -6,59 +6,110 @@ import { expect, test } from "@playwright/test"
 // deliver. Edits are local until Save is clicked: a single PATCH batches
 // everything changed, rather than firing one request per checkbox.
 //
-// The seeded superuser already has a real telegram_chat_id (connected) and no
-// line_user_id/viber_user_id (disconnected), so this exercises both states
-// without needing to mutate user data for setup.
+// Which account holds the real Telegram connection is mutable dev-DB state,
+// so anything that depends on a *specific* connected/disconnected state stubs
+// it at the network boundary. Tests that hit the real backend assert only
+// what holds regardless (LINE/Viber have no enrollment path, so they are
+// always disconnected).
 
-test("channel columns are gated by connection; Save batches, doesn't fire per click", async ({
+// Against the real backend. LINE and Viber have no enrollment path yet (they
+// need an inbound follow/subscribe webhook), so no account in this
+// environment has an address for them -- their switches must always be
+// disabled, since a preference enabled there could never deliver.
+test("channels with no address configured have disabled switches", async ({
   page,
 }) => {
   await page.goto("/notifications")
 
-  const telegramLowStock = page.getByRole("checkbox", {
-    name: "Telegram Low stock",
+  await expect(
+    page.getByRole("checkbox", { name: "LINE Low stock" }),
+  ).toBeDisabled()
+  await expect(
+    page.getByRole("checkbox", { name: "Viber Low stock" }),
+  ).toBeDisabled()
+})
+
+// Whether any given channel is connected is mutable dev-DB state (an
+// operator can move a Telegram connection between accounts at any time), so
+// the grid is stubbed here to keep this deterministic. That also lets it
+// count PATCH calls directly -- asserting "exactly one request, only after
+// Save" rather than inferring it from a reload.
+test("edits are local until Save, which sends exactly one batched request", async ({
+  page,
+}) => {
+  const gridRow = (
+    channel: string,
+    event_type: string,
+    enabled: boolean,
+    channel_connected: boolean,
+  ) => ({ id: null, channel, event_type, enabled, channel_connected })
+
+  await page.route("**/notifications/preferences", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        gridRow("TELEGRAM", "LOW_STOCK", false, true),
+        gridRow("TELEGRAM", "PULL_SHORT", false, true),
+        gridRow("LINE", "LOW_STOCK", false, false),
+        gridRow("LINE", "PULL_SHORT", false, false),
+      ]),
+    })
   })
-  const lineLowStock = page.getByRole("checkbox", { name: "LINE Low stock" })
-  const viberLowStock = page.getByRole("checkbox", { name: "Viber Low stock" })
 
-  await expect(telegramLowStock).toBeVisible()
-  await expect(telegramLowStock).toBeEnabled()
-  // No address configured for LINE/Viber -- their switches must be disabled,
-  // regardless of any (impossible) opted-in state.
-  await expect(lineLowStock).toBeDisabled()
-  await expect(viberLowStock).toBeDisabled()
+  const patches: string[] = []
+  await page.route("**/notifications/preferences", async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback()
+    patches.push(route.request().postData() ?? "")
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        gridRow("TELEGRAM", "LOW_STOCK", true, true),
+        gridRow("TELEGRAM", "PULL_SHORT", true, true),
+        gridRow("LINE", "LOW_STOCK", false, false),
+        gridRow("LINE", "PULL_SHORT", false, false),
+      ]),
+    })
+  })
 
+  await page.goto("/notifications")
+
+  const lowStock = page.getByRole("checkbox", { name: "Telegram Low stock" })
+  const pullShort = page.getByRole("checkbox", { name: "Telegram Pull short" })
   const saveButton = page.getByRole("button", { name: "Save" })
+
+  // A connected channel is editable; a disconnected one never is.
+  await expect(lowStock).toBeEnabled()
+  await expect(
+    page.getByRole("checkbox", { name: "LINE Low stock" }),
+  ).toBeDisabled()
   await expect(saveButton).toBeDisabled()
 
-  const wasChecked = await telegramLowStock.isChecked()
-
-  // Toggle without saving: the checkbox flips locally, Save becomes
-  // available, but reloading before Save must revert it -- proving no
-  // request fired on click.
-  await telegramLowStock.click()
-  await expect(telegramLowStock).toBeChecked({ checked: !wasChecked })
+  // Two edits, no Save yet: nothing may have been sent.
+  await lowStock.click()
+  await pullShort.click()
+  await expect(lowStock).toBeChecked()
+  await expect(pullShort).toBeChecked()
   await expect(saveButton).toBeEnabled()
+  expect(patches).toHaveLength(0)
 
-  await page.reload()
-  await expect(
-    page.getByRole("checkbox", { name: "Telegram Low stock" }),
-  ).toBeChecked({ checked: wasChecked })
-
-  // Toggle again and actually Save this time.
-  await page.getByRole("checkbox", { name: "Telegram Low stock" }).click()
-  await page.getByRole("button", { name: "Save" }).click()
+  await saveButton.click()
   await expect(page.getByText("Preferences saved.")).toBeVisible()
 
-  await page.reload()
-  await expect(
-    page.getByRole("checkbox", { name: "Telegram Low stock" }),
-  ).toBeChecked({ checked: !wasChecked })
+  // Exactly one request, carrying both edits together.
+  expect(patches).toHaveLength(1)
+  const sent = JSON.parse(patches[0]).preferences
+  expect(sent).toHaveLength(2)
+  expect(sent.map((p: { event_type: string }) => p.event_type).sort()).toEqual([
+    "LOW_STOCK",
+    "PULL_SHORT",
+  ])
+  expect(sent.every((p: { enabled: boolean }) => p.enabled)).toBe(true)
 
-  // Restore original state so the test is repeatable.
-  await page.getByRole("checkbox", { name: "Telegram Low stock" }).click()
-  await page.getByRole("button", { name: "Save" }).click()
-  await expect(page.getByText("Preferences saved.")).toBeVisible()
+  // Save goes back to disabled once there's nothing pending.
+  await expect(saveButton).toBeDisabled()
 })
 
 // Regression coverage for two rendering bugs found via screenshot: checkboxes
@@ -109,26 +160,21 @@ test("Low stock row has no gap in its hover highlight, and its checkboxes are ce
   }
 })
 
-// The seeded admin already has a real Telegram chat connected (from earlier
-// manual testing), so this exercises the real connect endpoint end-to-end --
-// including a real QR image and a real getUpdates poll against Telegram's
-// API. Deliberately never clicks "Send test message": TELEGRAM_BOT_TOKEN is
-// configured for real in this dev environment, and that chat_id is a real
-// person's Telegram, so clicking it would actually deliver a message to a
-// human on every test run.
-test("Telegram card shows connected state and Reconnect mints a real QR + deep link", async ({
-  page,
-}) => {
+// The card's button reads "Connect Telegram" or "Reconnect" depending on
+// whether this account currently has a chat bound. That's mutable dev-DB
+// state (an operator can move a connection between accounts at any time), so
+// tests must not hard-code either wording.
+const connectButton = (page: Page) =>
+  page.getByRole("button", { name: /^(Connect Telegram|Reconnect)$/ })
+
+// Exercises the real connect endpoint end-to-end, including a genuine
+// server-rendered QR image. Deliberately never clicks "Send test message":
+// TELEGRAM_BOT_TOKEN is configured for real in this dev environment, so that
+// would deliver an actual message to a real person on every test run.
+test("connect card mints a real QR + deep link", async ({ page }) => {
   await page.goto("/notifications")
 
-  // "Telegram" also appears as a grid column header, so anchor on text
-  // unique to the card instead of a bare channel-name match.
-  await expect(page.getByText(/^Connected as/)).toBeVisible()
-  await expect(
-    page.getByRole("button", { name: "Send test message" }),
-  ).toBeVisible()
-
-  await page.getByRole("button", { name: "Reconnect" }).click()
+  await connectButton(page).click()
 
   const qr = page.getByRole("img", { name: "Scan to connect Telegram" })
   await expect(qr).toBeVisible()
@@ -136,4 +182,81 @@ test("Telegram card shows connected state and Reconnect mints a real QR + deep l
 
   const deepLink = page.locator('a[href*="t.me"]')
   await expect(deepLink).toHaveAttribute("href", /\?start=.+/)
+  // The bot username must be configured, or the link is a dead t.me/None.
+  await expect(deepLink).not.toHaveAttribute(
+    "href",
+    /t\.me\/(None|undefined)\?/,
+  )
+})
+
+// A terminal confirm failure (this Telegram already backs another account)
+// must surface as a real message and stop the poll, not run out the clock
+// into "Didn't detect a connection" -- which would tell the user to retry
+// something retrying cannot fix. The trigger needs a *second* real Telegram
+// account to reproduce for real, so the confirm response is stubbed at the
+// network boundary; everything downstream of it is the real component.
+test("a Telegram already linked elsewhere shows a real error, not a generic timeout", async ({
+  page,
+}) => {
+  const ERROR =
+    "This Telegram account is already connected to another user. Disconnect it there first, or use a different Telegram account."
+
+  await page.route("**/notifications/telegram/confirm", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        connected: false,
+        telegram_username: null,
+        error: ERROR,
+      }),
+    }),
+  )
+
+  await page.goto("/notifications")
+  await connectButton(page).click()
+
+  await expect(
+    page.getByText("Couldn't connect this Telegram account"),
+  ).toBeVisible()
+  await expect(page.getByText(ERROR)).toBeVisible()
+  // The generic timeout copy must not also appear.
+  await expect(page.getByText(/Didn't detect a connection/)).toHaveCount(0)
+  // Polling stopped, so the QR is torn down rather than left spinning.
+  await expect(
+    page.getByRole("img", { name: "Scan to connect Telegram" }),
+  ).toHaveCount(0)
+})
+
+// Connected-state rendering, stubbed so it doesn't depend on which account
+// currently owns the real Telegram connection. The username is what makes a
+// stale binding visible ("Connected as @who?") rather than a meaningless
+// chat id, and delivery_failing is the passive rot warning for a binding
+// that broke (bot blocked, chat deleted) since the last send.
+test("connected state shows the username, and surfaces a failing binding", async ({
+  page,
+}) => {
+  await page.route("**/notifications/telegram/status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        connected: true,
+        telegram_username: "winthiha",
+        delivery_failing: true,
+        last_error: "Forbidden: bot was blocked by the user",
+      }),
+    }),
+  )
+
+  await page.goto("/notifications")
+
+  await expect(page.getByText("Connected as @winthiha")).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Send test message" }),
+  ).toBeVisible()
+  await expect(page.getByText("Telegram delivery is failing")).toBeVisible()
+  await expect(
+    page.getByText("Forbidden: bot was blocked by the user"),
+  ).toBeVisible()
 })
