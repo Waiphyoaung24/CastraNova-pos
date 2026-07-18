@@ -7,12 +7,15 @@ from app.core.limiter import TELEGRAM_TEST_RATE_LIMIT, limiter
 from app.models import (
     NotificationPreferencePublic,
     NotificationPreferencesUpdate,
+    NotificationStatus,
     TelegramConfirmRequest,
     TelegramConfirmResult,
     TelegramConnectResponse,
+    TelegramStatus,
     TelegramTestResult,
 )
 from app.services import notify
+from app.services.barcode import render_qr_png_data_uri
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -50,9 +53,11 @@ def connect_telegram(
     mints a fresh code, so switching Telegram accounts is one more tap, not a
     dead end."""
     record = crud.create_telegram_connect_code(session=session, user_id=current_user.id)
+    deep_link = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start={record.code}"
     return TelegramConnectResponse(
         code=record.code,
-        deep_link=f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start={record.code}",
+        deep_link=deep_link,
+        qr_code_data_uri=render_qr_png_data_uri(deep_link),
         expires_at=record.expires_at,
     )
 
@@ -112,3 +117,22 @@ def test_telegram(
         text="CastraNova POS: this is a test notification.",
     )
     return TelegramTestResult(ok=ok, detail=detail)
+
+
+@router.get("/telegram/status", response_model=TelegramStatus)
+def get_telegram_status(
+    *, session: SessionDep, current_user: CurrentUser
+) -> TelegramStatus:
+    """Connection state for the connect card: whether Telegram is bound, the
+    display username (so a stale binding is visible), and whether the most
+    recent send attempt failed (bot blocked, chat deleted)."""
+    latest = crud.get_latest_telegram_notification_log(
+        session=session, user_id=current_user.id
+    )
+    failing = bool(latest and latest.status == NotificationStatus.FAILED)
+    return TelegramStatus(
+        connected=bool(current_user.telegram_chat_id),
+        telegram_username=current_user.telegram_username,
+        delivery_failing=failing,
+        last_error=latest.last_error if failing and latest else None,
+    )

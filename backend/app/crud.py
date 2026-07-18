@@ -41,6 +41,7 @@ from app.models import (
     MovementType,
     NotificationChannel,
     NotificationEvent,
+    NotificationLog,
     NotificationPreference,
     NotificationPreferencePublic,
     NotificationPreferenceUpdate,
@@ -3306,6 +3307,24 @@ def confirm_telegram_connect_code(
         session.rollback()
         return False
     return True
+
+
+def get_latest_telegram_notification_log(
+    *, session: Session, user_id: uuid.UUID
+) -> NotificationLog | None:
+    """The most recent Telegram send attempt logged for `user_id`, or None if
+    they have never had one. Used to detect a rotted binding (bot blocked,
+    chat deleted): only the LATEST attempt matters, not "any failure ever" --
+    a later success means it recovered."""
+    return session.exec(
+        select(NotificationLog)
+        .where(
+            NotificationLog.target_user_id == user_id,
+            NotificationLog.channel == NotificationChannel.TELEGRAM,
+        )
+        .order_by(col(NotificationLog.created_at).desc())
+        .limit(1)
+    ).first()
 
 
 # Dummy hash to use for timing attack prevention when user is not found

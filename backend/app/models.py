@@ -1695,6 +1695,7 @@ class NotificationPreferencesUpdate(SQLModel):
 class TelegramConnectResponse(SQLModel):
     code: str
     deep_link: str
+    qr_code_data_uri: str
     expires_at: datetime
 
 
@@ -1710,6 +1711,16 @@ class TelegramConfirmResult(SQLModel):
 class TelegramTestResult(SQLModel):
     ok: bool
     detail: str | None = None
+
+
+class TelegramStatus(SQLModel):
+    connected: bool
+    telegram_username: str | None = None
+    # True only when the MOST RECENT Telegram NotificationLog for this user
+    # is FAILED -- a later successful send clears it, since the binding has
+    # recovered (a stale reconnect, the user unblocking the bot, etc).
+    delivery_failing: bool = False
+    last_error: str | None = None
 
 
 # --- Channel-margin report (FR-013; read-only aggregation) --------------------

@@ -58,6 +58,7 @@ def test_connect_mints_a_code_and_deep_link(
 
     assert body["code"]
     assert body["deep_link"] == f"https://t.me/{monkeypatch_username}?start={body['code']}"
+    assert body["qr_code_data_uri"].startswith("data:image/png;base64,")
 
     row = db.exec(
         select(TelegramConnectCode).where(TelegramConnectCode.code == body["code"])
@@ -363,3 +364,123 @@ def test_test_message_rate_limited(
     finally:
         limiter.enabled = False
         limiter.reset()
+
+
+# --- status --------------------------------------------------------------------
+
+
+def test_status_not_connected(
+    client: TestClient, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    _user, headers = user_and_headers
+    r = client.get(f"{PREFIX}/notifications/telegram/status", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "connected": False,
+        "telegram_username": None,
+        "delivery_failing": False,
+        "last_error": None,
+    }
+
+
+def test_status_connected_shows_username(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+) -> None:
+    user, headers = user_and_headers
+    user.telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    user.telegram_username = "winthiha"
+    db.add(user)
+    db.commit()
+
+    r = client.get(f"{PREFIX}/notifications/telegram/status", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["connected"] is True
+    assert body["telegram_username"] == "winthiha"
+    assert body["delivery_failing"] is False
+
+
+def test_status_delivery_failing_when_latest_log_is_failed(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+) -> None:
+    from app.models import NotificationChannel, NotificationEvent, NotificationStatus
+
+    user, headers = user_and_headers
+    user.telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    db.add(user)
+    db.commit()
+    db.add(
+        NotificationLog(
+            channel=NotificationChannel.TELEGRAM,
+            event_type=NotificationEvent.LOW_STOCK,
+            target_user_id=user.id,
+            payload={},
+            status=NotificationStatus.FAILED,
+            attempts=4,
+            last_error="bot was blocked by the user",
+        )
+    )
+    db.commit()
+
+    r = client.get(f"{PREFIX}/notifications/telegram/status", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["delivery_failing"] is True
+    assert body["last_error"] == "bot was blocked by the user"
+
+
+def test_status_not_failing_once_a_later_send_succeeds(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+) -> None:
+    """A recovered binding (later SENT) must clear the warning -- only the
+    MOST RECENT log for this user's Telegram channel matters, not "any
+    failure ever"."""
+    from datetime import timedelta
+
+    from app.models import (
+        NotificationChannel,
+        NotificationEvent,
+        NotificationStatus,
+        get_datetime_utc,
+    )
+
+    user, headers = user_and_headers
+    user.telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    db.add(user)
+    db.commit()
+    db.add(
+        NotificationLog(
+            channel=NotificationChannel.TELEGRAM,
+            event_type=NotificationEvent.LOW_STOCK,
+            target_user_id=user.id,
+            payload={},
+            status=NotificationStatus.FAILED,
+            attempts=4,
+            last_error="bot was blocked by the user",
+            created_at=get_datetime_utc() - timedelta(minutes=5),
+        )
+    )
+    db.add(
+        NotificationLog(
+            channel=NotificationChannel.TELEGRAM,
+            event_type=NotificationEvent.LOW_STOCK,
+            target_user_id=user.id,
+            payload={},
+            status=NotificationStatus.SENT,
+            attempts=1,
+            created_at=get_datetime_utc(),
+        )
+    )
+    db.commit()
+
+    r = client.get(f"{PREFIX}/notifications/telegram/status", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["delivery_failing"] is False
+    assert body["last_error"] is None
