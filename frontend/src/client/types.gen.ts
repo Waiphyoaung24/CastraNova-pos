@@ -836,6 +836,34 @@ export type SyncReviewResolve = {
 
 export type SyncReviewState = 'PENDING' | 'RESOLVED' | 'DISCARDED';
 
+export type TelegramConfirmRequest = {
+    code: string;
+};
+
+export type TelegramConfirmResult = {
+    connected: boolean;
+    telegram_username?: (string | null);
+};
+
+export type TelegramConnectResponse = {
+    code: string;
+    deep_link: string;
+    qr_code_data_uri: string;
+    expires_at: string;
+};
+
+export type TelegramStatus = {
+    connected: boolean;
+    telegram_username?: (string | null);
+    delivery_failing?: boolean;
+    last_error?: (string | null);
+};
+
+export type TelegramTestResult = {
+    ok: boolean;
+    detail?: (string | null);
+};
+
 export type Token = {
     access_token: string;
     token_type?: string;
@@ -1076,6 +1104,18 @@ export type NotificationsUpdateNotificationPreferencesData = {
 
 export type NotificationsUpdateNotificationPreferencesResponse = (Array<NotificationPreferencePublic>);
 
+export type NotificationsConnectTelegramResponse = (TelegramConnectResponse);
+
+export type NotificationsConfirmTelegramData = {
+    requestBody: TelegramConfirmRequest;
+};
+
+export type NotificationsConfirmTelegramResponse = (TelegramConfirmResult);
+
+export type NotificationsTestTelegramResponse = (TelegramTestResult);
+
+export type NotificationsGetTelegramStatusResponse = (TelegramStatus);
+
 export type PricingOverridesCreatePricingOverrideData = {
     requestBody: PricingOverrideCreate;
 };
@@ -1112,6 +1152,10 @@ export type ProductsReadProductsData = {
      * Case-insensitive substring match on category
      */
     category?: (string | null);
+    /**
+     * Filter by active/inactive status
+     */
+    isActive?: (boolean | null);
     limit?: number;
     /**
      * Case-insensitive substring match on SKU or model name

@@ -12,6 +12,7 @@ import {
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { TelegramConnectCard } from "@/components/notifications/TelegramConnectCard"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -165,6 +166,8 @@ function Notifications() {
           until it's connected. Make your changes, then Save.
         </AlertDescription>
       </Alert>
+
+      <TelegramConnectCard />
 
       {isPending ? (
         <p className="text-muted-foreground py-6 text-center text-sm">

@@ -4256,6 +4256,128 @@ export const SyncReviewStateSchema = {
     title: 'SyncReviewState'
 } as const;
 
+export const TelegramConfirmRequestSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            title: 'Code'
+        }
+    },
+    type: 'object',
+    required: ['code'],
+    title: 'TelegramConfirmRequest'
+} as const;
+
+export const TelegramConfirmResultSchema = {
+    properties: {
+        connected: {
+            type: 'boolean',
+            title: 'Connected'
+        },
+        telegram_username: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Telegram Username'
+        }
+    },
+    type: 'object',
+    required: ['connected'],
+    title: 'TelegramConfirmResult'
+} as const;
+
+export const TelegramConnectResponseSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        deep_link: {
+            type: 'string',
+            title: 'Deep Link'
+        },
+        qr_code_data_uri: {
+            type: 'string',
+            title: 'Qr Code Data Uri'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        }
+    },
+    type: 'object',
+    required: ['code', 'deep_link', 'qr_code_data_uri', 'expires_at'],
+    title: 'TelegramConnectResponse'
+} as const;
+
+export const TelegramStatusSchema = {
+    properties: {
+        connected: {
+            type: 'boolean',
+            title: 'Connected'
+        },
+        telegram_username: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Telegram Username'
+        },
+        delivery_failing: {
+            type: 'boolean',
+            title: 'Delivery Failing',
+            default: false
+        },
+        last_error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Error'
+        }
+    },
+    type: 'object',
+    required: ['connected'],
+    title: 'TelegramStatus'
+} as const;
+
+export const TelegramTestResultSchema = {
+    properties: {
+        ok: {
+            type: 'boolean',
+            title: 'Ok'
+        },
+        detail: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Detail'
+        }
+    },
+    type: 'object',
+    required: ['ok'],
+    title: 'TelegramTestResult'
+} as const;
+
 export const TokenSchema = {
     properties: {
         access_token: {

@@ -108,3 +108,32 @@ test("Low stock row has no gap in its hover highlight, and its checkboxes are ce
     expect(Math.abs(left - right)).toBeLessThan(1)
   }
 })
+
+// The seeded admin already has a real Telegram chat connected (from earlier
+// manual testing), so this exercises the real connect endpoint end-to-end --
+// including a real QR image and a real getUpdates poll against Telegram's
+// API. Deliberately never clicks "Send test message": TELEGRAM_BOT_TOKEN is
+// configured for real in this dev environment, and that chat_id is a real
+// person's Telegram, so clicking it would actually deliver a message to a
+// human on every test run.
+test("Telegram card shows connected state and Reconnect mints a real QR + deep link", async ({
+  page,
+}) => {
+  await page.goto("/notifications")
+
+  // "Telegram" also appears as a grid column header, so anchor on text
+  // unique to the card instead of a bare channel-name match.
+  await expect(page.getByText(/^Connected as/)).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Send test message" }),
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: "Reconnect" }).click()
+
+  const qr = page.getByRole("img", { name: "Scan to connect Telegram" })
+  await expect(qr).toBeVisible()
+  await expect(qr).toHaveAttribute("src", /^data:image\/png;base64,/)
+
+  const deepLink = page.locator('a[href*="t.me"]')
+  await expect(deepLink).toHaveAttribute("href", /\?start=.+/)
+})
