@@ -15,6 +15,7 @@ import {
 } from "@/client"
 import { CountryCombobox } from "@/components/Common/CountryCombobox"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListFilters } from "@/components/Common/ListFilters"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -333,7 +334,14 @@ function Customers() {
   })
   const customers = customersResponse?.data ?? []
   const listLoading = isPlaceholderData || isFetching
-  const hasFilters = debouncedSearch || country || type
+  const activeCount = [debouncedSearch, country, type].filter(Boolean).length
+  const hasFilters = activeCount > 0
+  const clearFilters = () => {
+    setSearch("")
+    setCountry("")
+    setType("")
+    pagination.reset()
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -343,7 +351,7 @@ function Customers() {
         actions={<CustomerCreateDialog />}
       />
 
-      <div className="flex flex-wrap items-end gap-3">
+      <ListFilters activeCount={activeCount} onClear={clearFilters}>
         <Input
           value={search}
           onChange={(e) => {
@@ -392,7 +400,7 @@ function Customers() {
             <SelectItem value="DEALER">{TYPE_LABEL.DEALER}</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+      </ListFilters>
 
       <div className="space-y-2">
         <ListShell loading={listLoading}>

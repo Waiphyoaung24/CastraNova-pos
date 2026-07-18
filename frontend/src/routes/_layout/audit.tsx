@@ -9,6 +9,7 @@ import {
 } from "@/client"
 import { AuditDetailSheet } from "@/components/audit/AuditDetailSheet"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListFilters } from "@/components/Common/ListFilters"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -61,6 +62,14 @@ const EVENT_TYPES: MovementType[] = [
 // sum to 100%. Long text columns (Model, Notes) absorb the slack + truncate.
 const AUDIT_WIDTHS = ["17%", "17%", "16%", "15%", "12%", "5%", "18%"]
 
+const EMPTY_FILTER: AuditFilter = {
+  eventType: "",
+  fromDate: "",
+  toDate: "",
+  actorUserId: "",
+  sku: "",
+}
+
 function Audit() {
   const isMobile = useIsMobile()
   const eventId = useId()
@@ -68,13 +77,8 @@ function Audit() {
   const toId = useId()
   const userSelectId = useId()
   const skuSelectId = useId()
-  const [filter, setFilter] = useState<AuditFilter>({
-    eventType: "",
-    fromDate: "",
-    toDate: "",
-    actorUserId: "",
-    sku: "",
-  })
+  const [filter, setFilter] = useState<AuditFilter>(EMPTY_FILTER)
+  const activeCount = Object.values(filter).filter(Boolean).length
   const [selected, setSelected] = useState<AuditEntryPublic | null>(null)
   const {
     page,
@@ -84,6 +88,10 @@ function Audit() {
     setPage,
     reset: resetPage,
   } = usePagination()
+  const clearFilters = () => {
+    setFilter(EMPTY_FILTER)
+    resetPage()
+  }
 
   const { data, isError, isPlaceholderData, isFetching } = useQuery({
     queryKey: ["audit", filter, page],
@@ -135,7 +143,7 @@ function Audit() {
         description="Append-only stock-movement history — who moved what, and why. Read-only."
       />
 
-      <div className="flex flex-wrap items-end gap-3">
+      <ListFilters activeCount={activeCount} onClear={clearFilters}>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={eventId}>Event</Label>
           <Select
@@ -207,7 +215,7 @@ function Audit() {
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={skuSelectId}>SKU</Label>
-          <div className="w-full sm:w-56">
+          <div className="w-full sm:w-80">
             <EntityCombobox
               id={skuSelectId}
               items={productOptions}
@@ -226,7 +234,7 @@ function Audit() {
             />
           </div>
         </div>
-      </div>
+      </ListFilters>
 
       {totalCount > 0 ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

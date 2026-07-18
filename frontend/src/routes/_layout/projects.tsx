@@ -9,6 +9,7 @@ import {
   ProjectsService,
 } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListFilters } from "@/components/Common/ListFilters"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -47,9 +48,18 @@ function Projects() {
   const [status, setStatus] = useState<StatusFilter>("ALL")
   const debouncedSearch = useDebouncedValue(search)
   const { page, pageSize, skip, limit, setPage, reset } = usePagination()
-  const hasActiveFilter = Boolean(
-    debouncedSearch || customerId || status !== "ALL",
-  )
+  const activeCount = [
+    debouncedSearch,
+    customerId,
+    status !== "ALL" ? status : "",
+  ].filter(Boolean).length
+  const hasActiveFilter = activeCount > 0
+  const clearFilters = () => {
+    setSearch("")
+    setCustomerId("")
+    setStatus("ALL")
+    reset()
+  }
 
   const {
     data: projectPage,
@@ -87,7 +97,7 @@ function Projects() {
         actions={<ProjectCreateDialog customers={customers} />}
       />
 
-      <div className="flex flex-wrap gap-3">
+      <ListFilters activeCount={activeCount} onClear={clearFilters}>
         <Input
           value={search}
           onChange={(e) => {
@@ -127,7 +137,7 @@ function Projects() {
             <TabsTrigger value="CLOSED">Closed</TabsTrigger>
           </TabsList>
         </Tabs>
-      </div>
+      </ListFilters>
 
       <div className="space-y-2">
         <ListShell loading={listLoading}>
