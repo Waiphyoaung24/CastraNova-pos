@@ -38,6 +38,8 @@ from app.models import (
     MarginBreakdownRow,
     MarginDimension,
     MovementType,
+    NotificationChannel,
+    NotificationEvent,
     NotificationPreference,
     NotificationPreferenceUpdate,
     OverrideExceptionRow,
@@ -101,6 +103,7 @@ from app.models import (
     UserCreate,
     UserOption,
     UserUpdate,
+    eligible_events,
     get_datetime_utc,
 )
 
@@ -3137,29 +3140,58 @@ def cancel_project_pull(
 
 
 def list_notification_preferences(
-    *, session: Session, user_id: uuid.UUID
+    *, session: Session, user: User
 ) -> list[NotificationPreference]:
-    """Return a user's notification preferences (FR-018)."""
-    return list(
-        session.exec(
-            select(NotificationPreference)
-            .where(NotificationPreference.user_id == user_id)
-            .order_by(col(NotificationPreference.id))
+    """Return the user's full opt-in grid: one row per (channel, eligible event).
+
+    Persisted rows are merged over a generated default of `enabled=False`, so a
+    user who has never opted in still sees every switch they could turn on.
+    Returning only persisted rows (the previous behaviour) left a fresh user
+    with an empty page and no way to create the first row, which made opt-in a
+    manual SQL step.
+
+    Synthetic rows carry `id=None` — they do not exist until the user PATCHes
+    one on. Pairs outside `eligible_events` are omitted entirely: the notify
+    producers would never deliver them, so offering the switch would promise a
+    send that silently never happens.
+    """
+    persisted = {
+        (p.channel, p.event_type): p
+        for p in session.exec(
+            select(NotificationPreference).where(
+                NotificationPreference.user_id == user.id
+            )
         ).all()
-    )
+    }
+    allowed = eligible_events(user)
+    return [
+        persisted.get((channel, event))
+        or NotificationPreference(
+            id=None,  # type: ignore[arg-type]  # synthetic: not yet persisted
+            user_id=user.id,
+            channel=channel,
+            event_type=event,
+            enabled=False,
+        )
+        # Stable ordering so the UI grid doesn't reshuffle between fetches.
+        for channel in NotificationChannel
+        for event in NotificationEvent
+        if event in allowed
+    ]
 
 
 def upsert_notification_preferences(
     *,
     session: Session,
-    user_id: uuid.UUID,
+    user: User,
     updates: list[NotificationPreferenceUpdate],
 ) -> list[NotificationPreference]:
     """Insert-or-update each (channel, event_type) opt-in for the user, then
-    return the user's full preference list. Idempotent."""
+    return the user's full merged grid (see `list_notification_preferences`).
+    Idempotent."""
     for upd in updates:
         stmt = select(NotificationPreference).where(
-            NotificationPreference.user_id == user_id,
+            NotificationPreference.user_id == user.id,
             NotificationPreference.channel == upd.channel,
             NotificationPreference.event_type == upd.event_type,
         )
@@ -3172,7 +3204,7 @@ def upsert_notification_preferences(
         else:
             session.add(
                 NotificationPreference(
-                    user_id=user_id,
+                    user_id=user.id,
                     channel=upd.channel,
                     event_type=upd.event_type,
                     enabled=upd.enabled,
@@ -3192,7 +3224,7 @@ def upsert_notification_preferences(
                 session.add(existing)
                 session.flush()
     session.commit()
-    return list_notification_preferences(session=session, user_id=user_id)
+    return list_notification_preferences(session=session, user=user)
 
 
 # Dummy hash to use for timing attack prevention when user is not found

@@ -121,6 +121,7 @@ class SyncReviewState(str, enum.Enum):
 class NotificationChannel(str, enum.Enum):
     LINE = "LINE"
     VIBER = "VIBER"
+    TELEGRAM = "TELEGRAM"
 
 
 class NotificationEvent(str, enum.Enum):
@@ -133,6 +134,23 @@ class NotificationEvent(str, enum.Enum):
 class NotificationStatus(str, enum.Enum):
     SENT = "SENT"
     FAILED = "FAILED"
+
+
+# Who may receive which event. These must agree with the recipient queries in
+# app.services.notify: the three below are fetched with
+# `User.role == UserRole.BKK_ADMIN`, while notify_low_stock has no role filter.
+# Offering a staff user a checkbox for an admin-only event would persist
+# enabled=True and then silently never deliver.
+ADMIN_ONLY_EVENTS: frozenset["NotificationEvent"] = frozenset(
+    {
+        NotificationEvent.PULL_SHORT,
+        NotificationEvent.PULL_FULFILLED,
+        NotificationEvent.OVERRIDE_PENDING,
+    }
+)
+ALL_ROLE_EVENTS: frozenset["NotificationEvent"] = frozenset(
+    set(NotificationEvent) - ADMIN_ONLY_EVENTS
+)
 
 
 # Shared properties
@@ -173,10 +191,24 @@ class User(UserBase, table=True):
     # Task 5.4). Table-only — never exposed via the user API (UserBase/Public).
     line_user_id: str | None = Field(default=None, max_length=128)
     viber_user_id: str | None = Field(default=None, max_length=128)
+    telegram_chat_id: str | None = Field(default=None, max_length=64)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+
+
+def eligible_events(user: User) -> set[NotificationEvent]:
+    """The events `user` can actually receive, given their role.
+
+    Keys off `role == BKK_ADMIN` — deliberately NOT `deps.is_admin`, which also
+    treats any superuser as admin. The notify producers query the role strictly,
+    so a superuser left at the default staff role genuinely does not receive
+    admin-only events; the grid must reflect that rather than the wider check.
+    """
+    if user.role == UserRole.BKK_ADMIN:
+        return set(NotificationEvent)
+    return set(ALL_ROLE_EVENTS)
 
 
 # Properties to return via API, id is always required
@@ -1572,7 +1604,10 @@ class NotificationLog(SQLModel, table=True):
 
 
 class NotificationPreferencePublic(SQLModel):
-    id: uuid.UUID
+    # Nullable: the grid returns synthetic rows for pairs the user has never
+    # opted into, which have no database row yet. Clients key on
+    # (channel, event_type), not id.
+    id: uuid.UUID | None
     channel: NotificationChannel
     event_type: NotificationEvent
     enabled: bool

@@ -16,9 +16,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 def read_notification_preferences(
     *, session: SessionDep, current_user: CurrentUser
 ) -> list[NotificationPreferencePublic]:
-    prefs = crud.list_notification_preferences(
-        session=session, user_id=current_user.id
-    )
+    prefs = crud.list_notification_preferences(session=session, user=current_user)
     return [NotificationPreferencePublic.model_validate(p) for p in prefs]
 
 
@@ -33,7 +31,7 @@ def update_notification_preferences(
 ) -> list[NotificationPreferencePublic]:
     prefs = crud.upsert_notification_preferences(
         session=session,
-        user_id=current_user.id,
+        user=current_user,
         updates=payload.preferences,
     )
     return [NotificationPreferencePublic.model_validate(p) for p in prefs]
