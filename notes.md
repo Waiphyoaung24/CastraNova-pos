@@ -509,17 +509,54 @@ reformat them on whichever branch next edits them.
 > *and* their rows render as "Unknown user". Fixing it properly needs a lightweight
 > `GET /users/options` endpoint (a backend change), mirroring
 > `/customers|suppliers|projects|products/options`.
-- **Catalog list pages need a search filter.** With 25 rows a page and no search, finding
-  one customer/product/supplier means paging through the list by hand. Server-side
-  pagination made this *more* acute, not less: the rows you want are now genuinely not on
-  the client. Each list endpoint would need a `q`/`search` query param (name/SKU
-  substring), plus a debounced input that resets to page 1 — the debounce hook and the
-  page-reset pattern both already exist.
-- **"Create new" should move behind a tab or a modal.** `products.tsx`, `customers.tsx`,
-  `suppliers.tsx` and `projects.tsx` all stack a full create-form `Card` *above* the table,
-  so the primary thing (the list) is pushed below the fold by a form that is used rarely.
-  Move it into a dialog behind a "New …" button (the pattern `AddUser` on `admin.tsx`
-  already uses) or a tab, and let the list own the page.
+> **DONE 2026-07-14/15** on `dev_wth` — `cf64dc5` (server-side search + filters, create
+> dialogs) and `4536f5a` (customers). The next three bullets as originally filed — the
+> catalog search filter, the "create new" move, and the owner's combined spec that restated
+> both as one unit of work — are all built.
+>
+> **Filters (server-side, per entity).** `GET /products/` gained `q` (SKU/model), `brand`,
+> `category` (case-insensitive substring) and `tracking_mode` (exact enum); `GET /suppliers/`
+> gained `q` + `country`; `GET /projects/` gained `q`, `status` and `customer_id`;
+> `GET /customers/` gained `q`, then `country` + `type` in `4536f5a`. Each is threaded through
+> **both** the list and the count query via shared clause builders, so `PaginationControls` can
+> never report a total that disagrees with the rows on the page — the same invariant
+> `count_audit` established above. `_ilike_term` is reused, so a literal `%`/`_` typed by a
+> user stays literal. **No schema change** — `tracking_mode`/`category` are already indexed and
+> a leading-wildcard `ILIKE` cannot use a btree index anyway. **Alembic head stays `m027`.**
+>
+> **Country lookups.** `GET /suppliers/countries` and `GET /customers/countries` return the
+> distinct in-use countries backing a new `CountryCombobox` (`lib/countries.ts`), used for both
+> the country *field* and the country *filter*.
+>
+> **Create forms behind dialogs.** `ProductCreateDialog`, `ProjectCreateDialog`,
+> `SupplierCreateDialog`, and a customer create/edit dialog replace the full-width create
+> `Card` that used to sit above each table — the list now owns the page, exactly as the
+> `AddUser`-on-`admin.tsx` pattern the bullet pointed at. Every filter change resets to page 1,
+> and the empty state now distinguishes "no matches" from "nothing created yet".
+>
+> **Tests.** `test_catalog_search.py` (each filter, their composition, the
+> count-matches-filtered-rows invariant, literal-`%` escaping, blank-is-no-filter, 422 on an
+> unknown `tracking_mode`), `test_customer_filters.py`, `test_supplier_country.py`,
+> `test_users.py`, plus `product-filters.spec.ts` / `countries.spec.ts` / `supplier-edit-flow.spec.ts`.
+>
+> Original findings, for the record:
+>
+> - **Catalog list pages need a search filter.** With 25 rows a page and no search, finding
+>   one customer/product/supplier means paging through the list by hand. Server-side
+>   pagination made this *more* acute, not less: the rows you want are now genuinely not on
+>   the client. Each list endpoint would need a `q`/`search` query param (name/SKU
+>   substring), plus a debounced input that resets to page 1 — the debounce hook and the
+>   page-reset pattern both already exist.
+> - **"Create new" should move behind a tab or a modal.** `products.tsx`, `customers.tsx`,
+>   `suppliers.tsx` and `projects.tsx` all stack a full create-form `Card` *above* the table,
+>   so the primary thing (the list) is pushed below the fold by a form that is used rarely.
+>   Move it into a dialog behind a "New …" button (the pattern `AddUser` on `admin.tsx`
+>   already uses) or a tab, and let the list own the page.
+> - **Catalog lists — owner's combined spec (2026-07-13):** *"make catalog lists - hide
+>   register behind a pop up model or a form tab - add list filters."* The same pair of asks,
+>   restated together as one unit of work for `products.tsx`, `customers.tsx`, `suppliers.tsx`
+>   and `projects.tsx`. Treat as one PR — a filter row and a "New …" trigger both land in the
+>   same header area above the table, so it is cheaper to lay out once.
 - **`EntityCombobox` doesn't look good on mobile (2026-07-13, owner-reported).**
   `PopoverContent` is pinned to `w-(--radix-popover-trigger-width)` (`EntityCombobox.tsx:112`)
   — a floating panel exactly as wide as its trigger, positioned relative to it. On a phone
@@ -536,16 +573,10 @@ reformat them on whichever branch next edits them.
   `side="bottom"`, or add `vaul`'s `Drawer` (shadcn's usual mobile-combobox pattern; not yet
   a dependency here) for swipe-to-dismiss. Either way the search input + list keep their
   desktop behavior — only the container becomes a fixed, full-width, keyboard-aware sheet
-  instead of a `Popover` anchored to the trigger. **Not built — recorded for later.**
-- **Catalog lists — owner's combined spec (2026-07-13):** *"make catalog lists - hide
-  register behind a pop up model or a form tab - add list filters."* This is the same pair
-  of asks as the two bullets above, restated together as one unit of work for the catalog
-  list pages (`products.tsx`, `customers.tsx`, `suppliers.tsx`, `projects.tsx`): (1) move
-  the create ("register") form behind a popup dialog or a form tab instead of sitting above
-  the table, and (2) add filters to the list itself (name/SKU search at minimum). Treat as
-  one PR — a filter row and a "New …" trigger both land in the same header area above the
-  table, so it is cheaper to lay out once than to patch the create-form move and then the
-  filter row separately. **Not built.**
+  instead of a `Popover` anchored to the trigger. **Still not built.** Note `c27babe`
+  (2026-07-15, below) reworked `EntityCombobox`'s height cap and scroll container, but that was
+  a *desktop* overflow bug — it did not touch the popover-vs-bottom-sheet question, which
+  remains open.
 
 ---
 
@@ -593,6 +624,35 @@ column alignment between a frozen header table and its independently-scrolling b
 is the one thing that's easy to get subtly wrong and hard to catch from reading code alone.
 Check `products` and `stock` specifically (tightest column counts) at a normal desktop
 width and near the 768px mobile cutoff where `minWidth` triggers horizontal scroll.
+
+---
+
+## Bug: no picker in the app was actually scrollable (2026-07-15)
+
+> **FIXED 2026-07-15** on `dev_wth` (`c27babe`). Regression spec `combobox-scroll.spec.ts`
+> (8/8), confirmed red against the unfixed code first. `tsc` + biome clean.
+
+Every picker in the app — SKU, country, supplier, customer, project — routes through
+`EntityCombobox`, and **two layers each broke the other's scrolling**:
+
+- `PopoverContent` carried the only height cap, but also `overflow-hidden` — so it *clipped*
+  its overflow instead of scrolling it.
+- `CommandList` had `overflow-y-auto`, but was handed `max-h-none` — so it rendered at full
+  content height and never overflowed *itself*, and therefore never scrolled.
+
+Net effect: nothing was scrollable anywhere, and the existing "Show 50 more" footer rendered
+roughly **1270px below the visible popover** — permanently unreachable. With a list capped at
+50 rendered rows, that made every option past the visible ~10 unselectable.
+
+**Fix.** `PopoverContent`/`Command` now form a bounded flex column so `CommandList` is the real
+scroll container; `command.tsx`'s default `max-h-[300px]` cap was restored (it was being
+overridden to `max-h-none`, which is also why the audit page's SKU picker stretched to the full
+page height); and the click-to-page "Show 50 more" button was replaced with **auto-load on
+scroll**, since the options are already fully loaded client-side and there was nothing to fetch.
+
+Also fixed in the same commit: `customer-create-flow.spec.ts` was filling the customer form
+without first opening the "New customer" dialog that the Customers screen now requires (see the
+catalog-lists work above).
 
 ---
 
@@ -976,19 +1036,71 @@ delivered.
   > actually fire, `notify()` needs three things (`notify.py:152-186`), in order:
   >   1. **Token in `.env`** — `LINE_CHANNEL_ACCESS_TOKEN` / `VIBER_AUTH_TOKEN`.
   >   2. **A `NotificationPreference` opt-in** (`enabled=True` for that channel+event) —
-  >      checked first; no pref row → user silently skipped. **Self-service** via
+  >      checked first; no pref row → user silently skipped. ~~**Self-service** via
   >      `PATCH /notifications/preferences` (`notifications.py:25-39`), so this is a normal
-  >      in-app action, not a deployment step.
+  >      in-app action, not a deployment step.~~ **CORRECTED 2026-07-17 — see below.**
   >   3. **`user_id` populated** on the User row — else the send no-ops with
   >      `"recipient id not set (not enrolled)"` (`notify.py:162-177`).
   >
-  > So the **only out-of-band / deployment provisioning is (1) tokens in `.env` and (3) the
-  > user_ids.** FR-004's actual gap is just (3): there is **no inbound webhook/bot** to
+  > ~~So the **only out-of-band / deployment provisioning is (1) tokens in `.env` and (3) the
+  > user_ids.**~~ (Corrected — (2) is also out-of-band in practice; see below.) FR-004's
+  > actual gap is just (3): there is **no inbound webhook/bot** to
   > capture user_ids automatically when someone follows/subscribes (LINE/Viber issue the id
   > at that moment). Until such a webhook exists ("KWG handles at deployment"), user_ids must
   > be set manually/out-of-band. Also note recipient targeting: `notify_pull_short` /
   > `notify_override_pending` only reach `BKK_ADMIN`-role users; `notify_low_stock` reaches
   > anyone with the enabled pref.
+  >
+  > **CORRECTION to (2) — the opt-in IS a deployment step (2026-07-17).** The *endpoint* is
+  > self-service, but the *UI cannot reach it for a pair that doesn't exist yet*:
+  > `list_notification_preferences` (`crud.py:3116`) returns only **persisted** rows, `GET
+  > /notifications/preferences` passes them through, and `notifications.tsx` renders
+  > `rows = data ?? []`, echoing back only `p.channel`/`p.event_type` it received. So the
+  > page is **empty for a fresh user with no affordance to add a row**, and `_is_opted_in`
+  > is fail-closed (missing row = no send **and no log** — `notify.py:160`). The PATCH would
+  > happily upsert a novel pair; the gap is the frontend, not the API. Net: provisioning a
+  > user today needs **(1) token + (2) hand-made pref rows + (3) recipient id** — all three
+  > out-of-band. A hand-rolled `PATCH {"preferences":[{channel, event_type, enabled}]}` as
+  > that user also works.
+  >
+  > **Diagnostic tell:** gate (2) fails **silently**; gate (3) writes a `FAILED` log with
+  > `attempts=0` / `"not enrolled"`. So an empty `notificationlog` = no event fired *or* no
+  > pref row; `FAILED`+"not enrolled" = pref exists, recipient id doesn't.
+  >
+  > **TELEGRAM added as a third channel (2026-07-17, m030).** `send_telegram` +
+  > `NotificationChannel.TELEGRAM` + `User.telegram_chat_id`. Two deviations from the
+  > LINE/Viber shape worth knowing: (a) the bot token goes in the **URL path**, not a header
+  > — so the Telegram URL is itself a secret and must never reach a log (the note above
+  > saying tokens are "sent in the request header" is LINE/Viber-only); (b) Telegram
+  > rate-limits with **HTTP 429**, which the shared `_classify` would treat as permanent and
+  > drop — `send_telegram` catches 429 as retryable first. **LINE has the same latent 429
+  > bug** (`notify.py:67-72` treats every 4xx as permanent); not fixed, deliberately out of
+  > scope. Enrollment is harder than LINE/Viber: a Telegram bot **cannot** message a user
+  > until that user messages it first, so `telegram_chat_id` must come from `getUpdates`
+  > after the user makes contact.
+  >
+  > **OPEN DECISION — role-aware preference grid (deferred 2026-07-17, owner discussing with
+  > other devs).** Making `list_notification_preferences` return persisted rows merged over a
+  > **generated** grid would make opt-in self-service forever and kill the manual-SQL step for
+  > all three channels. It **must be role-aware**: `LOW_STOCK` is open to any role, but
+  > `PULL_SHORT`/`PULL_FULFILLED`/`OVERRIDE_PENDING` are `BKK_ADMIN`-only, so a naive full
+  > grid would show staff a checkbox that persists `enabled=true` and never delivers —
+  > worse than today's blank page. Notes for whoever builds it:
+  >   - Key it off `role == UserRole.BKK_ADMIN` (what `notify.py` actually queries), **not**
+  >     `deps.is_admin` — see the divergence below.
+  >   - `NotificationPreferencePublic.id` is a required `uuid.UUID`; synthetic rows have none.
+  >     Cleanest: nullable `id` + key the React list on `${channel}-${event_type}`.
+  >   - Guard the duplication with a test asserting an `eligible_events(user)` helper agrees
+  >     with what the recipient queries return, or it rots on the next admin-only event.
+  >
+  > **LATENT TRAP — `is_admin` vs `role == BKK_ADMIN` (2026-07-17).** `deps.py:74` claims "a
+  > superuser OR an explicit BKK_ADMIN is treated as admin **everywhere**", but the notify
+  > producers query `User.role == UserRole.BKK_ADMIN` strictly. A superuser left at the
+  > default `YGN_STAFF` role passes every admin check yet silently receives no pull/override
+  > alerts. **Not currently biting** — `db.py:32` seeds the first superuser with
+  > `role=BKK_ADMIN` explicitly; it only springs for a superuser created later without
+  > setting `role`. Fixing it widens the recipient set for three live events — own ticket,
+  > probably client sign-off.
 
 ## Verified as solidly implemented
 
