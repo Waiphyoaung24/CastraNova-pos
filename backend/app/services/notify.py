@@ -144,6 +144,38 @@ def send_telegram(*, to: str, text: str) -> None:
     _classify(response)
 
 
+def send_telegram_test(*, to: str, text: str) -> tuple[bool, str | None]:
+    """Send a one-off test message and report the outcome directly, instead
+    of raising Retryable/PermanentNotifyError.
+
+    This is a synchronous, user-initiated probe of an address -- not part of
+    the ``notify()`` fan-out -- so there is no retry policy or append-only
+    log entry to feed; the caller just wants a pass/fail with a reason.
+    Returns ``(ok, detail)``, where ``detail`` is Telegram's own
+    ``description`` field on failure. Never the request URL/token — that
+    only ever rides in the URL path (see module docstring).
+    """
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return False, "Telegram is not configured"
+    url = TELEGRAM_SEND_URL_TEMPLATE.format(token=settings.TELEGRAM_BOT_TOKEN)
+    try:
+        response = _post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"chat_id": to, "text": text},
+        )
+    except httpx.TransportError:
+        return False, "Could not reach Telegram"
+    if response.status_code // 100 == 2:
+        return True, None
+    detail: str | None = None
+    try:
+        detail = response.json().get("description")
+    except ValueError:
+        pass
+    return False, detail or f"HTTP {response.status_code}"
+
+
 def get_telegram_updates() -> list[dict[str, Any]]:
     """Fetch pending Telegram updates (single raw attempt), WITHOUT
     acknowledging any of them.

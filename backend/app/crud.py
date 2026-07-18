@@ -1,7 +1,8 @@
+import secrets
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypeVar, cast
 
@@ -95,6 +96,7 @@ from app.models import (
     SyncReviewItemCreate,
     SyncReviewState,
     SystemSetting,
+    TelegramConnectCode,
     TrackingMode,
     Unit,
     UnitDrillRow,
@@ -585,6 +587,7 @@ def _product_filter_clauses(
     brand: str | None,
     category: str | None,
     tracking_mode: TrackingMode | None,
+    is_active: bool | None,
 ) -> list[ColumnElement[bool]]:
     clauses: list[ColumnElement[bool]] = []
     if q and q.strip():
@@ -603,6 +606,8 @@ def _product_filter_clauses(
         )
     if tracking_mode is not None:
         clauses.append(col(Product.tracking_mode) == tracking_mode)
+    if is_active is not None:
+        clauses.append(col(Product.is_active) == is_active)
     return clauses
 
 
@@ -613,12 +618,17 @@ def list_products(
     brand: str | None = None,
     category: str | None = None,
     tracking_mode: TrackingMode | None = None,
+    is_active: bool | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[Product]:
     stmt = select(Product)
     for clause in _product_filter_clauses(
-        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=tracking_mode,
+        is_active=is_active,
     ):
         stmt = stmt.where(clause)
     stmt = (
@@ -636,10 +646,15 @@ def count_products(
     brand: str | None = None,
     category: str | None = None,
     tracking_mode: TrackingMode | None = None,
+    is_active: bool | None = None,
 ) -> int:
     stmt = select(func.count()).select_from(Product)
     for clause in _product_filter_clauses(
-        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=tracking_mode,
+        is_active=is_active,
     ):
         stmt = stmt.where(clause)
     return session.exec(stmt).one()
@@ -3231,6 +3246,66 @@ def upsert_notification_preferences(
                 session.flush()
     session.commit()
     return list_notification_preferences(session=session, user=user)
+
+
+def create_telegram_connect_code(
+    *, session: Session, user_id: uuid.UUID
+) -> TelegramConnectCode:
+    """Mint a one-time, ~10-minute code for the Telegram connect deep link.
+
+    See TelegramConnectCode's docstring: this is an authentication boundary,
+    not a correlation key, so the code must be unguessable
+    (secrets.token_urlsafe, never a short or sequential value).
+    """
+    record = TelegramConnectCode(
+        user_id=user_id,
+        code=secrets.token_urlsafe(16),
+        expires_at=get_datetime_utc() + timedelta(minutes=10),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def confirm_telegram_connect_code(
+    *, session: Session, user: User, code: str, chat_id: str, username: str | None
+) -> bool:
+    """Validate and atomically consume a pending connect code for `user`,
+    binding `chat_id`/`username` on success. The caller (the confirm route)
+    is responsible for resolving `chat_id`/`username` via
+    ``notify.get_telegram_updates`` + ``parse_start_code`` first -- crud.py
+    doesn't reach into the notify service, matching this codebase's existing
+    layering (routes call both; crud stays DB-only).
+
+    ``FOR UPDATE`` makes the consumed_at check-then-set atomic against a
+    racing second confirm for the same code.
+    """
+    record = session.exec(
+        select(TelegramConnectCode)
+        .where(
+            TelegramConnectCode.code == code,
+            TelegramConnectCode.user_id == user.id,
+        )
+        .with_for_update()
+    ).first()
+    if record is None or record.consumed_at is not None:
+        return False
+    if record.expires_at < get_datetime_utc():
+        return False
+
+    record.consumed_at = get_datetime_utc()
+    session.add(record)
+    user.telegram_chat_id = chat_id
+    user.telegram_username = username
+    session.add(user)
+    try:
+        session.commit()
+    except IntegrityError:
+        # e.g. this chat is already bound to a different account.
+        session.rollback()
+        return False
+    return True
 
 
 # Dummy hash to use for timing attack prevention when user is not found

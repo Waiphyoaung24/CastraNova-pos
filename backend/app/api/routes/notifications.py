@@ -1,11 +1,18 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep
+from app.core.config import settings
+from app.core.limiter import TELEGRAM_TEST_RATE_LIMIT, limiter
 from app.models import (
     NotificationPreferencePublic,
     NotificationPreferencesUpdate,
+    TelegramConfirmRequest,
+    TelegramConfirmResult,
+    TelegramConnectResponse,
+    TelegramTestResult,
 )
+from app.services import notify
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -33,3 +40,75 @@ def update_notification_preferences(
         user=current_user,
         updates=payload.preferences,
     )
+
+
+@router.post("/telegram/connect", response_model=TelegramConnectResponse)
+def connect_telegram(
+    *, session: SessionDep, current_user: CurrentUser
+) -> TelegramConnectResponse:
+    """Mint a one-time code + t.me deep link. Re-runnable: calling again
+    mints a fresh code, so switching Telegram accounts is one more tap, not a
+    dead end."""
+    record = crud.create_telegram_connect_code(session=session, user_id=current_user.id)
+    return TelegramConnectResponse(
+        code=record.code,
+        deep_link=f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start={record.code}",
+        expires_at=record.expires_at,
+    )
+
+
+@router.post("/telegram/confirm", response_model=TelegramConfirmResult)
+def confirm_telegram(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: TelegramConfirmRequest,
+) -> TelegramConfirmResult:
+    """Resolve a pending connect code against Telegram's getUpdates. The
+    frontend polls this a few times after the user taps Start, rather than
+    requiring an explicit "I've done it" click."""
+    match = None
+    try:
+        for update in notify.get_telegram_updates():
+            parsed = notify.parse_start_code(update)
+            if parsed is not None and parsed[2] == payload.code:
+                match = parsed
+                break
+    except (notify.RetryableNotifyError, notify.PermanentNotifyError):
+        # Treated the same as "no match yet" -- the frontend just polls
+        # again; there is nothing actionable for the user to do differently.
+        return TelegramConfirmResult(connected=False)
+
+    if match is None:
+        return TelegramConfirmResult(connected=False)
+
+    chat_id, username, _ = match
+    connected = crud.confirm_telegram_connect_code(
+        session=session,
+        user=current_user,
+        code=payload.code,
+        chat_id=chat_id,
+        username=username,
+    )
+    return TelegramConfirmResult(
+        connected=connected, telegram_username=username if connected else None
+    )
+
+
+@router.post("/telegram/test", response_model=TelegramTestResult)
+@limiter.limit(TELEGRAM_TEST_RATE_LIMIT)
+def test_telegram(
+    *,
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
+    current_user: CurrentUser,
+) -> TelegramTestResult:
+    """Send a one-off probe message to the current user's connected
+    Telegram. Bypasses the notification-preference opt-in check on purpose:
+    this tests the address, not an event subscription."""
+    if not current_user.telegram_chat_id:
+        raise HTTPException(status_code=400, detail="Telegram is not connected")
+    ok, detail = notify.send_telegram_test(
+        to=current_user.telegram_chat_id,
+        text="CastraNova POS: this is a test notification.",
+    )
+    return TelegramTestResult(ok=ok, detail=detail)

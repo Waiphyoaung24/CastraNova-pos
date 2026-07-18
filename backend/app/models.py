@@ -1692,6 +1692,26 @@ class NotificationPreferencesUpdate(SQLModel):
         return self
 
 
+class TelegramConnectResponse(SQLModel):
+    code: str
+    deep_link: str
+    expires_at: datetime
+
+
+class TelegramConfirmRequest(SQLModel):
+    code: str
+
+
+class TelegramConfirmResult(SQLModel):
+    connected: bool
+    telegram_username: str | None = None
+
+
+class TelegramTestResult(SQLModel):
+    ok: bool
+    detail: str | None = None
+
+
 # --- Channel-margin report (FR-013; read-only aggregation) --------------------
 
 
