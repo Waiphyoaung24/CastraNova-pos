@@ -66,6 +66,12 @@ export function ProjectCreateDialog({
   return (
     <Dialog
       open={open}
+      // The Customer field's popover combobox is portalled outside this
+      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
+      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
+      // keeps the overlay/close-on-outside-click behavior but drops the
+      // trap, letting the combobox actually receive focus and keystrokes.
+      modal={false}
       onOpenChange={(next) => {
         setOpen(next)
         if (!next) reset()
