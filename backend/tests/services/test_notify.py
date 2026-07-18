@@ -1,4 +1,4 @@
-"""Service tests for LINE + Viber push notifications (FR-018, Task 2.7).
+"""Service tests for LINE + Viber + Telegram push notifications (FR-018, Task 2.7).
 
 The single network seam ``app.services.notify._post`` is monkeypatched so no
 real HTTP happens; tenacity's sleep is stubbed so retry tests run instantly.
@@ -27,6 +27,7 @@ from tests.utils.utils import assert_no_financial_keys
 
 LINE_TOKEN = "line-secret-token-xyz"
 VIBER_TOKEN = "viber-secret-token-xyz"
+TELEGRAM_TOKEN = "telegram-secret-token-xyz"
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +39,7 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 def _tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "LINE_CHANNEL_ACCESS_TOKEN", LINE_TOKEN)
     monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", VIBER_TOKEN)
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", TELEGRAM_TOKEN)
 
 
 def _resp(status_code: int, json_body: dict[str, Any] | None = None) -> httpx.Response:
@@ -58,12 +60,26 @@ def _recording_post(sent: list[Any]) -> Any:
     return fake_post
 
 
+class _Auto:
+    """Sentinel type distinguishing "caller didn't specify" (generate a
+    fresh, unique value) from an explicit telegram_chat_id=None (no address
+    at all, used by the not-enrolled test at line ~558). A fixed literal
+    default would collide with User.telegram_chat_id's UNIQUE constraint
+    (m031) the moment two tests in the same run both left it unset -- the
+    shared `db` fixture is session-scoped and never rolls back a successful
+    commit between tests."""
+
+
+_AUTO_CHAT_ID = _Auto()
+
+
 def _make_user(
     db: Session,
     *,
     role: UserRole = UserRole.BKK_ADMIN,
     line_user_id: str | None = "L-recipient",
     viber_user_id: str | None = "V-recipient",
+    telegram_chat_id: str | None | _Auto = _AUTO_CHAT_ID,
 ) -> User:
     from app import crud
     from tests.utils.utils import random_email, random_lower_string
@@ -74,8 +90,11 @@ def _make_user(
             email=random_email(), password=random_lower_string(), role=role
         ),
     )
+    if isinstance(telegram_chat_id, _Auto):
+        telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
     user.line_user_id = line_user_id
     user.viber_user_id = viber_user_id
+    user.telegram_chat_id = telegram_chat_id
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -146,6 +165,82 @@ def test_send_line_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(notify.PermanentNotifyError):
         notify.send_line(to="L-abc", text="hi")
     assert attempts["n"] == 1
+
+
+def test_send_telegram_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+        calls.append({"url": url, "headers": headers, "json": json})
+        return _resp(200, {"ok": True})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.send_telegram(to="123456789", text="hi")
+
+    assert len(calls) == 1
+    # Telegram carries the bot token in the URL path, not a header.
+    assert calls[0]["url"] == (
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    )
+    assert calls[0]["json"] == {"chat_id": "123456789", "text": "hi"}
+
+
+def test_send_telegram_5xx_raises_retryable_single_raw_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        attempts["n"] += 1
+        return _resp(503)
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
+    assert attempts["n"] == 1
+
+
+def test_send_telegram_429_is_retryable_not_permanent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Telegram signals rate limiting with HTTP 429 + retry_after. The generic
+    _classify treats every 4xx as permanent, which would silently drop a merely
+    throttled message — 429 must be retryable."""
+    attempts = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        attempts["n"] += 1
+        return _resp(429, {"ok": False, "parameters": {"retry_after": 1}})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
+    assert attempts["n"] == 1
+
+
+def test_send_telegram_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    # e.g. 403 "bot was blocked by the user" — never worth retrying.
+    attempts = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        attempts["n"] += 1
+        return _resp(403, {"ok": False, "description": "bot was blocked"})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
+    assert attempts["n"] == 1
+
+
+def test_send_telegram_transport_error_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(notify, "_post", boom)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
 
 
 def test_send_viber_status_zero_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -403,6 +498,92 @@ def test_send_viber_unset_token_raises_permanent_no_call(
     monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", None)
     with pytest.raises(notify.PermanentNotifyError):
         notify.send_viber(to="V-abc", text="hi")
+    assert sent == []
+
+
+def test_send_telegram_unset_token_raises_permanent_no_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[Any] = []
+    monkeypatch.setattr(notify, "_post", _recording_post(sent))
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
+    # fail-fast: an empty token would otherwise build a bot//sendMessage URL
+    assert sent == []
+
+
+# --- orchestrator: Telegram ---------------------------------------------------
+
+
+def test_notify_telegram_success_one_sent_log(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200, {"ok": True}))
+    user = _make_user(db)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
+
+    logs = notify.notify(
+        session=db,
+        event_type=NotificationEvent.PULL_SHORT,
+        recipients=[user],
+        payload={"k": "v"},
+    )
+    tg_logs = [log for log in logs if log.channel == NotificationChannel.TELEGRAM]
+    assert len(tg_logs) == 1
+    assert tg_logs[0].status == NotificationStatus.SENT
+    assert tg_logs[0].attempts == 1
+    assert tg_logs[0].target_user_id == user.id
+
+
+def test_notify_telegram_5xx_retries_and_never_logs_the_token(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bot token rides in the URL, so a failure path must not echo it into
+    last_error (which is stored and shown to admins)."""
+    sent: list[Any] = []
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        sent.append(1)
+        return _resp(503)
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    user = _make_user(db)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
+
+    logs = notify.notify(
+        session=db,
+        event_type=NotificationEvent.PULL_SHORT,
+        recipients=[user],
+        payload={},
+    )
+    tg_logs = [log for log in logs if log.channel == NotificationChannel.TELEGRAM]
+    assert len(tg_logs) == 1
+    assert tg_logs[0].status == NotificationStatus.FAILED
+    assert tg_logs[0].attempts == 4  # 4 attempts / 3 retries
+    assert len(sent) == 4
+    assert TELEGRAM_TOKEN not in (tg_logs[0].last_error or "")
+
+
+def test_notify_telegram_opted_in_but_no_chat_id_failed_not_enrolled(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[Any] = []
+    monkeypatch.setattr(notify, "_post", _recording_post(sent))
+    user = _make_user(db, telegram_chat_id=None)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
+
+    logs = notify.notify(
+        session=db,
+        event_type=NotificationEvent.PULL_SHORT,
+        recipients=[user],
+        payload={},
+    )
+    tg_logs = [log for log in logs if log.channel == NotificationChannel.TELEGRAM]
+    assert len(tg_logs) == 1
+    assert tg_logs[0].status == NotificationStatus.FAILED
+    assert tg_logs[0].attempts == 0
+    assert "not enrolled" in (tg_logs[0].last_error or "")
     assert sent == []
 
 

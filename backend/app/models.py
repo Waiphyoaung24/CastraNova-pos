@@ -185,6 +185,16 @@ class UpdatePassword(SQLModel):
 
 # Database model, database table inferred from class name
 class User(UserBase, table=True):
+    # A chat can only ever be bound to one account -- without this, two users
+    # could silently bind the same Telegram chat and cross-feed each other's
+    # notifications. Multiple NULLs (not-yet-connected users) are unaffected:
+    # Postgres UNIQUE never compares NULL to NULL as equal.
+    __table_args__ = (
+        UniqueConstraint(
+            "telegram_chat_id", name="uq_user_telegram_chat_id"
+        ),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     hashed_password: str
     # Messaging platform recipient IDs (populated at deployment enrollment,
@@ -192,6 +202,10 @@ class User(UserBase, table=True):
     line_user_id: str | None = Field(default=None, max_length=128)
     viber_user_id: str | None = Field(default=None, max_length=128)
     telegram_chat_id: str | None = Field(default=None, max_length=64)
+    # Display-only, captured alongside telegram_chat_id at connect time so a
+    # stale binding is visible ("Connected as @username") rather than a bare,
+    # meaningless chat id.
+    telegram_username: str | None = Field(default=None, max_length=64)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -1616,6 +1630,27 @@ class NotificationLog(SQLModel, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
         sa_column_kwargs={"server_default": func.now()},
+    )
+
+
+class TelegramConnectCode(SQLModel, table=True):
+    """A short-lived, single-use code binding a Telegram `/start` deep link
+    back to the user who requested it.
+
+    This is an authentication boundary, not a mere correlation key: whoever's
+    Telegram account echoes the code back gets bound to `user_id`. The code
+    must therefore be unguessable (minted with `secrets.token_urlsafe`, not a
+    short/sequential value), single-use (`consumed_at` set atomically on
+    confirm), and short-lived (`expires_at`, checked at confirm time).
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, index=True)
+    code: str = Field(unique=True, index=True, max_length=32)
+    expires_at: datetime = Field(sa_type=DateTime(timezone=True))  # type: ignore
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
     )
 
 
