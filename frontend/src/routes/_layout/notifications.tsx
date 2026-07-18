@@ -206,7 +206,7 @@ function Notifications() {
               <TableRow>
                 <TableHead>Event</TableHead>
                 {CHANNEL_ORDER.map((channel) => (
-                  <TableHead key={channel} className="text-right">
+                  <TableHead key={channel} className="text-center">
                     {channelLabel(channel)}
                   </TableHead>
                 ))}
@@ -219,7 +219,12 @@ function Notifications() {
                 {CHANNEL_ORDER.map((channel) => (
                   <TableCell
                     key={channel}
-                    className="overflow-visible! text-right"
+                    // pr-4! restores the padding the shared table styles zero
+                    // for any checkbox-containing cell (tuned for their
+                    // right-aligned use elsewhere) -- without it, text-center
+                    // centers within an asymmetric box and the checkbox skews
+                    // visibly right.
+                    className="overflow-visible! pr-4! text-center"
                   >
                     {checkboxFor(cells[channel], eventType)}
                   </TableCell>

@@ -60,3 +60,51 @@ test("channel columns are gated by connection; Save batches, doesn't fire per cl
   await page.getByRole("button", { name: "Save" }).click()
   await expect(page.getByText("Preferences saved.")).toBeVisible()
 })
+
+// Regression coverage for two rendering bugs found via screenshot: checkboxes
+// weren't centered under their column headers, and a short (non-scrolling)
+// grid left a transparent gap at the right edge of the row hover highlight --
+// ListTable's scrollbar-gutter reservation was unconditional even when no
+// scrollbar was ever going to appear. Both are geometry bugs invisible to
+// role/text assertions, so this reads actual bounding boxes.
+test("Low stock row has no gap in its hover highlight, and its checkboxes are centered", async ({
+  page,
+}) => {
+  await page.goto("/notifications")
+  const row = page.getByRole("row", { name: /Low stock/ })
+  await row.hover()
+
+  const geometry = await row.evaluate((el) => {
+    const tr = el as HTMLTableRowElement
+    const table = tr.closest("table") as HTMLTableElement
+    const scrollWrapper = table.parentElement as HTMLElement
+    const tableRight = table.getBoundingClientRect().right
+    const wrapperRight = scrollWrapper.getBoundingClientRect().right
+
+    const cellGaps = [...tr.querySelectorAll("td")]
+      .filter((td) => td.querySelector('[role="checkbox"]'))
+      .map((td) => {
+        const cellRect = td.getBoundingClientRect()
+        const cbRect = (
+          td.querySelector('[role="checkbox"]') as HTMLElement
+        ).getBoundingClientRect()
+        return {
+          left: cbRect.left - cellRect.left,
+          right: cellRect.right - cbRect.right,
+        }
+      })
+
+    return {
+      // The unused scrollbar gutter this grid (4 rows, no scrolling needed)
+      // used to reserve, leaving the row's hover background short of the
+      // container's true right edge.
+      unusedGutterGap: wrapperRight - tableRight,
+      cellGaps,
+    }
+  })
+
+  expect(geometry.unusedGutterGap).toBeLessThan(1)
+  for (const { left, right } of geometry.cellGaps) {
+    expect(Math.abs(left - right)).toBeLessThan(1)
+  }
+})
