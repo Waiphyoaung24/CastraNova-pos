@@ -912,7 +912,7 @@ export const NewPasswordSchema = {
 
 export const NotificationChannelSchema = {
     type: 'string',
-    enum: ['LINE', 'VIBER'],
+    enum: ['LINE', 'VIBER', 'TELEGRAM'],
     title: 'NotificationChannel'
 } as const;
 
@@ -925,8 +925,15 @@ export const NotificationEventSchema = {
 export const NotificationPreferencePublicSchema = {
     properties: {
         id: {
-            type: 'string',
-            format: 'uuid',
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
             title: 'Id'
         },
         channel: {

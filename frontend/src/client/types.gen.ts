@@ -182,12 +182,12 @@ export type NewPassword = {
     new_password: string;
 };
 
-export type NotificationChannel = 'LINE' | 'VIBER';
+export type NotificationChannel = 'LINE' | 'VIBER' | 'TELEGRAM';
 
 export type NotificationEvent = 'LOW_STOCK' | 'OVERRIDE_PENDING' | 'PULL_FULFILLED' | 'PULL_SHORT';
 
 export type NotificationPreferencePublic = {
-    id: string;
+    id: (string | null);
     channel: NotificationChannel;
     event_type: NotificationEvent;
     enabled: boolean;

@@ -18,7 +18,7 @@ import { useIsMobile } from "@/hooks/useMobile"
 import { channelLabel } from "@/lib/labels"
 import { requireAuth } from "@/lib/route-guards"
 
-// Both roles (FR-018): per-user opt-in for LINE/Viber notification events.
+// Both roles (FR-018): per-user opt-in for LINE/Viber/Telegram notification events.
 export const Route = createFileRoute("/_layout/notifications")({
   component: Notifications,
   beforeLoad: requireAuth,
@@ -61,19 +61,25 @@ function Notifications() {
 
   const rows = data ?? []
 
+  // Rows the user has never opted into are synthetic (id: null), so many rows
+  // can share id=null at once. Key on the pair instead, which is always unique.
+  const rowKey = (p: { channel: string; event_type: string }) =>
+    `${p.channel}-${p.event_type}`
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Notifications"
-        description="Choose which events get sent to you on LINE or Viber."
+        description="Choose which events get sent to you on LINE, Viber, or Telegram."
       />
 
       <Alert>
         <Bell />
         <AlertTitle>Get notified your way</AlertTitle>
         <AlertDescription>
-          Turn on the events you want pushed to LINE or Viber — low stock, stock
-          requests, and more. Toggle each one on or off; changes save instantly.
+          Turn on the events you want pushed to LINE, Viber, or Telegram — low
+          stock, stock requests, and more. Toggle each one on or off; changes
+          save instantly.
         </AlertDescription>
       </Alert>
 
@@ -85,16 +91,12 @@ function Notifications() {
         <p className="text-muted-foreground py-6 text-center text-sm">
           Could not load preferences.
         </p>
-      ) : rows.length === 0 ? (
-        <p className="text-muted-foreground py-6 text-center text-sm">
-          No notification channels configured.
-        </p>
       ) : isMobile ? (
         <ListShell loading={listLoading}>
           <div className="space-y-3">
             {rows.map((p) => (
               <div
-                key={p.id}
+                key={rowKey(p)}
                 className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4"
               >
                 <div className="min-w-0">
@@ -133,7 +135,7 @@ function Notifications() {
             }
           >
             {rows.map((p) => (
-              <TableRow key={p.id}>
+              <TableRow key={rowKey(p)}>
                 <TableCell>
                   <Badge variant="secondary">{channelLabel(p.channel)}</Badge>
                 </TableCell>
