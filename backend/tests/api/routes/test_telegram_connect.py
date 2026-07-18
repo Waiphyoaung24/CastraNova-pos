@@ -5,6 +5,7 @@ getUpdates; test sends a one-off probe message. notify._post is monkeypatched
 throughout, matching test_notify.py's convention -- no real HTTP happens.
 """
 
+import re
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -73,10 +74,23 @@ def test_connect_code_is_unguessably_long(
     _user, headers = user_and_headers
     r = client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
     assert r.status_code == 200, r.text
-    # secrets.token_urlsafe(16) -> ~22 chars. A short/sequential code would be
-    # guessable within the confirm TTL, letting an attacker bind their own
-    # Telegram to someone else's account.
+    # A short/sequential code would be guessable within the confirm TTL,
+    # letting an attacker bind their own Telegram to someone else's account.
     assert len(r.json()["code"]) >= 20
+
+
+def test_connect_code_only_uses_telegrams_allowed_start_parameter_charset(
+    client: TestClient, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    """Telegram's deep-link start parameter only allows [A-Za-z0-9_] -- any
+    other character (e.g. secrets.token_urlsafe's '-') makes the client treat
+    the whole parameter as invalid and drop it, so the user's Telegram just
+    sends a bare "/start" with no code. parse_start_code would never find a
+    match and confirm would hang forever."""
+    r = client.post(f"{PREFIX}/notifications/telegram/connect", headers=user_and_headers[1])
+    assert r.status_code == 200, r.text
+    code = r.json()["code"]
+    assert re.fullmatch(r"[A-Za-z0-9_]+", code), code
 
 
 # --- confirm ---------------------------------------------------------------

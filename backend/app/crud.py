@@ -3255,12 +3255,20 @@ def create_telegram_connect_code(
     """Mint a one-time, ~10-minute code for the Telegram connect deep link.
 
     See TelegramConnectCode's docstring: this is an authentication boundary,
-    not a correlation key, so the code must be unguessable
-    (secrets.token_urlsafe, never a short or sequential value).
+    not a correlation key, so the code must be unguessable -- never a short
+    or sequential value.
+
+    token_hex, not token_urlsafe: Telegram's deep-link start parameter only
+    allows [A-Za-z0-9_] (https://core.telegram.org/bots/features#deep-linking).
+    token_urlsafe's '-' fails that silently -- the Telegram client just drops
+    the whole parameter and sends a bare "/start", so parse_start_code never
+    finds a match and confirm hangs forever. token_hex(16) is 32 lowercase hex
+    characters, entirely within the allowed set, and matches the code column's
+    existing max_length=32 exactly.
     """
     record = TelegramConnectCode(
         user_id=user_id,
-        code=secrets.token_urlsafe(16),
+        code=secrets.token_hex(16),
         expires_at=get_datetime_utc() + timedelta(minutes=10),
     )
     session.add(record)
