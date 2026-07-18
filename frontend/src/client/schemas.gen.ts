@@ -945,10 +945,14 @@ export const NotificationPreferencePublicSchema = {
         enabled: {
             type: 'boolean',
             title: 'Enabled'
+        },
+        channel_connected: {
+            type: 'boolean',
+            title: 'Channel Connected'
         }
     },
     type: 'object',
-    required: ['id', 'channel', 'event_type', 'enabled'],
+    required: ['id', 'channel', 'event_type', 'enabled', 'channel_connected'],
     title: 'NotificationPreferencePublic'
 } as const;
 

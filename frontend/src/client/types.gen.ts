@@ -191,6 +191,7 @@ export type NotificationPreferencePublic = {
     channel: NotificationChannel;
     event_type: NotificationEvent;
     enabled: boolean;
+    channel_connected: boolean;
 };
 
 export type NotificationPreferencesUpdate = {

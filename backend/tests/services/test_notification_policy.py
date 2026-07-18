@@ -11,9 +11,11 @@ import pytest
 from app.models import (
     ADMIN_ONLY_EVENTS,
     ALL_ROLE_EVENTS,
+    NotificationChannel,
     NotificationEvent,
     User,
     UserRole,
+    channel_connected,
     eligible_events,
 )
 
@@ -72,3 +74,31 @@ def test_eligibility_keys_off_role_not_superuser_flag() -> None:
         is_superuser=True,
     )
     assert eligible_events(superuser_with_staff_role) == ALL_ROLE_EVENTS
+
+
+# --- channel_connected --------------------------------------------------------
+#
+# Whether a checkbox can ever actually deliver, independent of whether the
+# user has opted into that event -- a preference row is meaningless to enable
+# if notify() has no address to send to.
+
+
+def test_channel_disconnected_by_default() -> None:
+    user = _user(UserRole.YGN_STAFF)
+    assert channel_connected(user, NotificationChannel.LINE) is False
+    assert channel_connected(user, NotificationChannel.VIBER) is False
+    assert channel_connected(user, NotificationChannel.TELEGRAM) is False
+
+
+def test_channel_connected_when_address_set() -> None:
+    user = _user(UserRole.YGN_STAFF)
+    user.telegram_chat_id = "847392015"
+    assert channel_connected(user, NotificationChannel.TELEGRAM) is True
+    # Setting one channel's address must not affect the others.
+    assert channel_connected(user, NotificationChannel.LINE) is False
+
+
+def test_channel_connected_treats_blank_string_as_disconnected() -> None:
+    user = _user(UserRole.YGN_STAFF)
+    user.line_user_id = ""
+    assert channel_connected(user, NotificationChannel.LINE) is False

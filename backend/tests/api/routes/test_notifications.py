@@ -200,6 +200,30 @@ def test_grid_offers_every_channel_event_pair_to_a_fresh_user(
     # Nothing persisted yet, so every row is a synthetic default.
     assert all(p["enabled"] is False for p in rows)
     assert all(p["id"] is None for p in rows)
+    # A fresh user has no address configured on any channel: every row must
+    # say so, or the UI would offer a checkbox that can never deliver.
+    assert all(p["channel_connected"] is False for p in rows)
+
+
+def test_grid_marks_only_the_configured_channel_as_connected(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    headers = authentication_token_from_email_with_role(
+        client=client, email=email, db=db, role=UserRole.YGN_STAFF
+    )
+    user = crud.get_user_by_email(session=db, email=email)
+    assert user is not None
+    user.line_user_id = "L-configured"
+    db.add(user)
+    db.commit()
+
+    r = client.get(f"{PREFIX}/notifications/preferences", headers=headers)
+    assert r.status_code == 200, r.text
+    rows = r.json()
+
+    by_channel = {p["channel"] for p in rows if p["channel_connected"]}
+    assert by_channel == {"LINE"}
 
 
 def test_grid_excludes_admin_only_events_from_staff(

@@ -41,6 +41,7 @@ from app.models import (
     NotificationChannel,
     NotificationEvent,
     NotificationPreference,
+    NotificationPreferencePublic,
     NotificationPreferenceUpdate,
     OverrideExceptionRow,
     OverrideExceptionsReport,
@@ -103,6 +104,7 @@ from app.models import (
     UserCreate,
     UserOption,
     UserUpdate,
+    channel_connected,
     eligible_events,
     get_datetime_utc,
 )
@@ -3141,7 +3143,7 @@ def cancel_project_pull(
 
 def list_notification_preferences(
     *, session: Session, user: User
-) -> list[NotificationPreference]:
+) -> list[NotificationPreferencePublic]:
     """Return the user's full opt-in grid: one row per (channel, eligible event).
 
     Persisted rows are merged over a generated default of `enabled=False`, so a
@@ -3164,20 +3166,24 @@ def list_notification_preferences(
         ).all()
     }
     allowed = eligible_events(user)
-    return [
-        persisted.get((channel, event))
-        or NotificationPreference(
-            id=None,  # type: ignore[arg-type]  # synthetic: not yet persisted
-            user_id=user.id,
-            channel=channel,
-            event_type=event,
-            enabled=False,
-        )
-        # Stable ordering so the UI grid doesn't reshuffle between fetches.
-        for channel in NotificationChannel
-        for event in NotificationEvent
-        if event in allowed
-    ]
+    grid: list[NotificationPreferencePublic] = []
+    # Stable ordering so the UI grid doesn't reshuffle between fetches.
+    for channel in NotificationChannel:
+        connected = channel_connected(user, channel)
+        for event in NotificationEvent:
+            if event not in allowed:
+                continue
+            row = persisted.get((channel, event))
+            grid.append(
+                NotificationPreferencePublic(
+                    id=row.id if row else None,
+                    channel=channel,
+                    event_type=event,
+                    enabled=row.enabled if row else False,
+                    channel_connected=connected,
+                )
+            )
+    return grid
 
 
 def upsert_notification_preferences(
@@ -3185,7 +3191,7 @@ def upsert_notification_preferences(
     session: Session,
     user: User,
     updates: list[NotificationPreferenceUpdate],
-) -> list[NotificationPreference]:
+) -> list[NotificationPreferencePublic]:
     """Insert-or-update each (channel, event_type) opt-in for the user, then
     return the user's full merged grid (see `list_notification_preferences`).
     Idempotent."""

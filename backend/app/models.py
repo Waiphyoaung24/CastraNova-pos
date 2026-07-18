@@ -198,6 +198,22 @@ class User(UserBase, table=True):
     )
 
 
+# Mirrors the address-attribute mapping baked into services/notify.py's
+# _CHANNELS -- keep both in sync if a channel is ever added.
+CHANNEL_ADDRESS_ATTR: dict[NotificationChannel, str] = {
+    NotificationChannel.LINE: "line_user_id",
+    NotificationChannel.VIBER: "viber_user_id",
+    NotificationChannel.TELEGRAM: "telegram_chat_id",
+}
+
+
+def channel_connected(user: User, channel: NotificationChannel) -> bool:
+    """Whether `user` has an address configured for `channel`, independent of
+    any event opt-in -- a preference row is meaningless to enable if notify()
+    has no address to send to."""
+    return bool(getattr(user, CHANNEL_ADDRESS_ATTR[channel]))
+
+
 def eligible_events(user: User) -> set[NotificationEvent]:
     """The events `user` can actually receive, given their role.
 
@@ -1611,6 +1627,9 @@ class NotificationPreferencePublic(SQLModel):
     channel: NotificationChannel
     event_type: NotificationEvent
     enabled: bool
+    # Whether the user has an address configured for `channel` at all. A
+    # checkbox with channel_connected=False can never actually deliver.
+    channel_connected: bool
 
 
 class NotificationPreferenceUpdate(SQLModel):
