@@ -5,6 +5,7 @@ import { useId, useState } from "react"
 
 import { type SupplierPublic, SuppliersService } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { ListFilters } from "@/components/Common/ListFilters"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -67,7 +68,13 @@ function Suppliers() {
   })
   const suppliers = suppliersResponse?.data ?? []
   const listLoading = isPlaceholderData || isFetching
-  const hasFilters = debouncedSearch || country
+  const activeCount = [debouncedSearch, country].filter(Boolean).length
+  const hasFilters = activeCount > 0
+  const clearFilters = () => {
+    setSearch("")
+    setCountry("")
+    pagination.reset()
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -77,7 +84,7 @@ function Suppliers() {
         actions={<SupplierCreateDialog />}
       />
 
-      <div className="flex flex-wrap items-end gap-3">
+      <ListFilters activeCount={activeCount} onClear={clearFilters}>
         <Input
           value={search}
           onChange={(e) => {
@@ -108,7 +115,7 @@ function Suppliers() {
             />
           </div>
         </div>
-      </div>
+      </ListFilters>
 
       <div className="space-y-2">
         <ListShell loading={listLoading}>

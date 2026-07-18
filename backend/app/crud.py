@@ -1,7 +1,8 @@
+import secrets
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal, TypeVar, cast
 
@@ -38,7 +39,11 @@ from app.models import (
     MarginBreakdownRow,
     MarginDimension,
     MovementType,
+    NotificationChannel,
+    NotificationEvent,
+    NotificationLog,
     NotificationPreference,
+    NotificationPreferencePublic,
     NotificationPreferenceUpdate,
     OverrideExceptionRow,
     OverrideExceptionsReport,
@@ -92,6 +97,8 @@ from app.models import (
     SyncReviewItemCreate,
     SyncReviewState,
     SystemSetting,
+    TelegramConfirmOutcome,
+    TelegramConnectCode,
     TrackingMode,
     Unit,
     UnitDrillRow,
@@ -101,6 +108,8 @@ from app.models import (
     UserCreate,
     UserOption,
     UserUpdate,
+    channel_connected,
+    eligible_events,
     get_datetime_utc,
 )
 
@@ -580,6 +589,7 @@ def _product_filter_clauses(
     brand: str | None,
     category: str | None,
     tracking_mode: TrackingMode | None,
+    is_active: bool | None,
 ) -> list[ColumnElement[bool]]:
     clauses: list[ColumnElement[bool]] = []
     if q and q.strip():
@@ -598,6 +608,8 @@ def _product_filter_clauses(
         )
     if tracking_mode is not None:
         clauses.append(col(Product.tracking_mode) == tracking_mode)
+    if is_active is not None:
+        clauses.append(col(Product.is_active) == is_active)
     return clauses
 
 
@@ -608,12 +620,17 @@ def list_products(
     brand: str | None = None,
     category: str | None = None,
     tracking_mode: TrackingMode | None = None,
+    is_active: bool | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[Product]:
     stmt = select(Product)
     for clause in _product_filter_clauses(
-        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=tracking_mode,
+        is_active=is_active,
     ):
         stmt = stmt.where(clause)
     stmt = (
@@ -631,10 +648,15 @@ def count_products(
     brand: str | None = None,
     category: str | None = None,
     tracking_mode: TrackingMode | None = None,
+    is_active: bool | None = None,
 ) -> int:
     stmt = select(func.count()).select_from(Product)
     for clause in _product_filter_clauses(
-        q=q, brand=brand, category=category, tracking_mode=tracking_mode
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=tracking_mode,
+        is_active=is_active,
     ):
         stmt = stmt.where(clause)
     return session.exec(stmt).one()
@@ -3137,29 +3159,62 @@ def cancel_project_pull(
 
 
 def list_notification_preferences(
-    *, session: Session, user_id: uuid.UUID
-) -> list[NotificationPreference]:
-    """Return a user's notification preferences (FR-018)."""
-    return list(
-        session.exec(
-            select(NotificationPreference)
-            .where(NotificationPreference.user_id == user_id)
-            .order_by(col(NotificationPreference.id))
+    *, session: Session, user: User
+) -> list[NotificationPreferencePublic]:
+    """Return the user's full opt-in grid: one row per (channel, eligible event).
+
+    Persisted rows are merged over a generated default of `enabled=False`, so a
+    user who has never opted in still sees every switch they could turn on.
+    Returning only persisted rows (the previous behaviour) left a fresh user
+    with an empty page and no way to create the first row, which made opt-in a
+    manual SQL step.
+
+    Synthetic rows carry `id=None` — they do not exist until the user PATCHes
+    one on. Pairs outside `eligible_events` are omitted entirely: the notify
+    producers would never deliver them, so offering the switch would promise a
+    send that silently never happens.
+    """
+    persisted = {
+        (p.channel, p.event_type): p
+        for p in session.exec(
+            select(NotificationPreference).where(
+                NotificationPreference.user_id == user.id
+            )
         ).all()
-    )
+    }
+    allowed = eligible_events(user)
+    grid: list[NotificationPreferencePublic] = []
+    # Stable ordering so the UI grid doesn't reshuffle between fetches.
+    for channel in NotificationChannel:
+        connected = channel_connected(user, channel)
+        for event in NotificationEvent:
+            if event not in allowed:
+                continue
+            row = persisted.get((channel, event))
+            grid.append(
+                NotificationPreferencePublic(
+                    id=row.id if row else None,
+                    channel=channel,
+                    event_type=event,
+                    enabled=row.enabled if row else False,
+                    channel_connected=connected,
+                )
+            )
+    return grid
 
 
 def upsert_notification_preferences(
     *,
     session: Session,
-    user_id: uuid.UUID,
+    user: User,
     updates: list[NotificationPreferenceUpdate],
-) -> list[NotificationPreference]:
+) -> list[NotificationPreferencePublic]:
     """Insert-or-update each (channel, event_type) opt-in for the user, then
-    return the user's full preference list. Idempotent."""
+    return the user's full merged grid (see `list_notification_preferences`).
+    Idempotent."""
     for upd in updates:
         stmt = select(NotificationPreference).where(
-            NotificationPreference.user_id == user_id,
+            NotificationPreference.user_id == user.id,
             NotificationPreference.channel == upd.channel,
             NotificationPreference.event_type == upd.event_type,
         )
@@ -3172,7 +3227,7 @@ def upsert_notification_preferences(
         else:
             session.add(
                 NotificationPreference(
-                    user_id=user_id,
+                    user_id=user.id,
                     channel=upd.channel,
                     event_type=upd.event_type,
                     enabled=upd.enabled,
@@ -3192,7 +3247,112 @@ def upsert_notification_preferences(
                 session.add(existing)
                 session.flush()
     session.commit()
-    return list_notification_preferences(session=session, user_id=user_id)
+    return list_notification_preferences(session=session, user=user)
+
+
+def create_telegram_connect_code(
+    *, session: Session, user_id: uuid.UUID
+) -> TelegramConnectCode:
+    """Mint a one-time, ~10-minute code for the Telegram connect deep link.
+
+    See TelegramConnectCode's docstring: this is an authentication boundary,
+    not a correlation key, so the code must be unguessable -- never a short
+    or sequential value.
+
+    token_hex gives 32 lowercase hex characters -- 128 bits of entropy (same
+    as token_urlsafe(16)) and exactly the code column's max_length=32.
+
+    Telegram's deep-link start parameter allows A-Z, a-z, 0-9, '_' and '-'
+    (https://core.telegram.org/bots/features#deep-linking), so token_urlsafe
+    would be equally valid here; hex is just unambiguous in a URL. Do NOT
+    switch to plain base64 -- its '+', '/' and '=' are outside that set.
+    """
+    record = TelegramConnectCode(
+        user_id=user_id,
+        code=secrets.token_hex(16),
+        expires_at=get_datetime_utc() + timedelta(minutes=10),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def confirm_telegram_connect_code(
+    *, session: Session, user: User, code: str, chat_id: str, username: str | None
+) -> TelegramConfirmOutcome:
+    """Validate and atomically consume a pending connect code for `user`,
+    binding `chat_id`/`username` on success. The caller (the confirm route)
+    is responsible for resolving `chat_id`/`username` via
+    ``notify.get_telegram_updates`` + ``parse_start_code`` first -- crud.py
+    doesn't reach into the notify service, matching this codebase's existing
+    layering (routes call both; crud stays DB-only).
+
+    ``FOR UPDATE`` makes the consumed_at check-then-set atomic against a
+    racing second confirm for the same code.
+
+    Returns PENDING for anything the caller should keep polling through (no
+    such code, wrong owner, expired, already consumed) and
+    CHAT_ALREADY_LINKED for the one terminal case, so the UI can say
+    something true instead of timing out with a generic message.
+    """
+    record = session.exec(
+        select(TelegramConnectCode)
+        .where(
+            TelegramConnectCode.code == code,
+            TelegramConnectCode.user_id == user.id,
+        )
+        .with_for_update()
+    ).first()
+    if record is None or record.consumed_at is not None:
+        return TelegramConfirmOutcome.PENDING
+    if record.expires_at < get_datetime_utc():
+        return TelegramConfirmOutcome.PENDING
+
+    # Checked up front for a clear answer in the common case; the
+    # IntegrityError below still backstops a racing bind between here and
+    # commit. Deliberately does NOT consume the code -- the user can unlink
+    # the other account and retry within the TTL.
+    incumbent = session.exec(
+        select(User).where(
+            User.telegram_chat_id == chat_id, User.id != user.id
+        )
+    ).first()
+    if incumbent is not None:
+        return TelegramConfirmOutcome.CHAT_ALREADY_LINKED
+
+    record.consumed_at = get_datetime_utc()
+    session.add(record)
+    user.telegram_chat_id = chat_id
+    user.telegram_username = username
+    session.add(user)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Lost the race: someone bound this chat between the check above and
+        # the commit. The rollback also discards consumed_at, so the code
+        # stays usable if the winner later unlinks.
+        session.rollback()
+        return TelegramConfirmOutcome.CHAT_ALREADY_LINKED
+    return TelegramConfirmOutcome.CONNECTED
+
+
+def get_latest_telegram_notification_log(
+    *, session: Session, user_id: uuid.UUID
+) -> NotificationLog | None:
+    """The most recent Telegram send attempt logged for `user_id`, or None if
+    they have never had one. Used to detect a rotted binding (bot blocked,
+    chat deleted): only the LATEST attempt matters, not "any failure ever" --
+    a later success means it recovered."""
+    return session.exec(
+        select(NotificationLog)
+        .where(
+            NotificationLog.target_user_id == user_id,
+            NotificationLog.channel == NotificationChannel.TELEGRAM,
+        )
+        .order_by(col(NotificationLog.created_at).desc())
+        .limit(1)
+    ).first()
 
 
 # Dummy hash to use for timing attack prevention when user is not found

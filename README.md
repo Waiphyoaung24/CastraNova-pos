@@ -122,6 +122,14 @@ git merge --continue
 
 ### Configure
 
+The `.env` files hold secrets and are gitignored, so a fresh clone has to create
+them from the tracked templates:
+
+```bash
+cp .env.example .env
+cp frontend/.env.example frontend/.env
+```
+
 You can then update configs in the `.env` files to customize your configurations.
 
 Before deploying it, make sure you change at least the values for:

@@ -15,7 +15,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import { useIsMobile } from "@/hooks/useMobile"
 import { cn } from "@/lib/utils"
 
 const VISIBLE_LIMIT = 50
@@ -53,6 +61,7 @@ export function EntityCombobox<T>({
   required = false,
   disabled = false,
 }: EntityComboboxProps<T>) {
+  const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [shown, setShown] = useState(VISIBLE_LIMIT)
@@ -96,31 +105,126 @@ export function EntityCombobox<T>({
     }
   }
 
+  const trigger = (
+    <Button
+      type="button"
+      id={id}
+      variant="outline"
+      role="combobox"
+      aria-label={ariaLabel}
+      aria-required={required || undefined}
+      aria-expanded={open}
+      disabled={disabled}
+      className="w-full justify-between font-normal"
+    >
+      <span
+        className={cn(!selectedLabel && "text-muted-foreground", "truncate")}
+      >
+        {selectedLabel ?? placeholder}
+      </span>
+      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+    </Button>
+  )
+
+  // Shared by both the desktop popover and the mobile sheet below. CommandList
+  // caps its own height (`max-h-[300px] overflow-y-auto`, command.tsx) and
+  // scrolls itself regardless of what wraps it, so this subtree needs no
+  // changes between the two containers.
+  const list = (
+    <Command shouldFilter={false} className="min-h-0">
+      <CommandInput
+        placeholder={searchPlaceholder}
+        value={query}
+        onValueChange={(nextQuery: string) => {
+          setQuery(nextQuery)
+          setShown(VISIBLE_LIMIT)
+        }}
+      />
+      <CommandList
+        className="scrollbar-thin min-h-0 flex-1"
+        onScroll={revealMore}
+      >
+        <CommandEmpty>{emptyText}</CommandEmpty>
+        <CommandGroup>
+          {allowClear && (
+            <CommandItem
+              value="__clear__"
+              onSelect={() => {
+                onChange(undefined)
+                close(false)
+              }}
+            >
+              <span className="text-muted-foreground flex-1 truncate text-left">
+                All
+              </span>
+              <Check
+                className={cn(
+                  "ml-auto h-4 w-4",
+                  value ? "opacity-0" : "opacity-100",
+                )}
+              />
+            </CommandItem>
+          )}
+          {visible.map((item) => {
+            const key = getKey(item)
+            return (
+              <CommandItem
+                key={key}
+                value={key}
+                onSelect={() => {
+                  onChange(key)
+                  close(false)
+                }}
+              >
+                <span className="flex-1 truncate text-left">
+                  {getLabel(item)}
+                </span>
+                <Check
+                  className={cn(
+                    "ml-auto h-4 w-4",
+                    value === key ? "opacity-100" : "opacity-0",
+                  )}
+                />
+              </CommandItem>
+            )
+          })}
+        </CommandGroup>
+      </CommandList>
+      {matches.length > VISIBLE_LIMIT && (
+        <div className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground">
+          Showing {visible.length} of {matches.length}
+        </div>
+      )}
+    </Command>
+  )
+
+  // A Radix Popover positions itself relative to its trigger with collision
+  // avoidance — on mobile, a low trigger (e.g. inside a filter sheet) can flip
+  // the popover upward, landing it visually over unrelated controls above it.
+  // A bottom Sheet has no such ambiguity: it's always full-width, pinned to
+  // the viewport bottom.
+  if (isMobile) {
+    return (
+      <Sheet open={open} onOpenChange={close}>
+        <SheetTrigger asChild>{trigger}</SheetTrigger>
+        <SheetContent
+          side="bottom"
+          className="flex max-h-[85vh] flex-col overflow-hidden p-0"
+        >
+          <SheetHeader>
+            <SheetTitle>{ariaLabel ?? placeholder}</SheetTitle>
+          </SheetHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4">
+            {list}
+          </div>
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
   return (
     <Popover open={open} onOpenChange={close}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          id={id}
-          variant="outline"
-          role="combobox"
-          aria-label={ariaLabel}
-          aria-required={required || undefined}
-          aria-expanded={open}
-          disabled={disabled}
-          className="w-full justify-between font-normal"
-        >
-          <span
-            className={cn(
-              !selectedLabel && "text-muted-foreground",
-              "truncate",
-            )}
-          >
-            {selectedLabel ?? placeholder}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       {/* The popover is a bounded flex column so that CommandList — the only
           element with `overflow-y-auto` — is the one that actually scrolls.
           Without `flex flex-col` here, Command's `h-full` resolves against an
@@ -131,71 +235,7 @@ export function EntityCombobox<T>({
         align="start"
         collisionPadding={8}
       >
-        <Command shouldFilter={false} className="min-h-0">
-          <CommandInput
-            placeholder={searchPlaceholder}
-            value={query}
-            onValueChange={(nextQuery: string) => {
-              setQuery(nextQuery)
-              setShown(VISIBLE_LIMIT)
-            }}
-          />
-          <CommandList
-            className="scrollbar-thin min-h-0 flex-1"
-            onScroll={revealMore}
-          >
-            <CommandEmpty>{emptyText}</CommandEmpty>
-            <CommandGroup>
-              {allowClear && (
-                <CommandItem
-                  value="__clear__"
-                  onSelect={() => {
-                    onChange(undefined)
-                    close(false)
-                  }}
-                >
-                  <span className="text-muted-foreground flex-1 truncate text-left">
-                    All
-                  </span>
-                  <Check
-                    className={cn(
-                      "ml-auto h-4 w-4",
-                      value ? "opacity-0" : "opacity-100",
-                    )}
-                  />
-                </CommandItem>
-              )}
-              {visible.map((item) => {
-                const key = getKey(item)
-                return (
-                  <CommandItem
-                    key={key}
-                    value={key}
-                    onSelect={() => {
-                      onChange(key)
-                      close(false)
-                    }}
-                  >
-                    <span className="flex-1 truncate text-left">
-                      {getLabel(item)}
-                    </span>
-                    <Check
-                      className={cn(
-                        "ml-auto h-4 w-4",
-                        value === key ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                  </CommandItem>
-                )
-              })}
-            </CommandGroup>
-          </CommandList>
-          {matches.length > VISIBLE_LIMIT && (
-            <div className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground">
-              Showing {visible.length} of {matches.length}
-            </div>
-          )}
-        </Command>
+        {list}
       </PopoverContent>
     </Popover>
   )

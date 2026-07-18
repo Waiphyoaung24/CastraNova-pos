@@ -109,10 +109,15 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: EmailStr | None = None
     EMAILS_FROM_NAME: str | None = None
 
-    # Outbound push notification tokens (FR-018). None in dev/test; the LINE +
-    # Viber clients are mocked in tests. Never log these.
+    # Outbound push notification tokens (FR-018). None in dev/test; the LINE,
+    # Viber + Telegram clients are mocked in tests. Never log these.
+    # TELEGRAM_BOT_TOKEN goes in the request URL, not a header — see notify.py.
     LINE_CHANNEL_ACCESS_TOKEN: str | None = None
     VIBER_AUTH_TOKEN: str | None = None
+    TELEGRAM_BOT_TOKEN: str | None = None
+    # Public (not secret) -- used to build the t.me/<username>?start=<code>
+    # connect deep link. The bot token above is what's actually sensitive.
+    TELEGRAM_BOT_USERNAME: str | None = None
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:

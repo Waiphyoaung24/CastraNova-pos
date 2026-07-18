@@ -69,6 +69,44 @@ def test_staff_can_read_products(
     )
 
 
+def test_read_products_filters_by_is_active(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    active_sku = f"ACT-{uuid.uuid4().hex[:8]}"
+    inactive_sku = f"INA-{uuid.uuid4().hex[:8]}"
+    client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(active_sku),
+    )
+    created = client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(inactive_sku),
+    ).json()
+    client.patch(
+        f"{PREFIX}/products/{created['id']}",
+        headers=superuser_token_headers,
+        json={"is_active": False},
+    )
+
+    active_only = client.get(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        params={"is_active": True, "q": active_sku},
+    )
+    assert active_only.status_code == 200
+    assert [p["sku"] for p in active_only.json()["data"]] == [active_sku]
+
+    inactive_only = client.get(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        params={"is_active": False, "q": inactive_sku},
+    )
+    assert inactive_only.status_code == 200
+    assert [p["sku"] for p in inactive_only.json()["data"]] == [inactive_sku]
+
+
 def test_price_change_recorded_on_update(
     client: TestClient, superuser_token_headers: dict[str, str]
 ) -> None:

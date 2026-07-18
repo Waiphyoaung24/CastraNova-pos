@@ -7,8 +7,10 @@ emit N identical pages (one label per page) for the roll thermal printer. The
 encoded value is also printed human-readable for the manual fallback.
 """
 
+import base64
 import io
 
+import qrcode  # type: ignore[import-untyped]
 from reportlab.graphics import renderPDF  # type: ignore[import-untyped]
 from reportlab.graphics.barcode.qr import QrCodeWidget  # type: ignore[import-untyped]
 from reportlab.graphics.shapes import Drawing  # type: ignore[import-untyped]
@@ -66,6 +68,20 @@ def render_label_sheet(
         _draw_label_page(pdf, qr_value=qr_value, line1=line1, line2=line2)
     pdf.save()
     return buf.getvalue()
+
+
+def render_qr_png_data_uri(value: str) -> str:
+    """Return `value` as a QR code, encoded as a base64 PNG data URI.
+
+    For on-screen display (the Telegram connect card's deep link) rather than
+    print: unlike render_label_sheet's ReportLab vector/PDF output, this uses
+    the `qrcode` package directly to get a raster image cheaply.
+    """
+    img = qrcode.make(value)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def render_unit_label(*, castranova_barcode: str, caption: str) -> bytes:

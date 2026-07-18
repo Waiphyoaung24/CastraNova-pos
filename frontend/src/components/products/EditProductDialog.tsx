@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Pencil } from "lucide-react"
 import { useId, useState } from "react"
 
 import { type ProductPublic, ProductsService } from "@/client"
@@ -13,7 +12,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -93,18 +91,21 @@ function ActiveField({
   )
 }
 
-export function EditProductDialog({ product }: { product: ProductPublic }) {
-  const [open, setOpen] = useState(false)
+export function EditProductDialog({
+  product,
+  onClose,
+}: {
+  product: ProductPublic
+  onClose: () => void
+}) {
   const [draft, setDraft] = useState<ProductEditDraft>(() =>
     productToDraft(product),
   )
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
-  // Reseed the form from the latest product each time the dialog opens.
   function onOpenChange(next: boolean) {
-    if (next) setDraft(productToDraft(product))
-    setOpen(next)
+    if (!next) onClose()
   }
 
   function patch(key: keyof ProductEditDraft, value: string) {
@@ -119,7 +120,7 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
       }),
     onSuccess: () => {
       showSuccessToast("Product updated")
-      setOpen(false)
+      onClose()
     },
     onError: handleError.bind(showErrorToast),
     onSettled: () => {
@@ -134,13 +135,7 @@ export function EditProductDialog({ product }: { product: ProductPublic }) {
     JSON.stringify(draft) === JSON.stringify(productToDraft(product))
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
-          <Pencil className="mr-1 size-4" />
-          Edit
-        </Button>
-      </DialogTrigger>
+    <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit product — {product.sku}</DialogTitle>

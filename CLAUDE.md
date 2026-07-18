@@ -150,7 +150,7 @@ scripts/                # generate-client.sh, test.sh, etc.
 
 - Start dev stack: `docker compose watch`
 - Backend tests: `bash scripts/test.sh` (or `pytest` inside `backend/`)
-- E2E tests: `bun run test` (Playwright) in `frontend/`
+- E2E tests: `bun run test` (Playwright) in `frontend/`. **Always set `E2E_SKIP_DB_RESET=1`** unless a full dev-DB reset was explicitly requested — `frontend/tests/global.setup.ts` truncates and reseeds the shared dev database by default on every run.
 - Pre-commit (`prek` / biome / ruff / mypy) must pass before commit.
 - Required env vars before any deploy: `SECRET_KEY`, `POSTGRES_PASSWORD`, `FIRST_SUPERUSER_PASSWORD`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 

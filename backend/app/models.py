@@ -121,6 +121,7 @@ class SyncReviewState(str, enum.Enum):
 class NotificationChannel(str, enum.Enum):
     LINE = "LINE"
     VIBER = "VIBER"
+    TELEGRAM = "TELEGRAM"
 
 
 class NotificationEvent(str, enum.Enum):
@@ -133,6 +134,23 @@ class NotificationEvent(str, enum.Enum):
 class NotificationStatus(str, enum.Enum):
     SENT = "SENT"
     FAILED = "FAILED"
+
+
+# Who may receive which event. These must agree with the recipient queries in
+# app.services.notify: the three below are fetched with
+# `User.role == UserRole.BKK_ADMIN`, while notify_low_stock has no role filter.
+# Offering a staff user a checkbox for an admin-only event would persist
+# enabled=True and then silently never deliver.
+ADMIN_ONLY_EVENTS: frozenset["NotificationEvent"] = frozenset(
+    {
+        NotificationEvent.PULL_SHORT,
+        NotificationEvent.PULL_FULFILLED,
+        NotificationEvent.OVERRIDE_PENDING,
+    }
+)
+ALL_ROLE_EVENTS: frozenset["NotificationEvent"] = frozenset(
+    set(NotificationEvent) - ADMIN_ONLY_EVENTS
+)
 
 
 # Shared properties
@@ -167,16 +185,60 @@ class UpdatePassword(SQLModel):
 
 # Database model, database table inferred from class name
 class User(UserBase, table=True):
+    # A chat can only ever be bound to one account -- without this, two users
+    # could silently bind the same Telegram chat and cross-feed each other's
+    # notifications. Multiple NULLs (not-yet-connected users) are unaffected:
+    # Postgres UNIQUE never compares NULL to NULL as equal.
+    __table_args__ = (
+        UniqueConstraint(
+            "telegram_chat_id", name="uq_user_telegram_chat_id"
+        ),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     hashed_password: str
     # Messaging platform recipient IDs (populated at deployment enrollment,
     # Task 5.4). Table-only — never exposed via the user API (UserBase/Public).
     line_user_id: str | None = Field(default=None, max_length=128)
     viber_user_id: str | None = Field(default=None, max_length=128)
+    telegram_chat_id: str | None = Field(default=None, max_length=64)
+    # Display-only, captured alongside telegram_chat_id at connect time so a
+    # stale binding is visible ("Connected as @username") rather than a bare,
+    # meaningless chat id.
+    telegram_username: str | None = Field(default=None, max_length=64)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+
+
+# Mirrors the address-attribute mapping baked into services/notify.py's
+# _CHANNELS -- keep both in sync if a channel is ever added.
+CHANNEL_ADDRESS_ATTR: dict[NotificationChannel, str] = {
+    NotificationChannel.LINE: "line_user_id",
+    NotificationChannel.VIBER: "viber_user_id",
+    NotificationChannel.TELEGRAM: "telegram_chat_id",
+}
+
+
+def channel_connected(user: User, channel: NotificationChannel) -> bool:
+    """Whether `user` has an address configured for `channel`, independent of
+    any event opt-in -- a preference row is meaningless to enable if notify()
+    has no address to send to."""
+    return bool(getattr(user, CHANNEL_ADDRESS_ATTR[channel]))
+
+
+def eligible_events(user: User) -> set[NotificationEvent]:
+    """The events `user` can actually receive, given their role.
+
+    Keys off `role == BKK_ADMIN` — deliberately NOT `deps.is_admin`, which also
+    treats any superuser as admin. The notify producers query the role strictly,
+    so a superuser left at the default staff role genuinely does not receive
+    admin-only events; the grid must reflect that rather than the wider check.
+    """
+    if user.role == UserRole.BKK_ADMIN:
+        return set(NotificationEvent)
+    return set(ALL_ROLE_EVENTS)
 
 
 # Properties to return via API, id is always required
@@ -1571,11 +1633,38 @@ class NotificationLog(SQLModel, table=True):
     )
 
 
+class TelegramConnectCode(SQLModel, table=True):
+    """A short-lived, single-use code binding a Telegram `/start` deep link
+    back to the user who requested it.
+
+    This is an authentication boundary, not a mere correlation key: whoever's
+    Telegram account echoes the code back gets bound to `user_id`. The code
+    must therefore be unguessable (minted with `secrets.token_urlsafe`, not a
+    short/sequential value), single-use (`consumed_at` set atomically on
+    confirm), and short-lived (`expires_at`, checked at confirm time).
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, index=True)
+    code: str = Field(unique=True, index=True, max_length=32)
+    expires_at: datetime = Field(sa_type=DateTime(timezone=True))  # type: ignore
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
 class NotificationPreferencePublic(SQLModel):
-    id: uuid.UUID
+    # Nullable: the grid returns synthetic rows for pairs the user has never
+    # opted into, which have no database row yet. Clients key on
+    # (channel, event_type), not id.
+    id: uuid.UUID | None
     channel: NotificationChannel
     event_type: NotificationEvent
     enabled: bool
+    # Whether the user has an address configured for `channel` at all. A
+    # checkbox with channel_connected=False can never actually deliver.
+    channel_connected: bool
 
 
 class NotificationPreferenceUpdate(SQLModel):
@@ -1601,6 +1690,54 @@ class NotificationPreferencesUpdate(SQLModel):
                 )
             seen.add(key)
         return self
+
+
+class TelegramConnectResponse(SQLModel):
+    code: str
+    deep_link: str
+    qr_code_data_uri: str
+    expires_at: datetime
+
+
+class TelegramConfirmRequest(SQLModel):
+    code: str
+
+
+class TelegramConfirmOutcome(str, enum.Enum):
+    """Why a confirm attempt ended. PENDING is the ordinary "the user hasn't
+    tapped Start yet" case and must stay distinguishable from the terminal
+    failures below, or the client would abort a poll that just needs more
+    time -- or, worse, keep polling forever on something polling can't fix."""
+
+    CONNECTED = "CONNECTED"
+    PENDING = "PENDING"
+    # This Telegram chat already backs a different account (UNIQUE
+    # telegram_chat_id). Terminal: retrying cannot resolve it.
+    CHAT_ALREADY_LINKED = "CHAT_ALREADY_LINKED"
+
+
+class TelegramConfirmResult(SQLModel):
+    connected: bool
+    telegram_username: str | None = None
+    # Human-readable reason, set only on a terminal failure the user must act
+    # on. None on both success and PENDING -- the client keeps polling while
+    # this is null and stops as soon as it isn't.
+    error: str | None = None
+
+
+class TelegramTestResult(SQLModel):
+    ok: bool
+    detail: str | None = None
+
+
+class TelegramStatus(SQLModel):
+    connected: bool
+    telegram_username: str | None = None
+    # True only when the MOST RECENT Telegram NotificationLog for this user
+    # is FAILED -- a later successful send clears it, since the binding has
+    # recovered (a stale reconnect, the user unblocking the bot, etc).
+    delivery_failing: bool = False
+    last_error: str | None = None
 
 
 # --- Channel-margin report (FR-013; read-only aggregation) --------------------

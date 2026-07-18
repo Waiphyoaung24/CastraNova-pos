@@ -31,8 +31,9 @@ test("unitStatusLabel humanizes an unknown state instead of showing raw enum", (
   expect(unitStatusLabel("SOME_NEW_STATE")).toBe("Some new state")
 })
 
-test("channelLabel keeps LINE, names Viber, and passes through unknowns", () => {
+test("channelLabel keeps LINE, names Viber and Telegram, and passes through unknowns", () => {
   expect(channelLabel("LINE")).toBe("LINE")
   expect(channelLabel("VIBER")).toBe("Viber")
+  expect(channelLabel("TELEGRAM")).toBe("Telegram")
   expect(channelLabel("SMS")).toBe("SMS")
 })

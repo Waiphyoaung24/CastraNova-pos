@@ -1,13 +1,16 @@
-"""Outbound LINE + Viber push notifications (FR-018).
+"""Outbound LINE + Viber + Telegram push notifications (FR-018).
 
 Outbound only. Each channel send runs 4 attempts / 3 retries with exponential
 backoff (waits 1s, 5s, 25s) on transient failures (5xx / transport errors); 4xx
-and Viber ``status != 0`` are permanent and never retried. ``notify`` is
-best-effort: it never raises to its caller — every send outcome (including
-failures and un-enrolled recipients) lands as one append-only
-``notification_log`` row for weekly admin review.
+and Viber ``status != 0`` are permanent and never retried. Telegram's 429
+(rate-limited) is the one 4xx treated as transient. ``notify`` is best-effort:
+it never raises to its caller — every send outcome (including failures and
+un-enrolled recipients) lands as one append-only ``notification_log`` row for
+weekly admin review.
 
-Tokens are read from settings and sent in headers; they are never logged.
+Tokens are read from settings and never logged. LINE and Viber send theirs in a
+header; Telegram's bot token rides in the URL path instead, so the Telegram URL
+must never reach a log or an exception message.
 """
 
 import logging
@@ -43,6 +46,9 @@ from app.models import (
 
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 VIBER_SEND_URL = "https://chatapi.viber.com/pa/send_message"
+# Telegram takes the bot token in the path, so the URL itself is a secret.
+TELEGRAM_SEND_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
+TELEGRAM_GET_UPDATES_URL_TEMPLATE = "https://api.telegram.org/bot{token}/getUpdates"
 
 _TIMEOUT = 10.0
 
@@ -113,10 +119,114 @@ def send_viber(*, to: str, text: str) -> None:
         raise PermanentNotifyError(f"viber status {status}")
 
 
+def send_telegram(*, to: str, text: str) -> None:
+    """Push a text message via the Telegram Bot API (single raw attempt).
+
+    ``to`` is the recipient's chat id — a bot cannot message a user until that
+    user has messaged it first, so the id is captured out-of-band at enrollment.
+    """
+    if not settings.TELEGRAM_BOT_TOKEN:
+        raise PermanentNotifyError("TELEGRAM_TOKEN not configured")
+    url = TELEGRAM_SEND_URL_TEMPLATE.format(token=settings.TELEGRAM_BOT_TOKEN)
+    try:
+        response = _post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"chat_id": to, "text": text},
+        )
+    except httpx.TransportError as exc:
+        # Deliberately not chaining the URL/exc text — it carries the token.
+        raise RetryableNotifyError("transport error") from exc
+    # Telegram rate-limits with 429 + retry_after. _classify would call that
+    # permanent and drop a merely throttled message, so catch it first.
+    if response.status_code == 429:
+        raise RetryableNotifyError("HTTP 429 (rate limited)")
+    _classify(response)
+
+
+def send_telegram_test(*, to: str, text: str) -> tuple[bool, str | None]:
+    """Send a one-off test message and report the outcome directly, instead
+    of raising Retryable/PermanentNotifyError.
+
+    This is a synchronous, user-initiated probe of an address -- not part of
+    the ``notify()`` fan-out -- so there is no retry policy or append-only
+    log entry to feed; the caller just wants a pass/fail with a reason.
+    Returns ``(ok, detail)``, where ``detail`` is Telegram's own
+    ``description`` field on failure. Never the request URL/token — that
+    only ever rides in the URL path (see module docstring).
+    """
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return False, "Telegram is not configured"
+    url = TELEGRAM_SEND_URL_TEMPLATE.format(token=settings.TELEGRAM_BOT_TOKEN)
+    try:
+        response = _post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"chat_id": to, "text": text},
+        )
+    except httpx.TransportError:
+        return False, "Could not reach Telegram"
+    if response.status_code // 100 == 2:
+        return True, None
+    detail: str | None = None
+    try:
+        detail = response.json().get("description")
+    except ValueError:
+        pass
+    return False, detail or f"HTTP {response.status_code}"
+
+
+def get_telegram_updates() -> list[dict[str, Any]]:
+    """Fetch pending Telegram updates (single raw attempt), WITHOUT
+    acknowledging any of them.
+
+    Deliberately never advances the update offset: Telegram retains
+    unacknowledged updates for ~24h and returns up to 100 per call, so this
+    trades an unbounded update backlog for having no poller and no offset
+    state to persist or coordinate across workers. Used to resolve enrollment
+    codes sent via ``/start <code>`` — see ``parse_start_code``.
+    """
+    if not settings.TELEGRAM_BOT_TOKEN:
+        raise PermanentNotifyError("TELEGRAM_TOKEN not configured")
+    url = TELEGRAM_GET_UPDATES_URL_TEMPLATE.format(token=settings.TELEGRAM_BOT_TOKEN)
+    try:
+        response = _post(url, headers={"Content-Type": "application/json"}, json={})
+    except httpx.TransportError as exc:
+        # Deliberately not chaining the URL/exc text — it carries the token.
+        raise RetryableNotifyError("transport error") from exc
+    # Telegram rate-limits with 429 + retry_after. _classify would call that
+    # permanent and drop a merely-throttled poll, so catch it first.
+    if response.status_code == 429:
+        raise RetryableNotifyError("HTTP 429 (rate limited)")
+    _classify(response)
+    body: dict[str, Any] = response.json()
+    return list(body.get("result", []))
+
+
+def parse_start_code(update: dict[str, Any]) -> tuple[str, str | None, str] | None:
+    """If ``update`` is a Telegram ``/start <code>`` message, return
+    ``(chat_id, username, code)``; otherwise None (any other message shape —
+    no text, a different command, no chat — is simply not ours to handle)."""
+    message = update.get("message")
+    if not isinstance(message, dict):
+        return None
+    text = message.get("text")
+    if not isinstance(text, str) or not text.startswith("/start "):
+        return None
+    code = text.removeprefix("/start ").strip()
+    if not code:
+        return None
+    chat = message.get("chat")
+    if not isinstance(chat, dict) or "id" not in chat:
+        return None
+    return (str(chat["id"]), chat.get("username"), code)
+
+
 # Map a channel to (send fn, address attribute on User).
 _CHANNELS: dict[NotificationChannel, tuple[Any, str]] = {
     NotificationChannel.LINE: (send_line, "line_user_id"),
     NotificationChannel.VIBER: (send_viber, "viber_user_id"),
+    NotificationChannel.TELEGRAM: (send_telegram, "telegram_chat_id"),
 }
 
 

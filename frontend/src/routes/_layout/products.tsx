@@ -1,10 +1,12 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Package } from "lucide-react"
+import { History, Package } from "lucide-react"
+import type { KeyboardEvent } from "react"
 import { useState } from "react"
 
-import { ProductsService } from "@/client"
+import { type ProductPublic, ProductsService } from "@/client"
 import type { TrackingMode } from "@/client/types.gen"
+import { ListFilters } from "@/components/Common/ListFilters"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -38,6 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import { useIsMobile } from "@/hooks/useMobile"
 import { usePagination } from "@/hooks/usePagination"
 import { trackingModeLabel } from "@/lib/labels"
 import { formatThb } from "@/lib/reports"
@@ -56,33 +59,38 @@ export const Route = createFileRoute("/_layout/products")({
   }),
 })
 
-// Column widths in header order (SKU, Model, Brand, Category, Tracking,
-// Status, Purchase, Retail, Repair, History); sum to 100%.
-const PRODUCT_WIDTHS = [
-  "11%",
-  "15%",
-  "8%",
-  "9%",
-  "9%",
-  "8%",
-  "8%",
-  "8%",
-  "8%",
-  "16%",
-]
+// Column widths in header order (SKU, Model, Brand / Category, Tracking,
+// Status, Pricing, History); sum to 100%.
+const PRODUCT_WIDTHS = ["12%", "18%", "18%", "10%", "10%", "20%", "12%"]
 
 function Products() {
   const [search, setSearch] = useState("")
   const [brand, setBrand] = useState("")
   const [category, setCategory] = useState("")
   const [trackingMode, setTrackingMode] = useState("")
+  const [statusFilter, setStatusFilter] = useState("")
+  const [editing, setEditing] = useState<ProductPublic | null>(null)
   const debouncedSearch = useDebouncedValue(search)
   const debouncedBrand = useDebouncedValue(brand)
   const debouncedCategory = useDebouncedValue(category)
   const pagination = usePagination()
-  const hasFilters = Boolean(
-    debouncedSearch || debouncedBrand || debouncedCategory || trackingMode,
-  )
+  const isMobile = useIsMobile()
+  const activeCount = [
+    debouncedSearch,
+    debouncedBrand,
+    debouncedCategory,
+    trackingMode,
+    statusFilter,
+  ].filter(Boolean).length
+  const hasFilters = activeCount > 0
+  const clearFilters = () => {
+    setSearch("")
+    setBrand("")
+    setCategory("")
+    setTrackingMode("")
+    setStatusFilter("")
+    pagination.reset()
+  }
 
   const {
     data: productsResponse,
@@ -97,6 +105,7 @@ function Products() {
         brand: debouncedBrand,
         category: debouncedCategory,
         trackingMode,
+        statusFilter,
       },
     ],
     queryFn: () =>
@@ -107,11 +116,24 @@ function Products() {
         brand: debouncedBrand || undefined,
         category: debouncedCategory || undefined,
         trackingMode: (trackingMode || undefined) as TrackingMode | undefined,
+        isActive: statusFilter === "" ? undefined : statusFilter === "active",
       }),
     placeholderData: keepPreviousData,
   })
   const products = productsResponse?.data ?? []
   const listLoading = isPlaceholderData || isFetching
+  const rowProps = (p: ProductPublic) => ({
+    role: "button" as const,
+    tabIndex: 0,
+    "aria-label": `Edit ${p.model_name}`,
+    onClick: () => setEditing(p),
+    onKeyDown: (ev: KeyboardEvent) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault()
+        setEditing(p)
+      }
+    },
+  })
   const { data: purchaseCosts } = useQuery({
     queryKey: ["product-purchase-costs"],
     queryFn: () => ProductsService.readPurchaseCosts(),
@@ -131,7 +153,7 @@ function Products() {
         actions={<ProductCreateDialog />}
       />
 
-      <div className="flex flex-wrap gap-3">
+      <ListFilters activeCount={activeCount} onClear={clearFilters}>
         <Input
           value={search}
           onChange={(e) => {
@@ -184,7 +206,23 @@ function Products() {
             </SelectItem>
           </SelectContent>
         </Select>
-      </div>
+        <Select
+          value={statusFilter === "" ? ALL : statusFilter}
+          onValueChange={(v) => {
+            setStatusFilter(v === ALL ? "" : v)
+            pagination.reset()
+          }}
+        >
+          <SelectTrigger className="w-full sm:w-40" aria-label="Status filter">
+            <SelectValue placeholder="All statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All statuses</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+          </SelectContent>
+        </Select>
+      </ListFilters>
 
       <div className="space-y-2">
         <ListShell loading={listLoading}>
@@ -206,34 +244,96 @@ function Products() {
                   : "Create your first product with the New product button above."
               }
             />
+          ) : isMobile ? (
+            <div className="space-y-3">
+              {products.map((p) => (
+                <div
+                  key={p.id}
+                  {...rowProps(p)}
+                  className="bg-card hover:bg-muted/50 focus-visible:ring-ring cursor-pointer rounded-lg border p-4 outline-none focus-visible:ring-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium">{p.model_name}</p>
+                      <p className="num text-muted-foreground mt-0.5 text-xs">
+                        {p.sku}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="shrink-0">
+                      {trackingModeLabel(p.tracking_mode ?? "QUANTITY")}
+                    </Badge>
+                  </div>
+                  <dl className="text-muted-foreground mt-3 grid grid-cols-[5rem_1fr] gap-y-1 border-t pt-3 text-sm">
+                    <dt>Status</dt>
+                    <dd className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "size-2 rounded-full",
+                          p.is_active ? "bg-green-500" : "bg-gray-400",
+                        )}
+                      />
+                      <span
+                        className={p.is_active ? "text-foreground" : undefined}
+                      >
+                        {p.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </dd>
+                    <dt>Brand</dt>
+                    <dd className="text-foreground truncate">
+                      {p.brand ?? "—"}
+                    </dd>
+                    <dt>Category</dt>
+                    <dd className="text-foreground truncate">
+                      {p.category ?? "—"}
+                    </dd>
+                    <dt>Purchase</dt>
+                    <dd className="num text-foreground">
+                      {costByProductId.has(p.id)
+                        ? formatThb(costByProductId.get(p.id) as string)
+                        : "—"}
+                    </dd>
+                    <dt>Retail</dt>
+                    <dd className="num text-foreground">
+                      {formatThb(p.retail_price_thb)}
+                    </dd>
+                    <dt>Repair</dt>
+                    <dd className="num text-foreground">
+                      {formatThb(p.repair_price_thb)}
+                    </dd>
+                  </dl>
+                  <div className="mt-3 flex justify-end gap-2 border-t pt-3">
+                    <PriceHistoryDialog productId={p.id} sku={p.sku} />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             <ListTable
               widths={PRODUCT_WIDTHS}
-              minWidth={1140}
+              minWidth={920}
               head={
                 <TableRow>
                   <TableHead>SKU</TableHead>
                   <TableHead>Model</TableHead>
-                  <TableHead>Brand</TableHead>
-                  <TableHead>Category</TableHead>
+                  <TableHead>Brand / Category</TableHead>
                   <TableHead>Tracking</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Purchase</TableHead>
-                  <TableHead className="text-right">Retail</TableHead>
-                  <TableHead className="text-right">Repair</TableHead>
+                  <TableHead className="text-right">Pricing</TableHead>
                   <TableHead className="text-right">History</TableHead>
                 </TableRow>
               }
             >
               {products.map((p) => (
-                <TableRow key={p.id}>
+                <TableRow
+                  key={p.id}
+                  {...rowProps(p)}
+                  className="hover:bg-muted/50 focus-visible:bg-muted/50 cursor-pointer outline-none"
+                >
                   <TableCell className="num font-medium">{p.sku}</TableCell>
                   <TableCell>{p.model_name}</TableCell>
                   <TableCell className="text-muted-foreground">
-                    {p.brand ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {p.category ?? "—"}
+                    <div>{p.brand ?? "—"}</div>
+                    <div className="text-xs">{p.category ?? "—"}</div>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">
@@ -256,19 +356,17 @@ function Products() {
                     </div>
                   </TableCell>
                   <TableCell className="num text-right">
-                    {costByProductId.has(p.id)
-                      ? formatThb(costByProductId.get(p.id) as string)
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(p.retail_price_thb)}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {formatThb(p.repair_price_thb)}
+                    <div>
+                      Purchase:{" "}
+                      {costByProductId.has(p.id)
+                        ? formatThb(costByProductId.get(p.id) as string)
+                        : "—"}
+                    </div>
+                    <div>Retail: {formatThb(p.retail_price_thb)}</div>
+                    <div>Repair: {formatThb(p.repair_price_thb)}</div>
                   </TableCell>
                   <TableCell className="overflow-visible! text-right">
                     <div className="flex justify-end gap-2">
-                      <EditProductDialog product={p} />
                       <PriceHistoryDialog productId={p.id} sku={p.sku} />
                     </div>
                   </TableCell>
@@ -284,6 +382,9 @@ function Products() {
           onPageChange={pagination.setPage}
         />
       </div>
+      {editing && (
+        <EditProductDialog product={editing} onClose={() => setEditing(null)} />
+      )}
     </div>
   )
 }
@@ -304,60 +405,76 @@ function PriceHistoryDialog({
   })
   const rows = data ?? []
 
+  // Radix portals DialogContent/DialogOverlay elsewhere in the DOM, but React
+  // bubbles their synthetic events through the component tree — so a click on
+  // the close button or overlay still reaches the row's onClick unless this
+  // whole subtree stops it, not just the trigger button.
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
-          History
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Price history — {sku}</DialogTitle>
-        </DialogHeader>
-        {isLoading ? (
-          <p className="text-muted-foreground py-4 text-center text-sm">
-            Loading…
-          </p>
-        ) : isError ? (
-          <p className="text-muted-foreground py-4 text-center text-sm">
-            Could not load price history.
-          </p>
-        ) : rows.length === 0 ? (
-          <p className="text-muted-foreground py-4 text-center text-sm">
-            No price changes recorded.
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Field</TableHead>
-                <TableHead className="text-right">Old</TableHead>
-                <TableHead className="text-right">New</TableHead>
-                <TableHead>When</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((h) => (
-                <TableRow key={h.id}>
-                  <TableCell>{h.field}</TableCell>
-                  <TableCell className="num text-right">
-                    {h.old_value}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {h.new_value}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {h.changed_at
-                      ? new Date(h.changed_at).toLocaleDateString()
-                      : "—"}
-                  </TableCell>
+    // biome-ignore lint/a11y/noStaticElementInteractions: pure click-bubbling boundary around real interactive children, not itself perceivable by AT.
+    <div
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Price history"
+            title="Price history"
+          >
+            <History className="size-4" />
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Price history — {sku}</DialogTitle>
+          </DialogHeader>
+          {isLoading ? (
+            <p className="text-muted-foreground py-4 text-center text-sm">
+              Loading…
+            </p>
+          ) : isError ? (
+            <p className="text-muted-foreground py-4 text-center text-sm">
+              Could not load price history.
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="text-muted-foreground py-4 text-center text-sm">
+              No price changes recorded.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Field</TableHead>
+                  <TableHead className="text-right">Old</TableHead>
+                  <TableHead className="text-right">New</TableHead>
+                  <TableHead>When</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </DialogContent>
-    </Dialog>
+              </TableHeader>
+              <TableBody>
+                {rows.map((h) => (
+                  <TableRow key={h.id}>
+                    <TableCell>{h.field}</TableCell>
+                    <TableCell className="num text-right">
+                      {h.old_value}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {h.new_value}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {h.changed_at
+                        ? new Date(h.changed_at).toLocaleDateString()
+                        : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }
