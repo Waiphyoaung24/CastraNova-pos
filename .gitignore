@@ -15,3 +15,5 @@ compose.local.yml
 # Local tooling artifacts
 .playwright-mcp/
 preview/
+
+.env
