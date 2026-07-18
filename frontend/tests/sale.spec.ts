@@ -172,6 +172,40 @@ test.describe("Sale screen", () => {
     ).toBeDisabled()
   })
 
+  test("sale: insufficient stock (409) shows an actionable toast, not a generic one", async ({
+    page,
+  }) => {
+    const { barcode, customerName } = await seedSellableUnit()
+
+    await page.route("**/api/v1/sales", (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: "Insufficient stock: have 0, need 1",
+        }),
+      }),
+    )
+
+    await page.goto("/sale")
+    await page.getByRole("combobox", { name: "Customer" }).click()
+    await page.getByRole("option", { name: customerName, exact: true }).click()
+    await scanBarcode(page, barcode)
+    await expect(
+      page.getByRole("cell", { name: barcode, exact: true }),
+    ).toBeVisible()
+
+    await page.getByRole("button", { name: "Complete sale" }).click()
+
+    await expect(
+      page.getByText("Insufficient Stock", { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByText("Insufficient stock: have 0, need 1"),
+    ).toBeVisible()
+    await expect(page.getByText("Something went wrong!")).toHaveCount(0)
+  })
+
   test("sale online: scan a serialized unit and complete the sale → unit is SOLD", async ({
     page,
   }) => {

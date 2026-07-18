@@ -157,8 +157,20 @@ function Sale() {
     },
     // Surface the server reason (e.g. "Product X is inactive", "Unit already
     // SOLD", insufficient stock) — these are user-actionable and retrying will
-    // never clear them. Falls back to a generic message.
-    onError: handleError.bind(showErrorToast),
+    // never clear them. Falls back to a generic message. Insufficient-stock
+    // conflicts get a dedicated title so they don't read as a generic fault.
+    onError: (err: ApiError) => {
+      const detail = (err.body as { detail?: unknown } | undefined)?.detail
+      if (
+        err.status === 409 &&
+        typeof detail === "string" &&
+        detail.startsWith("Insufficient stock")
+      ) {
+        showErrorToast(detail, "Insufficient Stock")
+        return
+      }
+      handleError.call(showErrorToast, err)
+    },
   })
 
   // Gating on !isPending intentionally locks checkout while a sale is in flight
