@@ -31,6 +31,13 @@ def test_render_label_sheet_emits_qty_pages() -> None:
     assert _page_count(pdf) == 5
 
 
+def test_render_label_sheet_page_is_80x60mm() -> None:
+    # The page size must match the Hoin printer's 80x60mm label stock;
+    # 80mm = 226.77pt, 60mm = 170.08pt. Pinned from raw bytes, parser-free.
+    pdf = render_label_sheet(qr_value="FLT-001", line1="FLT-001", line2="Filter")
+    assert re.search(rb"/MediaBox\s*\[\s*0 0 226\.77\d* 170\.07\d*\s*\]", pdf)
+
+
 def test_render_unit_label_wrapper_still_one_page() -> None:
     pdf = render_unit_label(castranova_barcode="CN-ABC123", caption="SN-9")
     assert pdf[:4] == b"%PDF"
