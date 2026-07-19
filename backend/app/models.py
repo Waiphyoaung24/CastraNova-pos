@@ -1282,9 +1282,13 @@ class SyncReviewResolve(SQLModel):
 
 
 class Sale(SQLModel, table=True):
+    # sold_at is the hottest range predicate in margin_report — every query in
+    # the family closes over [start, end) on it. Plain (not partial) index:
+    # sold_at is NOT NULL.
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_sale_idempotency_key"),
         Index("ix_sale_customer_id", "customer_id"),
+        Index("ix_sale_sold_at", "sold_at"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1317,6 +1321,21 @@ class SaleLine(SQLModel, table=True):
         UniqueConstraint(
             "pricing_override_request_id",
             name="uq_saleline_pricing_override_request_id",
+        ),
+        # Bare-FK hygiene, not report tuning: margin_report reaches this table
+        # via the indexed sale_id, so these cover parent-delete scans on
+        # unit/product instead. Partial — both columns are nullable.
+        Index(
+            "ix_saleline_unit_id",
+            "unit_id",
+            unique=False,
+            postgresql_where=text("unit_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_saleline_product_id",
+            "product_id",
+            unique=False,
+            postgresql_where=text("product_id IS NOT NULL"),
         ),
     )
 
@@ -1402,6 +1421,14 @@ class ServiceTicket(SQLModel, table=True):
             "idempotency_key", name="uq_service_ticket_idempotency_key"
         ),
         Index("ix_serviceticket_customer_id", "customer_id"),
+        # margin_report range-filters closed_at. Partial: open tickets are NULL
+        # and can never satisfy `>= start`, so they are dead weight in the index.
+        Index(
+            "ix_serviceticket_closed_at",
+            "closed_at",
+            unique=False,
+            postgresql_where=text("closed_at IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1435,6 +1462,9 @@ class ServiceTicketPart(SQLModel, table=True):
             "pricing_override_request_id",
             name="uq_service_ticket_part_pricing_override_request_id",
         ),
+        # Bare-FK hygiene: rows are reached via the indexed service_ticket_id,
+        # so this covers parent-delete scans on product. Plain — NOT NULL.
+        Index("ix_serviceticketpart_product_id", "product_id"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1499,6 +1529,15 @@ class ProjectPull(SQLModel, table=True):
         Index("ix_project_pull_state_created", "state", "created_at"),
         Index("ix_projectpull_customer_id", "customer_id"),
         Index("ix_projectpull_project_id", "project_id"),
+        # margin_report range-filters fulfilled_at; ix_project_pull_state_created
+        # does not help it (those queries touch neither state nor created_at).
+        # Partial: unfulfilled pulls are NULL and never satisfy `>= start`.
+        Index(
+            "ix_projectpull_fulfilled_at",
+            "fulfilled_at",
+            unique=False,
+            postgresql_where=text("fulfilled_at IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
