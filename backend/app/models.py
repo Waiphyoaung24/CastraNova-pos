@@ -683,7 +683,11 @@ class UnitMovementBase(SQLModel):
 
 class UnitMovement(UnitMovementBase, table=True):
     # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
-    # index (unit_id, occurred_at DESC) for lifecycle traversal (FR-015).
+    # index (unit_id, occurred_at DESC) for lifecycle traversal (FR-015);
+    # (actor_user_id, occurred_at DESC) for the audit log's actor filter
+    # (list_audit/count_audit always pair the filter with this sort + limit);
+    # partial sale_id / stock_adjustment_id for margin_report's Sale join and
+    # FK lookups, mirroring the project_pull_id/service_ticket_id indexes.
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_unit_movement_idempotency_key"),
         Index(
@@ -702,6 +706,23 @@ class UnitMovement(UnitMovementBase, table=True):
             "service_ticket_id",
             unique=False,
             postgresql_where=text("service_ticket_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_actor_occurred",
+            "actor_user_id",
+            text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_unitmovement_sale_id",
+            "sale_id",
+            unique=False,
+            postgresql_where=text("sale_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_stock_adjustment_id",
+            "stock_adjustment_id",
+            unique=False,
+            postgresql_where=text("stock_adjustment_id IS NOT NULL"),
         ),
     )
 
@@ -867,6 +888,10 @@ class PartMovement(PartMovementBase, table=True):
     # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
     # index (product_id, occurred_at DESC) for SKU history (FR-015);
     # CHECK(quantity > 0) — direction is never encoded in the sign (§4.3).
+    # (actor_user_id, occurred_at DESC) for the audit log's actor filter
+    # (list_audit/count_audit always pair the filter with this sort + limit);
+    # partial sale_id / stock_adjustment_id for margin_report's Sale join and
+    # FK lookups, mirroring the project_pull_id/service_ticket_id indexes.
     __table_args__ = (
         UniqueConstraint(
             "idempotency_key", name="uq_part_movement_idempotency_key"
@@ -887,6 +912,23 @@ class PartMovement(PartMovementBase, table=True):
             "service_ticket_id",
             unique=False,
             postgresql_where=text("service_ticket_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_partmovement_actor_occurred",
+            "actor_user_id",
+            text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_partmovement_sale_id",
+            "sale_id",
+            unique=False,
+            postgresql_where=text("sale_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_partmovement_stock_adjustment_id",
+            "stock_adjustment_id",
+            unique=False,
+            postgresql_where=text("stock_adjustment_id IS NOT NULL"),
         ),
         CheckConstraint("quantity > 0", name="ck_part_movement_qty_positive"),
     )
