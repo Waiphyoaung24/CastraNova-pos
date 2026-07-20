@@ -14,13 +14,20 @@ per connect attempt, per user. An authenticated user can therefore drive unbound
 a third-party API on the shop's single bot token, risking Telegram-side throttling of the whole
 bot. `connect` being unlimited also grows `telegramconnectcode` rows with no reaping path.
 
-This spec covers both halves. It adds no product behaviour — the connect flow's user-visible
-contract is unchanged.
+Investigating that finding surfaced a second, unrelated defect in the same call path: the
+`getUpdates` fetch reads the *oldest* end of Telegram's update queue, so connect can silently
+stop working once the queue is busy (finding 1a). It is fixed here because it lives in the one
+line this spec was already changing.
+
+Scope is therefore both halves of H-8 plus that fix. The connect flow's user-visible contract is
+otherwise unchanged: no new screens, no new inputs. Two behaviours do change deliberately —
+connect becomes reliable when more than 100 updates are queued (Part 0), and the card stops
+polling on a 429 instead of hanging (Part 4).
 
 ## Findings that shape the design
 
-Three facts established by reading the running code, not the review doc. Each one changes the
-answer, so they are recorded here rather than left implicit.
+Four facts established by reading the running code and the Bot API docs, not the review doc.
+Each one changes the answer, so they are recorded here rather than left implicit.
 
 ### 1. `get_telegram_updates()` returns global, un-acknowledged state
 
@@ -32,6 +39,22 @@ The consequence the review missed: **the response is identical for every caller.
 bot's whole pending queue, not a per-user view. Ten staff polling concurrently make ten
 identical outbound requests for the same bytes. That makes the fetch cacheable, which attacks
 the amplification directly rather than throttling the symptom.
+
+### 1a. The un-offset fetch returns the OLDEST 100 updates, capping connect reliability
+
+`get_telegram_updates` posts `json={}` — no `offset`, no `limit`. Per the Bot API docs, that
+returns "updates starting with the earliest unconfirmed update", with `limit` defaulting to 100
+(also its maximum). Because the code never confirms anything, updates only leave the queue by
+aging out at 24h.
+
+So once more than 100 unconfirmed updates accumulate, `/confirm` sees the **oldest** 100 and a
+freshly-sent `/start` falls outside the window entirely. Connect then fails with no error — just
+a two-minute spinner and a timeout — until older updates expire. This is a correctness ceiling
+that tightens as the bot sees more traffic, and neither caching nor rate limiting touches it.
+
+The docs also document the fix: "The negative offset can be specified to retrieve updates
+starting from *-offset* update from the end of the updates queue." Passing `offset: -100` yields
+the newest 100 instead, which always contains a `/start` sent seconds ago.
 
 ### 2. Rate-limit buckets are per-worker, not shop-wide
 
@@ -53,11 +76,28 @@ available at no lookup cost.
 
 ## Design
 
+### Part 0 — Fetch the newest updates, not the oldest
+
+Change the `getUpdates` body from `json={}` to `json={"offset": -100}`, and update the
+docstring to record why. One line; it removes the ceiling in finding 1a.
+
+This preserves the design the docstring deliberately chose. An update is confirmed only when
+`getUpdates` is called with an offset *higher than its update_id*; a negative offset resolves
+relative to the queue's end, so it should confirm nothing — leaving no offset state to persist
+or coordinate across the 4 workers, exactly as today.
+
+**That last point is an assumption the docs do not state explicitly and it must be verified
+empirically against the live API before this ships.** If a negative offset *does* confirm, one
+worker's poll could forget a `/start` before the worker serving that user's `/confirm` sees it —
+a flaky-connect race, and precisely the coordination problem the original author avoided. Should
+that turn out to be the behaviour, the fallback is to keep `json={}` and accept the 100-update
+ceiling as a documented limitation rather than trade a rare ceiling for a common race.
+
 ### Part 1 — Collapse the outbound amplification
 
-Leave `get_telegram_updates()` untouched. Its docstring promises "a single raw attempt", it is
-covered by existing tests, and that contract stays true. Add a separate cached wrapper and point
-only the confirm route at it:
+Leave `get_telegram_updates()`'s contract otherwise untouched. Its docstring promises "a single
+raw attempt", it is covered by existing tests, and that stays true. Add a separate cached
+wrapper and point only the confirm route at it:
 
 ```python
 TELEGRAM_UPDATES_CACHE_TTL_SECONDS = 3.0  # one client poll interval
@@ -132,13 +172,24 @@ Safe against the confirm path: `confirm_telegram_connect_code` looks up by `(cod
 a deleted prior code returns `PENDING`, identical to the expired/unknown case it already handles
 and already tests.
 
+### Part 4 — Stop the confirm poll on 429
+
+The `/confirm` limit introduces a failure mode that does not exist today: if it ever trips, the
+card's poll keeps spinning until the 2-minute timeout with nothing shown to the user, because
+both existing stop conditions key off *successful* responses (M-15).
+
+`TelegramConnectCard` gains one narrow stop condition — on a 429 from `confirmQuery`, halt
+polling and surface the message. This is not a fix for M-15 generally; it closes only the gap
+this spec's own change opens, per the "clean up your own mess" rule. M-15's broader case
+(5xx, dropped network) stays open and separately tracked.
+
 ## Error handling
 
 | Case | Behaviour |
 |---|---|
 | Telegram unreachable during confirm | Propagates from the cache, route returns `connected=False`, client keeps polling. Unchanged. |
 | Cache miss racing another thread | Lock serializes; loser reads the fresh entry. One outbound call. |
-| Confirm 429 | Surfaces to the card as a query error. See M-15 note below. |
+| Confirm 429 | `TelegramConnectCard` stops polling and shows the error instead of spinning out the 2-minute timer. See Part 4. |
 | Connect 429 | Standard slowapi JSON error; the card's `onError` already shows a toast. |
 
 ## Testing
@@ -146,6 +197,14 @@ and already tests.
 Follows the existing `rate_limit_on` fixture (`tests/api/test_login_rate_limit.py`), the
 `MockTransport` pattern (`tests/services/test_notify.py`), and the suite already covering this
 flow (`tests/api/routes/test_telegram_connect.py`, 20+ cases).
+
+Offset (Part 0):
+- The outbound request body carries `offset: -100` (assert on the captured `MockTransport` request).
+- A code present only in the newest updates still resolves — i.e. the window is the recent end,
+  not the stale head.
+- Separately, and **not** as a pytest case: confirm against the live API that a negative offset
+  does not confirm updates (see Part 0's caveat). This is a manual pre-flight check, since a
+  mock cannot observe Telegram's server-side queue state.
 
 Cache:
 - Two confirms within the TTL produce **one** outbound call; a third after expiry produces a second.
@@ -159,15 +218,24 @@ Reaping:
 Rate limits:
 - 61st confirm within a minute → 429; 21st connect within an hour → 429.
 - **User A exhausting their bucket does not 429 user B.** This is the property that justifies
-  the custom key_func; without it the change is pointless.
+  the custom key_func; without it the change is pointless. It is also what proves the
+  dependency-ordering assumption in Part 2 — if `request.state` were unpopulated when `key_func`
+  ran, both users would share the IP-fallback bucket and this test fails.
+
+Frontend (Part 4):
+- A 429 from the confirm poll stops the polling and renders the message, rather than spinning to
+  the 2-minute timeout.
 
 ## Out of scope
 
 - **Shared limiter storage.** Making buckets shop-wide instead of per-worker requires Redis,
   which the stack does not run. That is an infrastructure decision, not part of this finding.
-- **M-15** (`TelegramConnectCard` fails silently when the confirm poll errors). A 429 mid-poll
-  would surface as the same silent spinner. `60/minute` puts that out of practical reach, but
-  the findings genuinely touch; M-15 stays a separate item rather than being folded in here.
-- **Telegram's own server-side rate limits.** Part 1 reduces call volume by construction; no
-  attempt is made to model or respect Telegram's published quotas beyond the existing 429
+- **M-15 in general.** Part 4 handles only the 429 case this spec introduces. The broader
+  silent-failure gap on 5xx and dropped connections stays open and separately tracked.
+- **Telegram's own server-side rate limits.** Parts 0 and 1 reduce call volume by construction;
+  no attempt is made to model or respect Telegram's published quotas beyond the existing 429
   handling in `get_telegram_updates`.
+- **Confirming/acknowledging updates.** Part 0 reads the newest window but still never advances
+  the offset, so the queue continues to drain only by 24h expiry. Genuine acknowledgement would
+  require cross-worker offset coordination — the trade-off the original design rejected, and
+  nothing here revisits it.
