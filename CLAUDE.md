@@ -91,7 +91,7 @@ CastraNova-POS is an **inventory tracking & management system**. Forked from `fa
 | DB       | PostgreSQL                                                           |
 | Frontend | React + TypeScript, Vite, TanStack Router + Query, shadcn/ui, Tailwind v4 |
 | SDK      | `@hey-api/openapi-ts` — auto-generated from FastAPI OpenAPI          |
-| Testing  | pytest (backend), Playwright (E2E)                                   |
+| Testing  | pytest (backend), vitest (frontend unit), Playwright (E2E)            |
 | Infra    | Docker Compose, Traefik, Mailcatcher (dev SMTP), Sentry              |
 | Tooling  | uv, ruff, mypy (strict), biome, prek (pre-commit)                    |
 
@@ -152,6 +152,7 @@ scripts/                # generate-client.sh, test.sh, etc.
 
 - Start dev stack: `docker compose watch`
 - Backend tests: `bash scripts/test.sh` (or `pytest` inside `backend/`)
+- Frontend unit tests: `bun run test:unit` (vitest) in `frontend/`. Scoped to colocated `src/**/*.test.ts` — pure logic only, no stack or DB needed. Playwright specs live in `frontend/tests/` and are never collected by vitest.
 - E2E tests: `bun run test` (Playwright) in `frontend/`. **Always set `E2E_SKIP_DB_RESET=1`** unless a full dev-DB reset was explicitly requested — `frontend/tests/global.setup.ts` truncates and reseeds the shared dev database by default on every run.
 - Pre-commit (`prek` / biome / ruff / mypy) must pass before commit.
 - Required env vars before any deploy: `SECRET_KEY`, `POSTGRES_PASSWORD`, `FIRST_SUPERUSER_PASSWORD`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
