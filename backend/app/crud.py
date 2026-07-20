@@ -4457,9 +4457,12 @@ def _hydrate_audit(
 def stock_on_hand(
     *,
     session: Session,
+    q: str | None = None,
+    brand: str | None = None,
     category: str | None = None,
     supplier_id: uuid.UUID | None = None,
-    customer_id: uuid.UUID | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> StockOnHandResponse:
     """Server-side stock-on-hand per active product in one annotation pass.
 
@@ -4495,6 +4498,49 @@ def stock_on_hand(
         (col(Product.tracking_mode) == TrackingMode.SERIALIZED, unit_subq),
         else_=qty_subq,
     )
+    clauses = _product_filter_clauses(
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=None,
+        is_active=True,
+    )
+    if supplier_id is not None:
+        qty_exists = (
+            select(PartBatch.id)
+            .where(
+                col(PartBatch.product_id) == col(Product.id),
+                col(PartBatch.supplier_id) == supplier_id,
+                col(PartBatch.remaining_qty) > 0,
+            )
+            .correlate(Product)
+            .exists()
+        )
+        unit_exists = (
+            select(Unit.id)
+            .where(
+                col(Unit.product_id) == col(Product.id),
+                col(Unit.supplier_id) == supplier_id,
+                col(Unit.current_state) == UnitState.IN_STOCK,
+            )
+            .correlate(Product)
+            .exists()
+        )
+        clauses.append(
+            case(
+                (
+                    col(Product.tracking_mode) == TrackingMode.SERIALIZED,
+                    unit_exists,
+                ),
+                else_=qty_exists,
+            )
+        )
+
+    count_stmt = select(func.count()).select_from(Product)
+    for clause in clauses:
+        count_stmt = count_stmt.where(clause)
+    count = session.exec(count_stmt).one()
+
     stmt = select(  # type: ignore[call-overload]
         Product.id,
         Product.sku,
@@ -4503,10 +4549,10 @@ def stock_on_hand(
         Product.category,
         Product.tracking_mode,
         on_hand.label("quantity_on_hand"),
-    ).where(col(Product.is_active).is_(True))
-    if category is not None:
-        stmt = stmt.where(col(Product.category) == category)
-    stmt = stmt.order_by(col(Product.sku))
+    )
+    for clause in clauses:
+        stmt = stmt.where(clause)
+    stmt = stmt.order_by(col(Product.sku)).offset(skip).limit(limit)
     rows = [
         StockOnHandRow(
             product_id=r[0],
@@ -4519,19 +4565,16 @@ def stock_on_hand(
         )
         for r in session.exec(stmt).all()
     ]
-    if customer_id is not None:
-        rows = _filter_rows_by_customer(
-            session=session, rows=rows, customer_id=customer_id
-        )
-    return StockOnHandResponse(rows=rows)
+    return StockOnHandResponse(rows=rows, count=count)
 
 
 def stock_on_hand_batches(
-    *, session: Session, product_id: uuid.UUID
+    *, session: Session, product_id: uuid.UUID, include_supplier: bool
 ) -> list[BatchDrillRow]:
     """Active (remaining_qty > 0) batches for a product, oldest first (FIFO order)."""
     batches = session.exec(
-        select(PartBatch)
+        select(PartBatch, Supplier.name)
+        .join(Supplier, col(PartBatch.supplier_id) == col(Supplier.id), isouter=True)
         .where(
             col(PartBatch.product_id) == product_id,
             PartBatch.remaining_qty > 0,
@@ -4540,20 +4583,22 @@ def stock_on_hand_batches(
     ).all()
     return [
         BatchDrillRow(
-            batch_no=b.batch_no,
-            remaining_qty=b.remaining_qty,
-            received_at=b.received_at,
+            batch_no=batch.batch_no,
+            remaining_qty=batch.remaining_qty,
+            received_at=batch.received_at,
+            supplier=supplier_name if include_supplier else None,
         )
-        for b in batches
+        for batch, supplier_name in batches
     ]
 
 
 def stock_on_hand_units(
-    *, session: Session, product_id: uuid.UUID
+    *, session: Session, product_id: uuid.UUID, include_supplier: bool
 ) -> list[UnitDrillRow]:
     """In-stock serialized units for a product, oldest first (received order)."""
     units = session.exec(
-        select(Unit)
+        select(Unit, Supplier.name)
+        .join(Supplier, col(Unit.supplier_id) == col(Supplier.id))
         .where(
             col(Unit.product_id) == product_id,
             col(Unit.current_state) == UnitState.IN_STOCK,
@@ -4562,38 +4607,12 @@ def stock_on_hand_units(
     ).all()
     return [
         UnitDrillRow(
-            id=u.id,
-            castranova_barcode=u.castranova_barcode,
-            supplier_serial=u.supplier_serial,
-            current_state=u.current_state,
-            received_at=u.received_at,
+            id=unit.id,
+            castranova_barcode=unit.castranova_barcode,
+            supplier_serial=unit.supplier_serial,
+            current_state=unit.current_state,
+            received_at=unit.received_at,
+            supplier=supplier_name if include_supplier else None,
         )
-        for u in units
+        for unit, supplier_name in units
     ]
-
-
-def _filter_rows_by_customer(
-    *,
-    session: Session,
-    rows: list[StockOnHandRow],
-    customer_id: uuid.UUID,
-) -> list[StockOnHandRow]:
-    """Restrict rows to products the customer has ever bought or had serviced."""
-    sold = session.exec(
-        select(SaleLine.product_id)
-        .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
-        .where(
-            col(Sale.customer_id) == customer_id,
-            col(SaleLine.product_id).is_not(None),
-        )
-    ).all()
-    serviced = session.exec(
-        select(ServiceTicketPart.product_id)
-        .join(
-            ServiceTicket,
-            col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
-        )
-        .where(col(ServiceTicket.customer_id) == customer_id)
-    ).all()
-    allowed = {pid for pid in [*sold, *serviced] if pid is not None}
-    return [row for row in rows if row.product_id in allowed]

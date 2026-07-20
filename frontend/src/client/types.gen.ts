@@ -35,6 +35,7 @@ export type BatchDrillRow = {
     batch_no: string;
     remaining_qty: number;
     received_at: string;
+    supplier: (string | null);
 };
 
 export type Body_login_login_access_token = {
@@ -752,6 +753,7 @@ export type StockAdjustmentPublic = {
 
 export type StockOnHandResponse = {
     rows: Array<StockOnHandRow>;
+    count: number;
 };
 
 export type StockOnHandRow = {
@@ -884,6 +886,7 @@ export type UnitDrillRow = {
     supplier_serial: string;
     current_state: UnitState;
     received_at: string;
+    supplier: (string | null);
 };
 
 export type UnitPublic = {
@@ -1040,8 +1043,11 @@ export type CustomersUpdateCustomerData = {
 export type CustomersUpdateCustomerResponse = (CustomerPublic);
 
 export type DashboardsGetStockOnHandData = {
+    brand?: (string | null);
     category?: (string | null);
-    customer?: (string | null);
+    limit?: number;
+    q?: (string | null);
+    skip?: number;
     supplier?: (string | null);
 };
 

@@ -167,9 +167,12 @@ export class DashboardsService {
     /**
      * Get Stock On Hand
      * @param data The data for the request.
+     * @param data.q
+     * @param data.brand
      * @param data.category
      * @param data.supplier
-     * @param data.customer
+     * @param data.skip
+     * @param data.limit
      * @returns StockOnHandResponse Successful Response
      * @throws ApiError
      */
@@ -178,9 +181,12 @@ export class DashboardsService {
             method: 'GET',
             url: '/api/v1/dashboards/stock-on-hand',
             query: {
+                q: data.q,
+                brand: data.brand,
                 category: data.category,
                 supplier: data.supplier,
-                customer: data.customer
+                skip: data.skip,
+                limit: data.limit
             },
             errors: {
                 422: 'Validation Error'

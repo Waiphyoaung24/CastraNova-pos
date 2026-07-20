@@ -1867,12 +1867,14 @@ class StockOnHandRow(SQLModel):
 
 class StockOnHandResponse(SQLModel):
     rows: list[StockOnHandRow]
+    count: int
 
 
 class BatchDrillRow(SQLModel):
     batch_no: str
     remaining_qty: int
     received_at: datetime
+    supplier: str | None
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 
@@ -1882,6 +1884,7 @@ class UnitDrillRow(SQLModel):
     supplier_serial: str
     current_state: UnitState
     received_at: datetime
+    supplier: str | None
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 

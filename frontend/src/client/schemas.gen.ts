@@ -223,10 +223,21 @@ export const BatchDrillRowSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Received At'
+        },
+        supplier: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier'
         }
     },
     type: 'object',
-    required: ['batch_no', 'remaining_qty', 'received_at'],
+    required: ['batch_no', 'remaining_qty', 'received_at', 'supplier'],
     title: 'BatchDrillRow'
 } as const;
 
@@ -3861,10 +3872,14 @@ export const StockOnHandResponseSchema = {
             },
             type: 'array',
             title: 'Rows'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
         }
     },
     type: 'object',
-    required: ['rows'],
+    required: ['rows', 'count'],
     title: 'StockOnHandResponse'
 } as const;
 
@@ -4456,10 +4471,21 @@ export const UnitDrillRowSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Received At'
+        },
+        supplier: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier'
         }
     },
     type: 'object',
-    required: ['id', 'castranova_barcode', 'supplier_serial', 'current_state', 'received_at'],
+    required: ['id', 'castranova_barcode', 'supplier_serial', 'current_state', 'received_at', 'supplier'],
     title: 'UnitDrillRow'
 } as const;
 
