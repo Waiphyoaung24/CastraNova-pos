@@ -33,7 +33,7 @@ import {
   setLineQuantity,
 } from "@/lib/sale-cart"
 import type { Queued } from "@/lib/sync-producer"
-import { handleError } from "@/utils"
+import { extractErrorMessage } from "@/utils"
 
 export const Route = createFileRoute("/_layout/sale")({
   component: Sale,
@@ -42,6 +42,12 @@ export const Route = createFileRoute("/_layout/sale")({
     meta: [{ title: "Sale - CastraNova POS" }],
   }),
 })
+
+// Matches the 409 raised by consume_quantity_fifo (backend/app/crud.py) so the
+// oversell case gets its own toast title. This couples the UI to backend prose:
+// reword that message and the sale screen silently falls back to a generic
+// error. Keep the two in sync until the backend carries a stable error code.
+const INSUFFICIENT_STOCK_PREFIX = "Insufficient stock"
 
 interface CheckoutPanelProps {
   customers: CustomerOption[]
@@ -160,16 +166,12 @@ function Sale() {
     // never clear them. Falls back to a generic message. Insufficient-stock
     // conflicts get a dedicated title so they don't read as a generic fault.
     onError: (err: ApiError) => {
-      const detail = (err.body as { detail?: unknown } | undefined)?.detail
-      if (
-        err.status === 409 &&
-        typeof detail === "string" &&
-        detail.startsWith("Insufficient stock")
-      ) {
-        showErrorToast(detail, "Insufficient Stock")
+      const message = extractErrorMessage(err)
+      if (err.status === 409 && message.startsWith(INSUFFICIENT_STOCK_PREFIX)) {
+        showErrorToast(message, "Insufficient Stock")
         return
       }
-      handleError.call(showErrorToast, err)
+      showErrorToast(message)
     },
   })
 

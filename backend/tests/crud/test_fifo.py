@@ -134,6 +134,12 @@ def test_fifo_oversell_raises_409_with_available(
 
     assert exc.value.status_code == 409
     assert "7" in str(exc.value.detail)  # real available total surfaced
+    # The sale screen keys its dedicated "Insufficient Stock" toast title on
+    # this exact prefix (INSUFFICIENT_STOCK_PREFIX in
+    # frontend/src/routes/_layout/sale.tsx). Reword the message and that screen
+    # silently degrades to a generic error, so pin the prefix here rather than
+    # letting the UI regression escape unnoticed.
+    assert str(exc.value.detail).startswith("Insufficient stock")
     # No stock consumed on the failed call.
     assert _remaining(db, pid) == 7
 
