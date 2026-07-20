@@ -3340,6 +3340,13 @@ def confirm_telegram_connect_code(
     return TelegramConfirmOutcome.CONNECTED
 
 
+def disconnect_telegram(*, session: Session, user: User) -> None:
+    user.telegram_chat_id = None
+    user.telegram_username = None
+    session.add(user)
+    session.commit()
+
+
 def get_latest_telegram_notification_log(
     *, session: Session, user_id: uuid.UUID
 ) -> NotificationLog | None:

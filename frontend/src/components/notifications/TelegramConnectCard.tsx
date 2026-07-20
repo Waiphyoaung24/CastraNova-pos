@@ -13,8 +13,8 @@ const POLL_INTERVAL_MS = 3_000
 const POLL_TIMEOUT_MS = 2 * 60 * 1_000
 
 /** Telegram connect/reconnect card: mint a code, show the QR + deep link,
- * poll confirm until the user taps Start in Telegram, then offer a test
- * message. Re-running Connect (as "Reconnect") always mints a fresh code, so
+ * poll confirm until the user taps Start in Telegram, then allow disconnect.
+ * Re-running Connect (as "Reconnect") always mints a fresh code, so
  * switching Telegram accounts is one more tap, not a dead end. */
 export function TelegramConnectCard() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -100,17 +100,20 @@ export function TelegramConnectCard() {
     return () => clearTimeout(timer)
   }, [pollStartedAt])
 
-  const testMutation = useMutation({
-    mutationFn: () => NotificationsService.testTelegram(),
-    onSuccess: (result) => {
-      if (result.ok) {
-        showSuccessToast("Test message sent — check Telegram.")
-      } else {
-        showErrorToast(result.detail ?? "Could not send the test message.")
-      }
+  const disconnectMutation = useMutation({
+    mutationFn: () => NotificationsService.disconnectTelegram(),
+    onSuccess: () => {
+      queryClient.setQueryData(["telegram-status"], {
+        connected: false,
+        telegram_username: null,
+        delivery_failing: false,
+        last_error: null,
+      })
+      queryClient.invalidateQueries({ queryKey: ["telegram-status"] })
+      queryClient.invalidateQueries({ queryKey: ["notification-preferences"] })
+      showSuccessToast("Telegram disconnected.")
     },
-    onError: () =>
-      showErrorToast("Could not send the test message. Try again."),
+    onError: () => showErrorToast("Could not disconnect Telegram. Try again."),
   })
 
   if (!status) return null
@@ -135,11 +138,11 @@ export function TelegramConnectCard() {
         <div className="flex gap-2">
           {status.connected && (
             <Button
-              variant="outline"
-              onClick={() => testMutation.mutate()}
-              disabled={testMutation.isPending}
+              variant="destructive"
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
             >
-              {testMutation.isPending ? "Sending…" : "Send test message"}
+              {disconnectMutation.isPending ? "Disconnecting…" : "Disconnect"}
             </Button>
           )}
           <Button

@@ -1119,6 +1119,8 @@ export type NotificationsConfirmTelegramData = {
 
 export type NotificationsConfirmTelegramResponse = (TelegramConfirmResult);
 
+export type NotificationsDisconnectTelegramResponse = (Message);
+
 export type NotificationsTestTelegramResponse = (TelegramTestResult);
 
 export type NotificationsGetTelegramStatusResponse = (TelegramStatus);
