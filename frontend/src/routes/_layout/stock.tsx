@@ -1,25 +1,19 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ChevronDown, ChevronRight, Warehouse } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useCallback, useState } from "react"
 
-import { DashboardsService } from "@/client"
+import { DashboardsService, type SupplierOption } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -28,14 +22,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useIsMobile } from "@/hooks/useMobile"
+import { usePagination } from "@/hooks/usePagination"
 import { useRole } from "@/hooks/useRole"
 import { useSupplierOptions } from "@/hooks/useSupplierOptions"
-import { trackingModeLabel, unitStatusLabel } from "@/lib/labels"
+import { unitStatusLabel } from "@/lib/labels"
 import { requireAuth } from "@/lib/route-guards"
-import { deriveCategories, filterStockRows } from "@/lib/stock-on-hand"
 
 export const Route = createFileRoute("/_layout/stock")({
   component: StockOnHand,
@@ -45,47 +38,70 @@ export const Route = createFileRoute("/_layout/stock")({
   }),
 })
 
-// Radix Select forbids an empty-string item value, so "all" uses a sentinel.
-const ALL = "__all__"
-
 // Column widths in header order (expander, SKU, Model, Brand, Category,
-// Tracking, In stock, Labels); sum to 100%.
-const STOCK_WIDTHS = ["4%", "12%", "18%", "11%", "12%", "11%", "9%", "23%"]
+// In stock, Labels); sum to 100%.
+const STOCK_WIDTHS = ["5%", "14%", "23%", "15%", "15%", "10%", "18%"]
 
 function StockOnHand() {
   const { isAdmin } = useRole()
   const isMobile = useIsMobile()
-  const [category, setCategory] = useState("")
   const [query, setQuery] = useState("")
+  const [brand, setBrand] = useState("")
+  const [category, setCategory] = useState("")
   const [supplierId, setSupplierId] = useState("")
-  const [customerId, setCustomerId] = useState("")
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const debouncedQuery = useDebouncedValue(query)
+  const debouncedBrand = useDebouncedValue(brand)
+  const debouncedCategory = useDebouncedValue(category)
+  const pagination = usePagination()
+
+  const resetList = () => {
+    pagination.reset()
+    setExpandedId(null)
+  }
 
   const {
     data: stock,
     isPlaceholderData,
     isFetching,
   } = useQuery({
-    queryKey: ["stock-on-hand", supplierId, customerId],
+    queryKey: [
+      "stock-on-hand",
+      {
+        page: pagination.page,
+        q: debouncedQuery,
+        brand: debouncedBrand,
+        category: debouncedCategory,
+        supplierId,
+      },
+    ],
     queryFn: () =>
       DashboardsService.getStockOnHand({
+        q: debouncedQuery || undefined,
+        brand: debouncedBrand || undefined,
+        category: debouncedCategory || undefined,
         supplier: supplierId || undefined,
-        customer: customerId || undefined,
+        skip: pagination.skip,
+        limit: pagination.limit,
       }),
     placeholderData: keepPreviousData,
   })
   const listLoading = isPlaceholderData || isFetching
-  // Both filters are admin-only; only fetch their option lists for admins.
   const { data: suppliers } = useSupplierOptions({ enabled: isAdmin })
-  const { data: customers } = useCustomerOptions({ enabled: isAdmin })
-
-  const allRows = stock?.rows ?? []
-  const categories = useMemo(() => deriveCategories(allRows), [allRows])
-  // The text filter scans every row, so defer it until typing settles.
-  const debouncedQuery = useDebouncedValue(query)
-  const rows = useMemo(
-    () => filterStockRows(allRows, { category, query: debouncedQuery }),
-    [allRows, category, debouncedQuery],
+  const rows = stock?.rows ?? []
+  const selectedSupplier = suppliers?.find(
+    (supplier) => supplier.id === supplierId,
+  )
+  const inStockLabel = selectedSupplier
+    ? `In stock (${selectedSupplier.name})`
+    : "In stock"
+  const getSupplierKey = useCallback(
+    (supplier: SupplierOption) => supplier.id,
+    [],
+  )
+  const getSupplierLabel = useCallback(
+    (supplier: SupplierOption) => supplier.name,
+    [],
   )
 
   return (
@@ -99,9 +115,9 @@ function StockOnHand() {
         <Warehouse />
         <AlertTitle>Check what's in stock</AlertTitle>
         <AlertDescription>
-          Search by name or barcode, or narrow the list with the filters. Tap a
-          row to see each delivery or unit. Print shelf or unit labels straight
-          from the list.
+          Search by SKU or model, or narrow the list with the filters. Tap a row
+          to see each delivery or unit. Print shelf or unit labels straight from
+          the list.
         </AlertDescription>
       </Alert>
 
@@ -109,57 +125,48 @@ function StockOnHand() {
         <Input
           placeholder="Search by name or barcode…"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            resetList()
+          }}
           className="w-full sm:w-64"
         />
-        <Select
-          value={category === "" ? ALL : category}
-          onValueChange={(v) => setCategory(v === ALL ? "" : v)}
-        >
-          <SelectTrigger className="w-full sm:w-48">
-            <SelectValue placeholder="All categories" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All categories</SelectItem>
-            {categories.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Input
+          aria-label="Brand filter"
+          placeholder="Filter by brand…"
+          value={brand}
+          onChange={(event) => {
+            setBrand(event.target.value)
+            resetList()
+          }}
+          className="w-full sm:w-48"
+        />
+        <Input
+          aria-label="Category filter"
+          placeholder="Filter by category…"
+          value={category}
+          onChange={(event) => {
+            setCategory(event.target.value)
+            resetList()
+          }}
+          className="w-full sm:w-48"
+        />
         {isAdmin ? (
           <div className="w-full sm:w-48">
             <EntityCombobox
               items={suppliers ?? []}
               value={supplierId || undefined}
-              onChange={(value) => setSupplierId(value ?? "")}
-              getKey={(supplier) => supplier.id}
-              getLabel={(supplier) => supplier.name}
+              onChange={(value) => {
+                setSupplierId(value ?? "")
+                resetList()
+              }}
+              getKey={getSupplierKey}
+              getLabel={getSupplierLabel}
               placeholder="All suppliers"
               searchPlaceholder="Search suppliers…"
               emptyText="No suppliers available"
               allowClear
               ariaLabel="Supplier filter"
-            />
-          </div>
-        ) : null}
-        {isAdmin ? (
-          <div className="w-full sm:w-48">
-            {/* FR-012: restricts rows to products the customer has ever
-                bought or had serviced (see docs/superpowers/specs/
-                2026-07-16-stock-customer-filter-design.md). */}
-            <EntityCombobox
-              items={customers ?? []}
-              value={customerId || undefined}
-              onChange={(value) => setCustomerId(value ?? "")}
-              getKey={(customer) => customer.id}
-              getLabel={(customer) => customer.name}
-              placeholder="All customers"
-              searchPlaceholder="Search customers…"
-              emptyText="No customers available"
-              allowClear
-              ariaLabel="Customer filter"
             />
           </div>
         ) : null}
@@ -183,7 +190,6 @@ function StockOnHand() {
                   modelName={r.model_name}
                   brand={r.brand}
                   category={r.category}
-                  trackingMode={r.tracking_mode}
                   quantityOnHand={r.quantity_on_hand}
                   isQuantity={isQuantity}
                   isOpen={isOpen}
@@ -197,7 +203,7 @@ function StockOnHand() {
         <ListShell loading={listLoading}>
           <ListTable
             widths={STOCK_WIDTHS}
-            minWidth={1120}
+            minWidth={900}
             head={
               <TableRow>
                 <TableHead aria-label="Expand" />
@@ -205,8 +211,7 @@ function StockOnHand() {
                 <TableHead>Model</TableHead>
                 <TableHead>Brand</TableHead>
                 <TableHead>Category</TableHead>
-                <TableHead>Tracking</TableHead>
-                <TableHead className="text-right">In stock</TableHead>
+                <TableHead className="text-right">{inStockLabel}</TableHead>
                 <TableHead aria-label="Labels" />
               </TableRow>
             }
@@ -222,7 +227,6 @@ function StockOnHand() {
                   modelName={r.model_name}
                   brand={r.brand}
                   category={r.category}
-                  trackingMode={r.tracking_mode}
                   quantityOnHand={r.quantity_on_hand}
                   isQuantity={isQuantity}
                   isOpen={isOpen}
@@ -233,6 +237,15 @@ function StockOnHand() {
           </ListTable>
         </ListShell>
       )}
+      <PaginationControls
+        total={stock?.count ?? 0}
+        pageSize={pagination.pageSize}
+        page={pagination.page}
+        onPageChange={(nextPage) => {
+          pagination.setPage(nextPage)
+          setExpandedId(null)
+        }}
+      />
     </div>
   )
 }
@@ -243,7 +256,6 @@ interface StockItemProps {
   modelName: string
   brand: string | null
   category: string | null
-  trackingMode: string
   quantityOnHand: number
   isQuantity: boolean
   isOpen: boolean
@@ -287,6 +299,7 @@ function StockDrillDown({
         <TableHeader>
           <TableRow>
             <TableHead>Delivery</TableHead>
+            <TableHead>Supplier</TableHead>
             <TableHead className="text-right">Remaining</TableHead>
             <TableHead>Received</TableHead>
           </TableRow>
@@ -295,6 +308,9 @@ function StockDrillDown({
           {(batches ?? []).map((b) => (
             <TableRow key={b.batch_no}>
               <TableCell className="num">{b.batch_no}</TableCell>
+              <TableCell className="text-muted-foreground">
+                {b.supplier ?? "—"}
+              </TableCell>
               <TableCell className="num text-right">
                 {b.remaining_qty}
               </TableCell>
@@ -322,6 +338,7 @@ function StockDrillDown({
         <TableRow>
           <TableHead>Shop barcode</TableHead>
           <TableHead>Maker's serial no.</TableHead>
+          <TableHead>Supplier</TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Received</TableHead>
           <TableHead className="w-0" aria-label="Actions" />
@@ -334,6 +351,9 @@ function StockDrillDown({
               {u.castranova_barcode}
             </TableCell>
             <TableCell className="num">{u.supplier_serial}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {u.supplier ?? "—"}
+            </TableCell>
             <TableCell>
               <Badge variant="outline">
                 {unitStatusLabel(u.current_state)}
@@ -364,7 +384,6 @@ function StockRow({
   modelName,
   brand,
   category,
-  trackingMode,
   quantityOnHand,
   isQuantity,
   isOpen,
@@ -392,9 +411,6 @@ function StockRow({
         <TableCell className="text-muted-foreground">
           {category ?? "—"}
         </TableCell>
-        <TableCell>
-          <Badge variant="secondary">{trackingModeLabel(trackingMode)}</Badge>
-        </TableCell>
         <TableCell className="num text-right">{quantityOnHand}</TableCell>
         <TableCell className="overflow-visible! text-right">
           {isQuantity ? (
@@ -405,7 +421,7 @@ function StockRow({
       {isOpen ? (
         <TableRow>
           <TableCell
-            colSpan={8}
+            colSpan={7}
             className="bg-muted/30 overflow-visible! whitespace-normal"
           >
             <StockDrillDown productId={productId} isQuantity={isQuantity} />
@@ -418,7 +434,7 @@ function StockRow({
 
 /**
  * Mobile presentation of one product: a tap-to-expand card replacing the
- * desktop table row (a 7-column table can't fit a phone without horizontal
+ * desktop table row (the catalog table can't fit a phone without horizontal
  * scroll). The whole header is the toggle; the SKU print label and drill-down
  * detail live in the expanded panel so no buttons nest inside the toggle.
  */
@@ -428,7 +444,6 @@ function StockCard({
   modelName,
   brand,
   category,
-  trackingMode,
   quantityOnHand,
   isQuantity,
   isOpen,
@@ -461,9 +476,6 @@ function StockCard({
               {brandCategory}
             </p>
           ) : null}
-          <p className="text-muted-foreground text-xs">
-            {trackingModeLabel(trackingMode)}
-          </p>
         </div>
         <div className="shrink-0 text-right">
           <div className="num text-lg leading-none font-semibold">
