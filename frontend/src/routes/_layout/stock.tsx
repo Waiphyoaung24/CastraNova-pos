@@ -39,9 +39,9 @@ export const Route = createFileRoute("/_layout/stock")({
   }),
 })
 
-// Column widths in header order (expander, SKU, Model, Brand, Category,
+// Column widths in header order (expander, SKU, Brand, Model, Category,
 // In stock, Labels); sum to 100%.
-const STOCK_WIDTHS = ["5%", "14%", "23%", "15%", "15%", "10%", "18%"]
+const STOCK_WIDTHS = ["5%", "14%", "15%", "23%", "15%", "10%", "18%"]
 
 function StockOnHand() {
   const { isAdmin } = useRole()
@@ -93,9 +93,6 @@ function StockOnHand() {
   const selectedSupplier = suppliers?.find(
     (supplier) => supplier.id === supplierId,
   )
-  const inStockLabel = selectedSupplier
-    ? `In stock (${selectedSupplier.name})`
-    : "In stock"
   const getSupplierKey = useCallback(
     (supplier: SupplierOption) => supplier.id,
     [],
@@ -174,6 +171,12 @@ function StockOnHand() {
         ) : null}
       </div>
 
+      {selectedSupplier ? (
+        <Badge variant="secondary" className="w-fit">
+          Showing stock from: {selectedSupplier.name}
+        </Badge>
+      ) : null}
+
       {rows.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
           {stock ? "No stock matches these filters." : "Loading…"}
@@ -215,10 +218,10 @@ function StockOnHand() {
               <TableRow>
                 <TableHead aria-label="Expand" />
                 <TableHead>SKU</TableHead>
-                <TableHead>Model</TableHead>
                 <TableHead>Brand</TableHead>
+                <TableHead>Model</TableHead>
                 <TableHead>Category</TableHead>
-                <TableHead className="text-right">{inStockLabel}</TableHead>
+                <TableHead className="text-right">In stock</TableHead>
                 <TableHead aria-label="Labels" />
               </TableRow>
             }
@@ -400,7 +403,7 @@ function StockRow({
   return (
     <>
       <TableRow>
-        <TableCell>
+        <TableCell className="px-1">
           <Button
             type="button"
             variant="ghost"
@@ -414,8 +417,8 @@ function StockRow({
           </Button>
         </TableCell>
         <TableCell className="num font-medium">{sku}</TableCell>
-        <TableCell>{modelName}</TableCell>
         <TableCell className="text-muted-foreground">{brand ?? "—"}</TableCell>
+        <TableCell>{modelName}</TableCell>
         <TableCell className="text-muted-foreground">
           {category ?? "—"}
         </TableCell>
