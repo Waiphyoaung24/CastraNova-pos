@@ -29,6 +29,7 @@ import { useRole } from "@/hooks/useRole"
 import { useSupplierOptions } from "@/hooks/useSupplierOptions"
 import { unitStatusLabel } from "@/lib/labels"
 import { requireAuth } from "@/lib/route-guards"
+import { stockDrillQueryKey } from "@/lib/stock-query-cache"
 
 export const Route = createFileRoute("/_layout/stock")({
   component: StockOnHand,
@@ -123,7 +124,8 @@ function StockOnHand() {
 
       <div className="flex flex-wrap gap-3">
         <Input
-          placeholder="Search by name or barcode…"
+          aria-label="Search stock by SKU or model"
+          placeholder="Search by SKU or model…"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value)
@@ -191,6 +193,11 @@ function StockOnHand() {
                   brand={r.brand}
                   category={r.category}
                   quantityOnHand={r.quantity_on_hand}
+                  quantityCaption={
+                    selectedSupplier
+                      ? `from ${selectedSupplier.name}`
+                      : "in stock"
+                  }
                   isQuantity={isQuantity}
                   isOpen={isOpen}
                   onToggle={() => setExpandedId(isOpen ? null : r.product_id)}
@@ -272,13 +279,14 @@ function StockDrillDown({
   productId,
   isQuantity,
 }: Pick<StockItemProps, "productId" | "isQuantity">) {
+  const { isAdmin } = useRole()
   const { data: batches, isPending: batchesPending } = useQuery({
-    queryKey: ["stock-batches", productId],
+    queryKey: stockDrillQueryKey("batches", productId, isAdmin),
     queryFn: () => DashboardsService.getStockOnHandBatches({ productId }),
     enabled: isQuantity,
   })
   const { data: units, isPending: unitsPending } = useQuery({
-    queryKey: ["stock-units", productId],
+    queryKey: stockDrillQueryKey("units", productId, isAdmin),
     queryFn: () => DashboardsService.getStockOnHandUnits({ productId }),
     enabled: !isQuantity,
   })
@@ -445,10 +453,11 @@ function StockCard({
   brand,
   category,
   quantityOnHand,
+  quantityCaption,
   isQuantity,
   isOpen,
   onToggle,
-}: StockItemProps) {
+}: StockItemProps & { quantityCaption: string }) {
   const brandCategory = [brand, category].filter(Boolean).join(" · ")
   return (
     <div className="bg-card overflow-hidden rounded-lg border">
@@ -481,7 +490,9 @@ function StockCard({
           <div className="num text-lg leading-none font-semibold">
             {quantityOnHand}
           </div>
-          <div className="text-muted-foreground mt-1 text-xs">in stock</div>
+          <div className="text-muted-foreground mt-1 text-xs">
+            {quantityCaption}
+          </div>
         </div>
       </button>
       {isOpen ? (

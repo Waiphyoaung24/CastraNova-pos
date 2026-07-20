@@ -45,7 +45,7 @@
 
 - [ ] **Step 1: Write failing API tests**
 
-Add exact brand/category, case-insensitive SKU/model q, pagination, filtered count, and both tracking-mode supplier tests. Seed products stocked only by suppliers A and B; request A and assert only A remains with its A-scoped quantity. Replace customer-filter tests. Assert drill supplier equals the name for administrators and None for staff.
+Add case-insensitive contains filters for brand/category and SKU/model q, pagination, filtered count, and both tracking-mode supplier tests. Seed products stocked only by suppliers A and B; request A and assert only A remains with its A-scoped quantity. Replace customer-filter tests. Assert drill supplier equals the name for administrators and None for staff.
 
     response = client.get(endpoint, headers=staff_token_headers,
                           params={"q": sku[:8], "skip": 0, "limit": 1})
@@ -60,7 +60,7 @@ Expected: FAIL because count, query/page parameters, narrowing, and drill suppli
 
 - [ ] **Step 3: Write minimal implementation**
 
-Define StockOnHandResponse with rows and count. Define each drill row with supplier: str | None. In crud.py create one helper returning active-product, q, exact brand/category, and tracking-aware correlated exists clauses. Apply it identically to the count query and rows query. Preserve existing supplier-qualified aggregate subqueries, then order by SKU, offset(skip), and limit(limit). Remove _filter_rows_by_customer/customer_id. Select Supplier.name with active batches and units and only emit it when include_supplier is true.
+Define StockOnHandResponse with rows and count. Define each drill row with supplier: str | None. In crud.py create one helper returning active-product, case-insensitive contains filters, and tracking-aware correlated exists clauses. Apply it identically to the count query and rows query. Preserve existing supplier-qualified aggregate subqueries, then order by SKU, offset(skip), and limit(limit). Remove _filter_rows_by_customer/customer_id. Select Supplier.name with active batches and units and only emit it when include_supplier is true.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -182,4 +182,3 @@ Expected: no whitespace errors and only pre-existing unrelated untracked files, 
 
     git add docs/dev_notes/2026-07-18-full-code-review.md
     git commit -m "docs: record stock dashboard hardening"
-

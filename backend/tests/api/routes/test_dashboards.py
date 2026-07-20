@@ -203,8 +203,8 @@ def test_stock_on_hand_server_filters_paginate_with_filtered_count(
         headers=staff_token_headers,
         params={
             "q": tag.upper(),
-            "brand": f"Brand-{tag}",
-            "category": f"Category-{tag}",
+            "brand": tag.upper(),
+            "category": tag.upper(),
             "skip": 0,
             "limit": 1,
         },
@@ -218,8 +218,8 @@ def test_stock_on_hand_server_filters_paginate_with_filtered_count(
         headers=staff_token_headers,
         params={
             "q": tag,
-            "brand": f"Brand-{tag}",
-            "category": f"Category-{tag}",
+            "brand": tag.upper(),
+            "category": tag.upper(),
             "skip": 1,
             "limit": 1,
         },

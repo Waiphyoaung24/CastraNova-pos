@@ -107,7 +107,7 @@ test.describe("Stock on hand — server filters and pagination", () => {
     }
 
     await page.goto("/stock")
-    const search = page.getByPlaceholder("Search by name or barcode…")
+    const search = page.getByLabel("Search stock by SKU or model")
     const firstPage = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return (

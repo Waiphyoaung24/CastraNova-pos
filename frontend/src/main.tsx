@@ -18,6 +18,7 @@ import {
   persister,
   queryClient,
 } from "./lib/query-client"
+import { isSensitiveStockQueryKey } from "./lib/stock-query-cache"
 import { routeTree } from "./routeTree.gen"
 
 OpenAPI.BASE = import.meta.env.VITE_API_URL
@@ -71,8 +72,20 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <PersistQueryClientProvider
         client={queryClient}
-        persistOptions={{ persister }}
+        persistOptions={{
+          persister,
+          dehydrateOptions: {
+            shouldDehydrateQuery: (query) =>
+              query.state.status === "success" &&
+              !isSensitiveStockQueryKey(query.queryKey),
+          },
+        }}
         onSuccess={async () => {
+          // Remove drill data written by older app versions before role-tiered
+          // keys and persistence exclusion were introduced.
+          queryClient.removeQueries({
+            predicate: (query) => isSensitiveStockQueryKey(query.queryKey),
+          })
           // Once the persisted cache is restored, replay any offline-queued
           // mutations — but only if we hold a valid session. If the refresh
           // token has expired (12h idle), leave them PAUSED so they survive to

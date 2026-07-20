@@ -15,8 +15,8 @@ the list is paginated.
   positive in-stock inventory from that supplier. The `In stock` value remains
   scoped to that supplier, and the header names the selected supplier.
 - Add server-side `q`, `brand`, and `category` filters. `q` matches product SKU
-  or model name; brand and category are exact values, following the existing
-  products endpoint convention.
+  or model name; brand and category use the existing products endpoint's
+  case-insensitive contains matching.
 - Add page-based pagination (25 rows per page) with a filtered `count`.
 - Add supplier names to batch and unit drill-down rows for administrators only.
   Staff receive `supplier: null`, preserving the existing financial/provenance
