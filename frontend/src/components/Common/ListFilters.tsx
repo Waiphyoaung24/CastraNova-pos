@@ -8,6 +8,7 @@ import {
   SheetContent,
   SheetFooter,
   SheetTitle,
+  SheetTrigger,
 } from "@/components/ui/sheet"
 import { useIsMobile } from "@/hooks/useMobile"
 import { cn } from "@/lib/utils"
@@ -46,17 +47,20 @@ export function ListFilters({
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full justify-start"
-        aria-label={activeCount ? `Filters, ${activeCount} active` : "Filters"}
-        onClick={() => setOpen(true)}
-      >
-        <SlidersHorizontal className="h-4 w-4" />
-        Filters
-        {activeCount > 0 ? <Badge>{activeCount}</Badge> : null}
-      </Button>
+      <SheetTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-start"
+          aria-label={
+            activeCount ? `Filters, ${activeCount} active` : "Filters"
+          }
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          Filters
+          {activeCount > 0 ? <Badge>{activeCount}</Badge> : null}
+        </Button>
+      </SheetTrigger>
       <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto">
         <SheetTitle className="px-4 pt-4">Filters</SheetTitle>
         <div className="flex flex-col gap-4 px-4">{children}</div>
