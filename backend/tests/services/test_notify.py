@@ -4,6 +4,7 @@ The single network seam ``app.services.notify._post`` is monkeypatched so no
 real HTTP happens; tenacity's sleep is stubbed so retry tests run instantly.
 """
 
+import logging
 import uuid
 from typing import Any
 
@@ -12,6 +13,7 @@ import pytest
 from sqlmodel import Session
 
 from app.core.config import settings
+from app.core.logging import configure_logging
 from app.models import (
     NotificationChannel,
     NotificationEvent,
@@ -241,6 +243,34 @@ def test_send_telegram_transport_error_retryable(
     monkeypatch.setattr(notify, "_post", boom)
     with pytest.raises(notify.RetryableNotifyError):
         notify.send_telegram(to="123456789", text="hi")
+
+
+def test_configure_logging_suppresses_telegram_token_in_httpx_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Regression for C-2: httpx's own logger otherwise emits the full
+    request URL — bot token and all — at INFO on every real send. This drives
+    a real httpx.Client.send (via a MockTransport, no real network) so
+    httpx's actual "HTTP Request: ..." log line fires, and asserts
+    configure_logging() keeps the token out of every captured record."""
+    configure_logging()
+    caplog.set_level(logging.DEBUG)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    transport = httpx.MockTransport(handler)
+
+    def fake_httpx_post(url: str, **kwargs: Any) -> httpx.Response:
+        trust_env = kwargs.pop("trust_env", True)
+        with httpx.Client(transport=transport, trust_env=trust_env) as client:
+            return client.post(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "post", fake_httpx_post)
+    notify.send_telegram(to="123456789", text="hi")
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any(TELEGRAM_TOKEN in m for m in messages)
 
 
 def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
