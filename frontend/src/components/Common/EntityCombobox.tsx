@@ -225,6 +225,20 @@ export function EntityCombobox<T>({
   return (
     <Popover open={open} onOpenChange={close}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      {/* This popover must render non-modal (Popover has no `modal` prop set
+          here, defaulting to false) AND any Dialog it's used inside must
+          pass modal={false}. Verified 2026-07-19: under a modal Dialog,
+          Radix's scroll-lock (react-remove-scroll) only allows focus and
+          wheel-scroll within the dialog's own content node. This popover
+          portals to document.body, outside that area, so autofocus-on-open
+          silently fails and the option list can't be wheel-scrolled.
+          Tried portalling the popover inside the dialog's content node
+          instead (2026-07-19 spike) — broke Radix Popper's positioning
+          outright (position:static, wrong width) because DialogContent's
+          centering transform becomes Popper's containing block, which its
+          hardcoded strategy:"fixed" can't handle. No known fix without
+          rewriting Dialog's centering or Popover's positioning — out of
+          scope here. */}
       {/* The popover is a bounded flex column so that CommandList — the only
           element with `overflow-y-auto` — is the one that actually scrolls.
           Without `flex flex-col` here, Command's `h-full` resolves against an
