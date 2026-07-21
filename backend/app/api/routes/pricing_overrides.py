@@ -76,7 +76,7 @@ def list_pricing_overrides(
 
 
 @router.get("/{override_id}", response_model=PricingOverridePublic)
-def get_pricing_override_endpoint(
+def get_pricing_override(
     *,
     session: SessionDep,
     current_user: CurrentUser,

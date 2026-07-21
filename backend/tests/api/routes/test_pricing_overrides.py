@@ -6,7 +6,6 @@ from sqlmodel import Session
 
 from app import crud
 from app.models import ProductCreate, TrackingMode, UserRole
-
 from tests.utils.user import authentication_token_from_email_with_role
 
 

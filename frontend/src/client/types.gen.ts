@@ -1133,6 +1133,12 @@ export type PricingOverridesListPricingOverridesData = {
 
 export type PricingOverridesListPricingOverridesResponse = (PricingOverridesPublic);
 
+export type PricingOverridesGetPricingOverrideData = {
+    overrideId: string;
+};
+
+export type PricingOverridesGetPricingOverrideResponse = (PricingOverridePublic);
+
 export type PricingOverridesDecidePricingOverrideData = {
     overrideId: string;
     requestBody: PricingOverrideDecision;
