@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Branch: `feat/sale-price-override` (already exists, has the spec commits). PR target: `dev`. Never touch `master`.
-- ⚠️ **Backend pytest TRUNCATEs the dev database** (conftest wipes all domain data). The owner is mid-manual-acceptance-pass with hand-seeded data — **confirm with the owner before the first pytest run** (they approved implementation knowing this; re-confirm only if unclear).
+- ⚠️ **Backend pytest is DEFERRED (owner decision 2026-07-21):** pytest TRUNCATEs the dev database and the owner is mid-manual-acceptance-pass with hand-seeded data. **Write** the Task 1 tests but do **not run any backend pytest** (Task 1 Steps 2/4, Final Verification backend suite) until the owner gives the go-ahead; gate Task 1 on ruff + mypy only. Browserless Playwright specs and E2E with `E2E_SKIP_DB_RESET=1` are safe to run — they don't truncate.
 - ⚠️ **Never run backend tests via a stale container.** The dev stack must be running under `docker compose watch` (syncs `./backend` → `/app/backend`). Verify the container sees your new code before trusting green (e.g. `docker compose exec backend grep -n "get_pricing_override_endpoint" /app/backend/app/api/routes/pricing_overrides.py`).
 - Baselines (do not chase as regressions): backend 576 passed / 3 failed; E2E 253 passed / 17 failed (pre-existing auth-flow specs).
 - E2E runs: **always** `E2E_SKIP_DB_RESET=1` (otherwise global.setup truncates + reseeds the shared dev DB).
