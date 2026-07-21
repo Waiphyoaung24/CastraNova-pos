@@ -5,7 +5,9 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app import crud
-from app.models import ProductCreate, TrackingMode
+from app.models import ProductCreate, TrackingMode, UserRole
+
+from tests.utils.user import authentication_token_from_email_with_role
 
 
 def _seed_product(db: Session) -> uuid.UUID:
@@ -146,3 +148,69 @@ def test_override_exceptions_report_admin_only(
     assert body["month"] == month
     assert body["total"] == len(body["rows"])
     assert body["pending"] >= 1
+
+
+def test_get_pricing_override_as_creator(
+    client: TestClient, staff_token_headers: dict[str, str], db: Session
+) -> None:
+    pid = _seed_product(db)
+    created = client.post(
+        "/api/v1/pricing-overrides",
+        headers=staff_token_headers,
+        json=_create_payload(pid, "970.00"),  # 3% -> AUTO_APPROVED
+    ).json()
+    r = client.get(
+        f"/api/v1/pricing-overrides/{created['id']}", headers=staff_token_headers
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == created["id"]
+    assert body["state"] == "AUTO_APPROVED"
+    assert body["product_sku"].startswith("OVRAPI-")
+
+
+def test_get_pricing_override_as_admin(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    pid = _seed_product(db)
+    created = client.post(
+        "/api/v1/pricing-overrides",
+        headers=staff_token_headers,
+        json=_create_payload(pid, "900.00"),  # 10% -> PENDING
+    ).json()
+    r = client.get(
+        f"/api/v1/pricing-overrides/{created['id']}",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "PENDING"
+
+
+def test_get_pricing_override_other_user_forbidden(
+    client: TestClient, staff_token_headers: dict[str, str], db: Session
+) -> None:
+    pid = _seed_product(db)
+    created = client.post(
+        "/api/v1/pricing-overrides",
+        headers=staff_token_headers,
+        json=_create_payload(pid, "970.00"),
+    ).json()
+    other_staff = authentication_token_from_email_with_role(
+        client=client, email="staff2@example.com", db=db, role=UserRole.YGN_STAFF
+    )
+    r = client.get(
+        f"/api/v1/pricing-overrides/{created['id']}", headers=other_staff
+    )
+    assert r.status_code == 403
+
+
+def test_get_pricing_override_not_found(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
+    r = client.get(
+        f"/api/v1/pricing-overrides/{uuid.uuid4()}", headers=staff_token_headers
+    )
+    assert r.status_code == 404

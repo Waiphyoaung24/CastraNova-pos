@@ -1,10 +1,10 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from app import crud
-from app.api.deps import AdminUser, CurrentUser, SessionDep, get_admin
+from app.api.deps import AdminUser, CurrentUser, SessionDep, get_admin, is_admin
 from app.core.limiter import PRICING_OVERRIDE_RATE_LIMIT, limiter
 from app.models import (
     OverrideState,
@@ -72,6 +72,26 @@ def list_pricing_overrides(
         )
     return PricingOverridesPublic(
         data=data, count=crud.count_pricing_overrides(session=session, state=state)
+    )
+
+
+@router.get("/{override_id}", response_model=PricingOverridePublic)
+def get_pricing_override_endpoint(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    override_id: uuid.UUID,
+) -> PricingOverridePublic:
+    """Read one override request (FR-010). The requester polls this while their
+    request is PENDING; admins may read any. Anyone else gets 403."""
+    override = crud.get_pricing_override(session=session, override_id=override_id)
+    if not override:
+        raise HTTPException(status_code=404, detail="Override request not found")
+    if override.created_by_user_id != current_user.id and not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    product = crud.get_product(session=session, product_id=override.product_id)
+    return PricingOverridePublic.model_validate(
+        override, update={"product_sku": product.sku if product else ""}
     )
 
 
