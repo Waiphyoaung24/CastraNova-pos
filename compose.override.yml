@@ -111,6 +111,10 @@ services:
         - NODE_ENV=development
         - VITE_ENABLE_PWA=false
     command: ["bun", "run", "dev", "--host", "--port", "5173"]
+    # The build args above only exist during `bun run build`; the Vite dev
+    # server reads env at runtime, so the API base must be set here too.
+    environment:
+      VITE_API_URL: http://localhost:8000
     ports:
       - "5173:5173"
     # `docker compose watch` pushes source edits into the container; Vite's
