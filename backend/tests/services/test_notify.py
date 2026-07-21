@@ -125,7 +125,9 @@ def _opt_in(
 def test_send_line_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200)
 
@@ -172,7 +174,9 @@ def test_send_line_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_send_telegram_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200, {"ok": True})
 
@@ -278,7 +282,9 @@ def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
 ) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
 
@@ -399,7 +405,9 @@ def test_parse_start_code_ignores_unrelated_messages(update: dict[str, Any]) -> 
 def test_send_viber_status_zero_success(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200, {"status": 0})
 
@@ -441,9 +449,7 @@ def test_notify_line_success_one_sent_log(
         recipients=[user],
         payload={"k": "v"},
     )
-    line_logs = [
-        log for log in logs if log.channel == NotificationChannel.LINE
-    ]
+    line_logs = [log for log in logs if log.channel == NotificationChannel.LINE]
     assert len(line_logs) == 1
     log = line_logs[0]
     assert log.status == NotificationStatus.SENT
@@ -491,7 +497,9 @@ def test_notify_opt_out_no_send_no_log(
     monkeypatch.setattr(notify, "_post", _recording_post(sent))
     user = _make_user(db)
     # explicit disabled LINE pref + no VIBER pref at all
-    _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT, enabled=False)
+    _opt_in(
+        db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT, enabled=False
+    )
 
     logs = notify.notify(
         session=db,
@@ -529,9 +537,7 @@ def test_notify_opted_in_but_no_address_failed_not_enrolled(
 def test_notify_one_log_per_attempted_recipient_channel(
     db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        notify, "_post", lambda *a, **k: _resp(200, {"status": 0})
-    )
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200, {"status": 0}))
     user = _make_user(db)
     _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
     _opt_in(db, user, NotificationChannel.VIBER, NotificationEvent.PULL_SHORT)
@@ -766,9 +772,7 @@ def test_notify_pull_short_targets_bkk_admins_with_pref(
     staff = _make_user(db, role=UserRole.YGN_STAFF)
     _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
 
-    customer = crud.create_customer(
-        session=db, customer_in=CustomerCreate(name="C")
-    )
+    customer = crud.create_customer(session=db, customer_in=CustomerCreate(name="C"))
     project = crud.create_project(
         session=db,
         project_in=ProjectCreate(
@@ -813,18 +817,11 @@ def test_notify_pull_short_targets_bkk_admins_with_pref(
     sample = next(log for log in logs if log.target_user_id == admin.id)
     assert sample.payload["short_line_count"] == 1
     assert sample.payload["pull_id"] == str(pull.id)
+    assert sample.payload["project_name"] == project.name
+    assert sample.payload["project_code"] == project.code
 
 
 # --- notify_pull_fulfilled helper (FR-018) ------------------------------------
-
-
-def test_render_text_pull_fulfilled_mentions_pull_id() -> None:
-    text = notify._render_text(
-        event_type=NotificationEvent.PULL_FULFILLED,
-        payload={"pull_id": "the-pull-id"},
-    )
-    assert "the-pull-id" in text
-    assert "fulfilled" in text.lower()
 
 
 def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
@@ -845,9 +842,7 @@ def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
     staff = _make_user(db, role=UserRole.YGN_STAFF)
     _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.PULL_FULFILLED)
 
-    customer = crud.create_customer(
-        session=db, customer_in=CustomerCreate(name="C")
-    )
+    customer = crud.create_customer(session=db, customer_in=CustomerCreate(name="C"))
     project = crud.create_project(
         session=db,
         project_in=ProjectCreate(
@@ -868,10 +863,137 @@ def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
     targets = {log.target_user_id for log in logs}
     assert admin.id in targets
     assert staff.id not in targets
-    assert all(
-        log.event_type == NotificationEvent.PULL_FULFILLED for log in logs
-    )
+    assert all(log.event_type == NotificationEvent.PULL_FULFILLED for log in logs)
     sample = next(log for log in logs if log.target_user_id == admin.id)
     assert sample.payload["pull_id"] == str(pull.id)
+    assert sample.payload["project_name"] == project.name
+    assert sample.payload["project_code"] == project.code
     # FR-018 requires the FULFILLED push carry NO financial fields.
     assert_no_financial_keys(sample.payload)
+
+
+# --- message copy (2026-07-22 friendlier messages) ----------------------------
+
+
+def test_render_text_pull_short_is_labeled_lines() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.PULL_SHORT,
+        payload={
+            "pull_id": "the-pull-id",
+            "project_id": "the-project-id",
+            "project_name": "Riverside Tower",
+            "project_code": "PRJ-001",
+            "short_line_count": 2,
+        },
+    )
+    assert text == (
+        "⚠️ Project pull came up short\n"
+        "Project: Riverside Tower (PRJ-001)\n"
+        "Lines short: 2"
+    )
+    # ids are payload-only now
+    assert "the-pull-id" not in text
+
+
+def test_render_text_pull_fulfilled_names_the_project() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.PULL_FULFILLED,
+        payload={
+            "pull_id": "the-pull-id",
+            "project_id": "the-project-id",
+            "project_name": "Riverside Tower",
+            "project_code": "PRJ-001",
+        },
+    )
+    assert text == "✅ Project pull fulfilled\nProject: Riverside Tower (PRJ-001)"
+    assert "the-pull-id" not in text
+
+
+def test_render_text_low_stock_names_the_product() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.LOW_STOCK,
+        payload={
+            "product_id": "the-product-id",
+            "sku": "SKU-1234",
+            "model_name": "12mm Copper Elbow",
+            "on_hand": 3,
+            "min_stock_level": 10,
+        },
+    )
+    assert text == (
+        "📉 Low stock\nItem: 12mm Copper Elbow (SKU-1234)\nOn hand: 3 (minimum 10)"
+    )
+
+
+def test_render_text_override_pending_names_the_product() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.OVERRIDE_PENDING,
+        payload={
+            "override_id": "the-override-id",
+            "sku": "SKU-1234",
+            "model_name": "12mm Copper Elbow",
+            "deviation_pct": "12.5",
+        },
+    )
+    assert text == (
+        "🔔 Pricing override needs approval\n"
+        "Item: 12mm Copper Elbow (SKU-1234)\n"
+        "Deviation: 12.5%"
+    )
+    assert "the-override-id" not in text
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            NotificationEvent.PULL_SHORT,
+            {"project_id": "the-project-id", "short_line_count": 2},
+        ),
+        (NotificationEvent.PULL_FULFILLED, {"project_id": "the-project-id"}),
+        (
+            NotificationEvent.LOW_STOCK,
+            {"product_id": "the-product-id", "on_hand": 3, "min_stock_level": 10},
+        ),
+        (
+            NotificationEvent.OVERRIDE_PENDING,
+            {"override_id": "the-override-id", "deviation_pct": "12.5"},
+        ),
+    ],
+)
+def test_render_text_falls_back_to_id_when_row_is_gone(
+    event_type: NotificationEvent, payload: dict[str, object]
+) -> None:
+    """A deleted Project/Product leaves the name keys absent. The label must
+    degrade to the id and must never render the string "None"."""
+    text = notify._render_text(event_type=event_type, payload=payload)
+    assert "None" not in text
+    assert "unknown" not in text
+    fallback = (
+        payload.get("project_id")
+        or payload.get("product_id")
+        or payload.get("override_id")
+    )
+    assert str(fallback) in text
+
+
+def test_render_text_never_renders_none_for_missing_quantities() -> None:
+    """Every key absent — the last line of defence against "None" reaching a
+    user's phone."""
+    for event_type in (
+        NotificationEvent.PULL_SHORT,
+        NotificationEvent.PULL_FULFILLED,
+        NotificationEvent.LOW_STOCK,
+        NotificationEvent.OVERRIDE_PENDING,
+    ):
+        text = notify._render_text(event_type=event_type, payload={})
+        assert "None" not in text
+
+
+def test_render_text_still_rejects_an_unknown_event() -> None:
+    """Every new event must add an explicit, safe template — never a raw dump."""
+    with pytest.raises(NotImplementedError):
+        notify._render_text(
+            event_type="not-an-event",  # type: ignore[arg-type]
+            payload={"retail_price_thb": "999.00"},
+        )

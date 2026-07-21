@@ -326,34 +326,88 @@ def notify(
     return logs
 
 
+def _clean(value: Any) -> str:
+    """A payload value as display text; None and blank strings become ""."""
+    return "" if value is None else str(value).strip()
+
+
+def _field(*candidates: Any) -> str:
+    """The first candidate carrying display text, else "unknown". This is what
+    guarantees a message never renders the string "None"."""
+    for candidate in candidates:
+        text = _clean(candidate)
+        if text:
+            return text
+    return "unknown"
+
+
+def _describe(name: Any, code: Any, fallback: Any) -> str:
+    """ "name (code)", degrading to whichever one is present, then to an id.
+
+    A row named in a payload can be deleted between the send and the render,
+    so every label needs a floor.
+    """
+    label, extra = _clean(name), _clean(code)
+    if label and extra:
+        return f"{label} ({extra})"
+    return _field(label, extra, fallback)
+
+
 def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> str:
+    """Render one plain-text message. Sent without parse_mode, so emoji and
+    newlines render but markup does not.
+
+    Ids are payload-only: they stay in the append-only log for audit, but a
+    UUID means nothing to someone reading this on their phone.
+    """
     if event_type == NotificationEvent.PULL_SHORT:
+        project = _describe(
+            payload.get("project_name"),
+            payload.get("project_code"),
+            payload.get("project_id"),
+        )
         return (
-            f"Project pull {payload.get('pull_id')} settled SHORT "
-            f"({payload.get('short_line_count')} line(s) short)."
+            "⚠️ Project pull came up short\n"
+            f"Project: {project}\n"
+            f"Lines short: {_field(payload.get('short_line_count'))}"
         )
     if event_type == NotificationEvent.PULL_FULFILLED:
-        return f"Project pull {payload.get('pull_id')} fulfilled."
+        project = _describe(
+            payload.get("project_name"),
+            payload.get("project_code"),
+            payload.get("project_id"),
+        )
+        return f"✅ Project pull fulfilled\nProject: {project}"
     if event_type == NotificationEvent.LOW_STOCK:
+        item = _describe(
+            payload.get("model_name"),
+            payload.get("sku"),
+            payload.get("product_id"),
+        )
         return (
-            f"Low stock: {payload.get('sku')} — {payload.get('on_hand')} left "
-            f"(min {payload.get('min_stock_level')})."
+            "📉 Low stock\n"
+            f"Item: {item}\n"
+            f"On hand: {_field(payload.get('on_hand'))} "
+            f"(minimum {_field(payload.get('min_stock_level'))})"
         )
     if event_type == NotificationEvent.OVERRIDE_PENDING:
         # deviation_pct is a percentage, not a raw price — safe to surface.
+        item = _describe(
+            payload.get("model_name"),
+            payload.get("sku"),
+            payload.get("override_id"),
+        )
         return (
-            f"Pricing override pending approval: {payload.get('sku')} "
-            f"({payload.get('deviation_pct')}% deviation). "
-            f"Request {payload.get('override_id')}."
+            "🔔 Pricing override needs approval\n"
+            f"Item: {item}\n"
+            f"Deviation: {_field(payload.get('deviation_pct'))}%"
         )
     # Never push a raw payload (may carry financial fields). Each new event must
     # add an explicit, safe template here.
     raise NotImplementedError(f"No render template for {event_type!r}")
 
 
-def notify_pull_short(
-    *, session: Session, pull: ProjectPull
-) -> list[NotificationLog]:
+def notify_pull_short(*, session: Session, pull: ProjectPull) -> list[NotificationLog]:
     """Notify every BKK_ADMIN of a SHORT project pull (FR-018, Flow D)."""
     recipients = list(
         session.exec(select(User).where(User.role == UserRole.BKK_ADMIN)).all()
