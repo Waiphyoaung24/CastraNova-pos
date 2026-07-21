@@ -1,4 +1,4 @@
-import type { SaleCreateRequest, SaleLineInput } from "@/client/types.gen"
+import type { OverrideState, SaleCreateRequest, SaleLineInput } from "@/client/types.gen"
 import type { ScanLookupResult } from "@/hooks/useScanLookup"
 
 // ---------------------------------------------------------------------------
@@ -17,6 +17,14 @@ import type { ScanLookupResult } from "@/hooks/useScanLookup"
 //     sku increments the quantity, and PART quantity is floored at 1.
 // ---------------------------------------------------------------------------
 
+/** A price-override request attached to a line (FR-010). */
+export type LineOverride = {
+  /** PricingOverridePublic.id */
+  id: string
+  state: OverrideState
+  requestedPriceThb: number
+}
+
 type CartLineBase = {
   /** Stable id: barcode for UNIT, sku for PART. */
   key: string
@@ -25,6 +33,8 @@ type CartLineBase = {
   quantity: number
   /** Selling price from priceMap; 0 when the product is missing from the map. */
   unitPriceThb: number
+  /** Price-override request for this line, if the operator made one. */
+  override?: LineOverride
 }
 
 /** A single serialized piece, keyed and identified by its barcode. */
@@ -128,9 +138,41 @@ export function removeLine(lines: CartLine[], key: string): CartLine[] {
   return lines.filter((l) => l.key !== key)
 }
 
-/** Σ unitPriceThb × quantity across all lines (display-only). */
+/** AUTO_APPROVED / APPROVED change the effective price; PENDING / REJECTED don't. */
+function overrideActive(o: LineOverride | undefined): o is LineOverride {
+  return o !== undefined && (o.state === "AUTO_APPROVED" || o.state === "APPROVED")
+}
+
+/** Set/replace the override on the line with `key`; unknown key returns `lines`. */
+export function applyOverride(
+  lines: CartLine[],
+  key: string,
+  override: LineOverride,
+): CartLine[] {
+  if (!lines.some((l) => l.key === key)) return lines
+  return lines.map((l) => (l.key === key ? { ...l, override } : l))
+}
+
+/** Drop the override on the line with `key` (used when a request is REJECTED). */
+export function clearOverride(lines: CartLine[], key: string): CartLine[] {
+  return lines.map((l) => (l.key === key ? { ...l, override: undefined } : l))
+}
+
+/** Effective unit price: the requested price once approved, else retail. */
+export function lineUnitPriceThb(line: CartLine): number {
+  return overrideActive(line.override)
+    ? line.override.requestedPriceThb
+    : line.unitPriceThb
+}
+
+/** True while any line's override awaits an admin decision; gates checkout. */
+export function cartHasPendingOverride(lines: CartLine[]): boolean {
+  return lines.some((l) => l.override?.state === "PENDING")
+}
+
+/** Σ effective unit price × quantity across all lines (display-only). */
 export function cartSubtotalThb(lines: CartLine[]): number {
-  return lines.reduce((sum, l) => sum + l.unitPriceThb * l.quantity, 0)
+  return lines.reduce((sum, l) => sum + lineUnitPriceThb(l) * l.quantity, 0)
 }
 
 /**
@@ -145,15 +187,20 @@ export function buildSaleRequest(
   return {
     customer_id: customerId,
     idempotency_key: idempotencyKey,
-    lines: lines.map(
-      (l): SaleLineInput =>
+    lines: lines.map((l): SaleLineInput => {
+      const base =
         l.lineKind === "UNIT"
           ? {
-              line_kind: "UNIT",
+              line_kind: "UNIT" as const,
               castranova_barcode: l.barcode,
               quantity: l.quantity,
             }
-          : { line_kind: "PART", sku: l.sku, quantity: l.quantity },
-    ),
+          : { line_kind: "PART" as const, sku: l.sku, quantity: l.quantity }
+      // Only a decided-approved override is referenced; the backend re-validates
+      // it (state, product match) and stays price-authoritative.
+      return overrideActive(l.override)
+        ? { ...base, pricing_override_request_id: l.override.id }
+        : base
+    }),
   }
 }
