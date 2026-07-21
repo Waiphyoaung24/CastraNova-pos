@@ -378,9 +378,15 @@ function PendingOverrideWatcher({
         : false,
   })
 
+  // Toast fns from useCustomToast change identity every render, which would
+  // churn onDecided and re-fire this effect on unrelated re-renders; a ref
+  // keeps the latest callback without re-running the effect.
+  const onDecidedRef = useRef(onDecided)
+  onDecidedRef.current = onDecided
+
   useEffect(() => {
-    if (data && data.state !== "PENDING") onDecided(lineKey, data)
-  }, [data, lineKey, onDecided])
+    if (data && data.state !== "PENDING") onDecidedRef.current(lineKey, data)
+  }, [data, lineKey])
 
   return null
 }
