@@ -105,7 +105,10 @@ react-hook-form).
 
 ### 4. Pending auto-refresh — `sale.tsx`
 
-For each line whose override is PENDING, one `useQuery`:
+For each line whose override is PENDING, one query. Rules of Hooks: don't
+call `useQuery` in a loop — render one tiny `PendingOverrideWatcher`
+component per pending line (each owns its own hook and reports via an
+`onDecided` callback), or use `useQueries`. Per watcher:
 
 ```ts
 useQuery({
