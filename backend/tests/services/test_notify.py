@@ -872,6 +872,87 @@ def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
     assert_no_financial_keys(sample.payload)
 
 
+# --- payload names (2026-07-22 friendlier messages) ---------------------------
+
+
+def test_notify_low_stock_payload_carries_model_name(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import crud
+    from app.models import ProductCreate, TrackingMode
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.LOW_STOCK)
+
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"NS-{uuid.uuid4().hex[:8]}",
+            model_name="12mm Copper Elbow",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="10.00",
+            repair_price_thb="2.00",
+            default_min_stock_level=10,
+        ),
+    )
+
+    logs = notify.notify_low_stock(session=db, product_ids=[product.id])
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["model_name"] == "12mm Copper Elbow"
+    assert sample.payload["sku"] == product.sku
+    assert_no_financial_keys(sample.payload)
+
+
+def test_notify_override_pending_payload_carries_model_name(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decimal import Decimal
+
+    from app import crud
+    from app.models import (
+        OverrideState,
+        OverrideTargetKind,
+        PricingOverrideRequest,
+        ProductCreate,
+        TrackingMode,
+    )
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.OVERRIDE_PENDING)
+
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"NS-{uuid.uuid4().hex[:8]}",
+            model_name="12mm Copper Elbow",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="10.00",
+            repair_price_thb="2.00",
+        ),
+    )
+    override = PricingOverrideRequest(
+        target_kind=OverrideTargetKind.SALE_LINE,
+        product_id=product.id,
+        default_price_thb=Decimal("10.00"),
+        requested_price_thb=Decimal("8.75"),
+        deviation_pct=Decimal("12.5"),
+        reason="customer discount",
+        state=OverrideState.PENDING,
+        created_by_user_id=admin.id,
+    )
+    db.add(override)
+    db.commit()
+    db.refresh(override)
+
+    logs = notify.notify_override_pending(session=db, override=override)
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["model_name"] == "12mm Copper Elbow"
+    assert sample.payload["sku"] == product.sku
+    assert_no_financial_keys(sample.payload)
+
+
 # --- message copy (2026-07-22 friendlier messages) ----------------------------
 
 

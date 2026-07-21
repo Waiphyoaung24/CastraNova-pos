@@ -38,6 +38,7 @@ from app.models import (
     NotificationStatus,
     PricingOverrideRequest,
     Product,
+    Project,
     ProjectPull,
     ProjectPullLine,
     User,
@@ -416,9 +417,12 @@ def notify_pull_short(*, session: Session, pull: ProjectPull) -> list[Notificati
         select(ProjectPullLine).where(ProjectPullLine.project_pull_id == pull.id)
     ).all()
     short_line_count = sum(1 for ln in lines if ln.line_state == LineState.SHORT)
+    project = session.get(Project, pull.project_id)
     payload: dict[str, Any] = {
         "pull_id": str(pull.id),
         "project_id": str(pull.project_id),
+        "project_name": project.name if project else None,
+        "project_code": project.code if project else None,
         "customer_id": str(pull.customer_id),
         "short_line_count": short_line_count,
     }
@@ -437,9 +441,12 @@ def notify_pull_fulfilled(
     recipients = list(
         session.exec(select(User).where(User.role == UserRole.BKK_ADMIN)).all()
     )
+    project = session.get(Project, pull.project_id)
     payload: dict[str, Any] = {
         "pull_id": str(pull.id),
         "project_id": str(pull.project_id),
+        "project_name": project.name if project else None,
+        "project_code": project.code if project else None,
         "customer_id": str(pull.customer_id),
     }
     return notify(
@@ -486,6 +493,7 @@ def notify_low_stock(
         payload: dict[str, Any] = {
             "product_id": str(product.id),
             "sku": product.sku,
+            "model_name": product.model_name,
             "on_hand": on_hand,
             "min_stock_level": threshold,
         }
@@ -521,6 +529,7 @@ def notify_override_pending(
     payload: dict[str, Any] = {
         "override_id": str(override.id),
         "sku": product.sku if product else None,
+        "model_name": product.model_name if product else None,
         "deviation_pct": str(override.deviation_pct),
     }
     return notify(
