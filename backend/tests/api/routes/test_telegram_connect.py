@@ -438,6 +438,33 @@ def test_test_message_succeeds_when_connected(
     ).all() == []
 
 
+def test_test_message_copy_is_friendly(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probe a user sees after clicking "Send test" should read like a
+    confirmation, not a log line."""
+    user, headers = user_and_headers
+    user.telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    db.add(user)
+    db.commit()
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", "test-token")
+
+    sent: dict[str, Any] = {}
+
+    def _capture(*_args: Any, json: dict[str, Any], **_kwargs: Any) -> httpx.Response:
+        sent.update(json)
+        return _resp(200, {"ok": True})
+
+    monkeypatch.setattr(notify, "_post", _capture)
+
+    r = client.post(f"{PREFIX}/notifications/telegram/test", headers=headers)
+    assert r.status_code == 200, r.text
+    assert sent["text"] == "✅ CastraNova POS\nYour Telegram notifications are working."
+
+
 def test_test_message_not_connected_is_a_client_error(
     client: TestClient, user_and_headers: tuple[User, dict[str, str]]
 ) -> None:

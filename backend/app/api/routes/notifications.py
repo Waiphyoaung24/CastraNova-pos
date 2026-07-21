@@ -132,7 +132,7 @@ def test_telegram(
         raise HTTPException(status_code=400, detail="Telegram is not connected")
     ok, detail = notify.send_telegram_test(
         to=current_user.telegram_chat_id,
-        text="CastraNova POS: this is a test notification.",
+        text="✅ CastraNova POS\nYour Telegram notifications are working.",
     )
     return TelegramTestResult(ok=ok, detail=detail)
 
