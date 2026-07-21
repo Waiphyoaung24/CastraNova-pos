@@ -1,6 +1,6 @@
 // Pure helpers for the admin report screens (FR-013 channel margin, FR-014
 // holding period). Kept framework-free so the screens stay thin and the logic
-// is unit-testable without a browser (mirrors lib/stock-on-hand.ts).
+// is unit-testable without a browser.
 
 /** Format a decimal-string THB amount for display, e.g. "1400.00" -> "฿1,400.00". */
 export function formatThb(value: string): string {

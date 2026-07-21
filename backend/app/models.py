@@ -683,7 +683,11 @@ class UnitMovementBase(SQLModel):
 
 class UnitMovement(UnitMovementBase, table=True):
     # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
-    # index (unit_id, occurred_at DESC) for lifecycle traversal (FR-015).
+    # index (unit_id, occurred_at DESC) for lifecycle traversal (FR-015);
+    # (actor_user_id, occurred_at DESC) for the audit log's actor filter
+    # (list_audit/count_audit always pair the filter with this sort + limit);
+    # partial sale_id / stock_adjustment_id for margin_report's Sale join and
+    # FK lookups, mirroring the project_pull_id/service_ticket_id indexes.
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_unit_movement_idempotency_key"),
         Index(
@@ -702,6 +706,23 @@ class UnitMovement(UnitMovementBase, table=True):
             "service_ticket_id",
             unique=False,
             postgresql_where=text("service_ticket_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_actor_occurred",
+            "actor_user_id",
+            text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_unitmovement_sale_id",
+            "sale_id",
+            unique=False,
+            postgresql_where=text("sale_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_stock_adjustment_id",
+            "stock_adjustment_id",
+            unique=False,
+            postgresql_where=text("stock_adjustment_id IS NOT NULL"),
         ),
     )
 
@@ -867,6 +888,10 @@ class PartMovement(PartMovementBase, table=True):
     # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
     # index (product_id, occurred_at DESC) for SKU history (FR-015);
     # CHECK(quantity > 0) — direction is never encoded in the sign (§4.3).
+    # (actor_user_id, occurred_at DESC) for the audit log's actor filter
+    # (list_audit/count_audit always pair the filter with this sort + limit);
+    # partial sale_id / stock_adjustment_id for margin_report's Sale join and
+    # FK lookups, mirroring the project_pull_id/service_ticket_id indexes.
     __table_args__ = (
         UniqueConstraint(
             "idempotency_key", name="uq_part_movement_idempotency_key"
@@ -887,6 +912,23 @@ class PartMovement(PartMovementBase, table=True):
             "service_ticket_id",
             unique=False,
             postgresql_where=text("service_ticket_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_partmovement_actor_occurred",
+            "actor_user_id",
+            text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_partmovement_sale_id",
+            "sale_id",
+            unique=False,
+            postgresql_where=text("sale_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_partmovement_stock_adjustment_id",
+            "stock_adjustment_id",
+            unique=False,
+            postgresql_where=text("stock_adjustment_id IS NOT NULL"),
         ),
         CheckConstraint("quantity > 0", name="ck_part_movement_qty_positive"),
     )
@@ -1240,9 +1282,13 @@ class SyncReviewResolve(SQLModel):
 
 
 class Sale(SQLModel, table=True):
+    # sold_at is the hottest range predicate in margin_report — every query in
+    # the family closes over [start, end) on it. Plain (not partial) index:
+    # sold_at is NOT NULL.
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_sale_idempotency_key"),
         Index("ix_sale_customer_id", "customer_id"),
+        Index("ix_sale_sold_at", "sold_at"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1275,6 +1321,21 @@ class SaleLine(SQLModel, table=True):
         UniqueConstraint(
             "pricing_override_request_id",
             name="uq_saleline_pricing_override_request_id",
+        ),
+        # Bare-FK hygiene, not report tuning: margin_report reaches this table
+        # via the indexed sale_id, so these cover parent-delete scans on
+        # unit/product instead. Partial — both columns are nullable.
+        Index(
+            "ix_saleline_unit_id",
+            "unit_id",
+            unique=False,
+            postgresql_where=text("unit_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_saleline_product_id",
+            "product_id",
+            unique=False,
+            postgresql_where=text("product_id IS NOT NULL"),
         ),
     )
 
@@ -1360,6 +1421,14 @@ class ServiceTicket(SQLModel, table=True):
             "idempotency_key", name="uq_service_ticket_idempotency_key"
         ),
         Index("ix_serviceticket_customer_id", "customer_id"),
+        # margin_report range-filters closed_at. Partial: open tickets are NULL
+        # and can never satisfy `>= start`, so they are dead weight in the index.
+        Index(
+            "ix_serviceticket_closed_at",
+            "closed_at",
+            unique=False,
+            postgresql_where=text("closed_at IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1393,6 +1462,9 @@ class ServiceTicketPart(SQLModel, table=True):
             "pricing_override_request_id",
             name="uq_service_ticket_part_pricing_override_request_id",
         ),
+        # Bare-FK hygiene: rows are reached via the indexed service_ticket_id,
+        # so this covers parent-delete scans on product. Plain — NOT NULL.
+        Index("ix_serviceticketpart_product_id", "product_id"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1457,6 +1529,15 @@ class ProjectPull(SQLModel, table=True):
         Index("ix_project_pull_state_created", "state", "created_at"),
         Index("ix_projectpull_customer_id", "customer_id"),
         Index("ix_projectpull_project_id", "project_id"),
+        # margin_report range-filters fulfilled_at; ix_project_pull_state_created
+        # does not help it (those queries touch neither state nor created_at).
+        # Partial: unfulfilled pulls are NULL and never satisfy `>= start`.
+        Index(
+            "ix_projectpull_fulfilled_at",
+            "fulfilled_at",
+            unique=False,
+            postgresql_where=text("fulfilled_at IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1786,12 +1867,14 @@ class StockOnHandRow(SQLModel):
 
 class StockOnHandResponse(SQLModel):
     rows: list[StockOnHandRow]
+    count: int
 
 
 class BatchDrillRow(SQLModel):
     batch_no: str
     remaining_qty: int
     received_at: datetime
+    supplier: str | None
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 
@@ -1801,6 +1884,7 @@ class UnitDrillRow(SQLModel):
     supplier_serial: str
     current_state: UnitState
     received_at: datetime
+    supplier: str | None
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 

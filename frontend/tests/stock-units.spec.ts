@@ -54,7 +54,7 @@ test.describe("Stock — serialized unit drill-down", () => {
     const barcode = recv.units[0].castranova_barcode
 
     await page.goto("/stock")
-    await page.getByPlaceholder("Search by name or barcode…").fill(sku)
+    await page.getByLabel("Search stock by SKU or model").fill(sku)
     await page.getByRole("button", { name: `Expand ${sku}` }).click()
 
     await expect(

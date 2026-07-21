@@ -55,11 +55,7 @@ export function SupplierCreateDialog() {
   return (
     <Dialog
       open={open}
-      // The Country field's popover combobox is portalled outside this
-      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
-      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
-      // keeps the overlay/close-on-outside-click behavior but drops the
-      // trap, letting the combobox actually receive focus and keystrokes.
+      // Required by the Country field's EntityCombobox — see EntityCombobox.tsx.
       modal={false}
       onOpenChange={(next) => {
         setOpen(next)

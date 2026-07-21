@@ -83,11 +83,7 @@ export function ProjectEditDialog({
   return (
     <Dialog
       open
-      // The Customer field's popover combobox is portalled outside this
-      // Dialog's DOM subtree; a modal Dialog's focus trap fights that
-      // portal for focus (Radix issue: nested modal FocusScopes). Non-modal
-      // keeps the overlay/close-on-outside-click behavior but drops the
-      // trap, letting the combobox actually receive focus and keystrokes.
+      // Required by the Customer field's EntityCombobox — see EntityCombobox.tsx.
       modal={false}
       onOpenChange={(next) => {
         if (!next) onClose()

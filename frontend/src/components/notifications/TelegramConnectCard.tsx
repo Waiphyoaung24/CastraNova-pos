@@ -66,8 +66,8 @@ export function TelegramConnectCard() {
         ? `Connected as @${confirmQuery.data.telegram_username}.`
         : "Telegram connected.",
     )
-    // showSuccessToast is a stable helper from useCustomToast; the actual
-    // trigger is confirmQuery.data flipping to connected.
+    // The actual trigger is confirmQuery.data flipping to connected;
+    // showSuccessToast is useCallback-stabilized so it can't cause a re-fire.
   }, [confirmQuery.data, queryClient, showSuccessToast])
 
   // A terminal failure (e.g. this Telegram already backs another account).

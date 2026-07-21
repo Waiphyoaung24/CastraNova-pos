@@ -6,7 +6,6 @@ from sqlmodel import Session, select
 from app import crud
 from app.core.config import settings
 from app.models import (
-    CustomerCreate,
     Location,
     ProductCreate,
     SupplierCreate,
@@ -166,49 +165,68 @@ def test_stock_on_hand_filter_by_category(
     assert fan_sku not in skus
 
 
-def test_stock_on_hand_filter_by_customer(
+def test_stock_on_hand_server_filters_paginate_with_filtered_count(
     client: TestClient,
-    superuser_token_headers: dict[str, str],
     staff_token_headers: dict[str, str],
     db: Session,
 ) -> None:
-    # Two QUANTITY products; the customer buys a small qty of only the first,
-    # leaving stock on hand. The customer= filter must return only the product
-    # that customer transacted, excluding the untouched one.
-    bought_sku = f"BUY-{uuid.uuid4().hex[:8]}"
-    other_sku = f"OTHER-{uuid.uuid4().hex[:8]}"
-    _seed_quantity_with_batches(
-        client, staff_token_headers, db, [10], sku=bought_sku, admin_headers=superuser_token_headers
-    )
-    _seed_quantity_with_batches(
-        client, staff_token_headers, db, [10], sku=other_sku, admin_headers=superuser_token_headers
-    )
-    customer = crud.create_customer(
-        session=db, customer_in=CustomerCreate(name="Filtered Customer")
+    tag = uuid.uuid4().hex[:8]
+    matching_skus = [f"SOH-{tag}-A", f"SOH-{tag}-B"]
+    for sku in matching_skus:
+        crud.create_product(
+            session=db,
+            product_in=ProductCreate(
+                sku=sku,
+                model_name=f"Filter model {tag}",
+                brand=f"Brand-{tag}",
+                category=f"Category-{tag}",
+                tracking_mode=TrackingMode.QUANTITY,
+                retail_price_thb="50.00",
+                repair_price_thb="10.00",
+            ),
+        )
+    crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"SOH-{tag}-OTHER",
+            model_name=f"Filter model {tag}",
+            brand="Other brand",
+            category=f"Category-{tag}",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="50.00",
+            repair_price_thb="10.00",
+        ),
     )
 
-    sale = client.post(
-        f"{settings.API_V1_STR}/sales",
+    first = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand",
         headers=staff_token_headers,
-        json={
-            "customer_id": str(customer.id),
-            "lines": [{"line_kind": "PART", "sku": bought_sku, "quantity": 2}],
-            "idempotency_key": str(uuid.uuid4()),
+        params={
+            "q": tag.upper(),
+            "brand": tag.upper(),
+            "category": tag.upper(),
+            "skip": 0,
+            "limit": 1,
         },
     )
-    assert sale.status_code == 200, sale.text
+    assert first.status_code == 200, first.text
+    assert first.json()["count"] == 2
+    assert [row["sku"] for row in first.json()["rows"]] == [matching_skus[0]]
 
-    # The customer filter is admin-only (see test_customer_filter_is_admin_only);
-    # this test pins its row semantics, so it reads as admin.
-    r = client.get(
+    second = client.get(
         f"{settings.API_V1_STR}/dashboards/stock-on-hand",
-        headers=superuser_token_headers,
-        params={"customer": str(customer.id)},
+        headers=staff_token_headers,
+        params={
+            "q": tag,
+            "brand": tag.upper(),
+            "category": tag.upper(),
+            "skip": 1,
+            "limit": 1,
+        },
     )
-    assert r.status_code == 200, r.text
-    skus = {row["sku"] for row in r.json()["rows"]}
-    assert bought_sku in skus
-    assert other_sku not in skus
+    assert second.status_code == 200, second.text
+    assert second.json()["count"] == 2
+    assert [row["sku"] for row in second.json()["rows"]] == [matching_skus[1]]
 
 
 def test_stock_on_hand_filter_by_supplier_quantity(
@@ -251,19 +269,30 @@ def test_stock_on_hand_filter_by_supplier_quantity(
         )
         assert r.status_code == 200, r.text
 
-    def _qoh(params: dict[str, str]) -> int:
+    unmatched_sku = f"QTY-OTHER-{uuid.uuid4().hex[:8]}"
+    _seed_quantity_with_batches(
+        client,
+        staff_token_headers,
+        db,
+        [7],
+        sku=unmatched_sku,
+        admin_headers=superuser_token_headers,
+    )
+
+    def _rows(params: dict[str, str]) -> dict[str, dict[str, object]]:
         resp = client.get(
             f"{settings.API_V1_STR}/dashboards/stock-on-hand",
-            headers=staff_token_headers,
+            headers=superuser_token_headers,
             params=params,
         )
         assert resp.status_code == 200, resp.text
-        rows = {row["sku"]: row for row in resp.json()["rows"]}
-        return int(rows[sku]["quantity_on_hand"])
+        return {row["sku"]: row for row in resp.json()["rows"]}
 
-    assert _qoh({}) == 15
-    assert _qoh({"supplier": str(supplier_a.id)}) == 10
-    assert _qoh({"supplier": str(supplier_b.id)}) == 5
+    assert int(_rows({})[sku]["quantity_on_hand"]) == 15
+    supplier_a_rows = _rows({"supplier": str(supplier_a.id)})
+    assert int(supplier_a_rows[sku]["quantity_on_hand"]) == 10
+    assert unmatched_sku not in supplier_a_rows
+    assert int(_rows({"supplier": str(supplier_b.id)})[sku]["quantity_on_hand"]) == 5
 
 
 def test_stock_on_hand_filter_by_supplier_serialized(
@@ -312,19 +341,30 @@ def test_stock_on_hand_filter_by_supplier_serialized(
         )
         assert r.status_code == 200, r.text
 
-    def _count(params: dict[str, str]) -> int:
+    unmatched_sku = f"SER-OTHER-{uuid.uuid4().hex[:8]}"
+    _seed_serialized_units(
+        client,
+        staff_token_headers,
+        db,
+        1,
+        sku=unmatched_sku,
+        admin_headers=superuser_token_headers,
+    )
+
+    def _rows(params: dict[str, str]) -> dict[str, dict[str, object]]:
         resp = client.get(
             f"{settings.API_V1_STR}/dashboards/stock-on-hand",
-            headers=staff_token_headers,
+            headers=superuser_token_headers,
             params=params,
         )
         assert resp.status_code == 200, resp.text
-        rows = {row["sku"]: row for row in resp.json()["rows"]}
-        return int(rows[sku]["quantity_on_hand"])
+        return {row["sku"]: row for row in resp.json()["rows"]}
 
-    assert _count({}) == 5
-    assert _count({"supplier": str(supplier_a.id)}) == 3
-    assert _count({"supplier": str(supplier_b.id)}) == 2
+    assert int(_rows({})[sku]["quantity_on_hand"]) == 5
+    supplier_a_rows = _rows({"supplier": str(supplier_a.id)})
+    assert int(supplier_a_rows[sku]["quantity_on_hand"]) == 3
+    assert unmatched_sku not in supplier_a_rows
+    assert int(_rows({"supplier": str(supplier_b.id)})[sku]["quantity_on_hand"]) == 2
 
 
 def test_stock_on_hand_requires_auth(client: TestClient) -> None:
@@ -348,6 +388,14 @@ def test_batch_drilldown_lists_active_batches(
     assert r.status_code == 200, r.text
     remaining = [b["remaining_qty"] for b in r.json()]
     assert remaining == [8, 12]
+    assert {b["supplier"] for b in r.json()} == {None}
+
+    admin = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand/{product_id}/batches",
+        headers=superuser_token_headers,
+    )
+    assert admin.status_code == 200, admin.text
+    assert {b["supplier"] for b in admin.json()} == {"Acme Parts"}
 
 
 def test_unit_drilldown_exposes_id_usable_for_label(
@@ -370,6 +418,7 @@ def test_unit_drilldown_exposes_id_usable_for_label(
     assert r.status_code == 200, r.text
     rows = r.json()
     assert len(rows) == 2
+    assert {row["supplier"] for row in rows} == {None}
     for row in rows:
         unit_id = uuid.UUID(row["id"])  # well-formed UUID
         label = client.get(
@@ -378,6 +427,13 @@ def test_unit_drilldown_exposes_id_usable_for_label(
         )
         assert label.status_code == 200, label.text
         assert label.content[:4] == b"%PDF"
+
+    admin = client.get(
+        f"{settings.API_V1_STR}/dashboards/stock-on-hand/{product_id}/units",
+        headers=superuser_token_headers,
+    )
+    assert admin.status_code == 200, admin.text
+    assert {row["supplier"] for row in admin.json()} == {"Acme"}
 
 
 def test_stock_on_hand_includes_brand(
@@ -439,22 +495,20 @@ def test_stock_on_hand_is_single_pass_not_n_plus_one(
     assert counter["n"] < 15
 
 
-def test_customer_filter_is_admin_only(
+def test_supplier_filter_is_admin_only(
     client: TestClient,
     superuser_token_headers: dict[str, str],
     bkk_admin_token_headers: dict[str, str],
     staff_token_headers: dict[str, str],
     db: Session,
 ) -> None:
-    """FR-012's ?customer= filter reveals what a customer has bought or had
-    serviced, so it is admin-only (recorded owner decision). The UI gate alone
-    is not enough — a staff token must be rejected at the API. Both admin
-    subtypes is_admin() accepts (superuser and BKK_ADMIN) must get through."""
-    customer = crud.create_customer(
+    supplier = crud.create_supplier(
         session=db,
-        customer_in=CustomerCreate(name=f"Gate Cust {uuid.uuid4().hex[:8]}"),
+        supplier_in=SupplierCreate(
+            name=f"Gate Supplier {uuid.uuid4().hex[:8]}", country="TH"
+        ),
     )
-    params = {"customer": str(customer.id)}
+    params = {"supplier": str(supplier.id)}
 
     staff = client.get(
         f"{settings.API_V1_STR}/dashboards/stock-on-hand",
@@ -473,7 +527,25 @@ def test_customer_filter_is_admin_only(
         assert admin.status_code == 200, admin.text
 
 
-def test_stock_on_hand_without_customer_filter_stays_open_to_staff(
+def test_stock_on_hand_pagination_bounds(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+) -> None:
+    for params in (
+        {"skip": -1},
+        {"skip": 10_001},
+        {"limit": 0},
+        {"limit": 501},
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/dashboards/stock-on-hand",
+            headers=staff_token_headers,
+            params=params,
+        )
+        assert response.status_code == 422, (params, response.text)
+
+
+def test_stock_on_hand_without_supplier_filter_stays_open_to_staff(
     client: TestClient,
     staff_token_headers: dict[str, str],
 ) -> None:

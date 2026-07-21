@@ -71,13 +71,15 @@ For multi-step tasks, state a brief plan with verification per step.
 
 CastraNova-POS is an **inventory tracking & management system**. Forked from `fastapi/full-stack-fastapi-template`. Core domain (forward-looking): products, stock movements, suppliers, sales, audit trails.
 
-## Project Status (as of 2026-06-12)
+## Project Status (as of 2026-07-19)
 
 - **Branch model (3 branches).** `dev` is the development trunk — flow is feature branch → PR → `dev`. `production` is the release/deploy branch (created 2026-06-17 from `dev`); promote by merging `dev` → `production`. `master` is the upstream `full-stack-fastapi-template` base — never target or push it (no `dev`/`production` → `master` PRs).
 - **Core POS implementation** (plan Parts 0–2) is built; Parts 3–5 remain a roadmap to expand on demand.
 - **Pre-deploy hardening shipped** (merged to `dev` 2026-06-12 via PRs #6/#7/#8; per-PR branches deleted): bounded/ordered catalog endpoints; security (idempotency replay→actor binding, rate limits, least-privilege `castranova_app` DB role); E2E per-run DB reset + admin de-flake.
 - **CodeRabbit whole-repo remediation done:** migration `m027` (saleline `quantity > 0`, product `retail/repair_price_thb >= 0` CHECKs, `systemsetting.updated_by_user_id` FK `ON DELETE SET NULL`) + `tickets.tsx` idempotency-key reuse on retry. Design/plan under `docs/superpowers/`.
-- **Alembic head: `m027`** (`586bc2d1d79d`). Run `alembic upgrade head` on any DB still on an older revision.
+- **Telegram self-enrollment shipped** (m030/m031): a one-time-code connect flow binds a user's Telegram chat to their account (`telegramconnectcode` table, unique `telegram_chat_id`); LINE/Viber still have no enrollment path.
+- **Ledger/report indexes shipped** (m028/m029/m032/m033): FK and range-filter indexes on the append-only unit/part movement ledgers and the margin-report date columns.
+- **Alembic head: `m033`** (`e5f6a7b8c9d0`). Run `alembic upgrade head` on any DB still on an older revision.
 - **Known backlog:** `ServiceTicketPart` has no `idempotency_key`, so a multi-part ticket retry can duplicate part lines — add one (mirroring `Sale`/`PartMovement`) in a future hardening pass. Remaining deploy-checklist leftovers are tracked outside this file.
 
 ## Stack
@@ -89,7 +91,7 @@ CastraNova-POS is an **inventory tracking & management system**. Forked from `fa
 | DB       | PostgreSQL                                                           |
 | Frontend | React + TypeScript, Vite, TanStack Router + Query, shadcn/ui, Tailwind v4 |
 | SDK      | `@hey-api/openapi-ts` — auto-generated from FastAPI OpenAPI          |
-| Testing  | pytest (backend), Playwright (E2E)                                   |
+| Testing  | pytest (backend), vitest (frontend unit), Playwright (E2E)            |
 | Infra    | Docker Compose, Traefik, Mailcatcher (dev SMTP), Sentry              |
 | Tooling  | uv, ruff, mypy (strict), biome, prek (pre-commit)                    |
 
@@ -150,6 +152,7 @@ scripts/                # generate-client.sh, test.sh, etc.
 
 - Start dev stack: `docker compose watch`
 - Backend tests: `bash scripts/test.sh` (or `pytest` inside `backend/`)
+- Frontend unit tests: `bun run test:unit` (vitest) in `frontend/`. Scoped to colocated `src/**/*.test.ts` — pure logic only, no stack or DB needed. Playwright specs live in `frontend/tests/` and are never collected by vitest.
 - E2E tests: `bun run test` (Playwright) in `frontend/`. **Always set `E2E_SKIP_DB_RESET=1`** unless a full dev-DB reset was explicitly requested — `frontend/tests/global.setup.ts` truncates and reseeds the shared dev database by default on every run.
 - Pre-commit (`prek` / biome / ruff / mypy) must pass before commit.
 - Required env vars before any deploy: `SECRET_KEY`, `POSTGRES_PASSWORD`, `FIRST_SUPERUSER_PASSWORD`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
