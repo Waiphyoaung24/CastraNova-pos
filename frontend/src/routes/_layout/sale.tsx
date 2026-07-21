@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ShoppingCart } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -6,13 +6,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   ApiError,
   CustomerOption,
+  PricingOverridePublic,
   SaleCreateRequest,
   SalePublic,
   SaleStaffPublic,
 } from "@/client"
+import { PricingOverridesService } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
+import { PriceOverrideDialog } from "@/components/pos/PriceOverrideDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
 import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -27,8 +30,12 @@ import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
 import {
   addScanToCart,
+  applyOverride,
   buildSaleRequest,
+  cartHasPendingOverride,
   type CartLine,
+  clearOverride,
+  type LineOverride,
   removeLine,
   setLineQuantity,
 } from "@/lib/sale-cart"
@@ -52,6 +59,7 @@ interface CheckoutPanelProps {
   /** Drives the button label: queued (offline) vs. completing vs. idle. */
   isPaused: boolean
   isPending: boolean
+  waitingForOverride: boolean
 }
 
 /**
@@ -68,6 +76,7 @@ function CheckoutPanel({
   onCheckout,
   isPaused,
   isPending,
+  waitingForOverride,
 }: CheckoutPanelProps) {
   return (
     <div className="space-y-4">
@@ -100,6 +109,11 @@ function CheckoutPanel({
             ? "Completing…"
             : "Complete sale"}
       </Button>
+      {waitingForOverride ? (
+        <p className="text-muted-foreground text-center text-sm">
+          Waiting for override approval
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -112,6 +126,8 @@ function Sale() {
   const [customerId, setCustomerId] = useState<string>("")
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
   const scanRef = useRef<ScanFieldHandle>(null)
+  const [overrideKey, setOverrideKey] = useState<string | null>(null)
+  const overrideLine = lines.find((l) => l.key === overrideKey) ?? null
 
   const { data: products } = useProductOptions({ activeOnly: true })
   const { data: customers } = useCustomerOptions()
@@ -173,12 +189,42 @@ function Sale() {
     },
   })
 
+  const handleOverrideCreated = useCallback(
+    (key: string, override: LineOverride) => {
+      setLines((prev) => applyOverride(prev, key, override))
+    },
+    [],
+  )
+
+  const handleOverrideDecided = useCallback(
+    (key: string, decided: PricingOverridePublic) => {
+      if (decided.state === "APPROVED") {
+        setLines((prev) =>
+          applyOverride(prev, key, {
+            id: decided.id,
+            state: decided.state,
+            requestedPriceThb: Number(decided.requested_price_thb),
+          }),
+        )
+        showSuccessToast("Override approved.")
+      } else if (decided.state === "REJECTED") {
+        setLines((prev) => clearOverride(prev, key))
+        showErrorToast("Override rejected — price reverted.")
+      }
+    },
+    [showSuccessToast, showErrorToast],
+  )
+
   // Gating on !isPending intentionally locks checkout while a sale is in flight
   // OR queued offline (isPaused keeps isPending true). This is the single-sale-
   // offline design: the spec only requires one queued sale surviving reload +
   // replay — multi-sale-offline cart-clearing is explicitly out of scope.
+  const waitingForOverride = cartHasPendingOverride(lines)
   const canCheckout =
-    lines.length > 0 && customerId !== "" && !mutation.isPending
+    lines.length > 0 &&
+    customerId !== "" &&
+    !mutation.isPending &&
+    !waitingForOverride
 
   const handleCheckout = useCallback(() => {
     if (!canCheckout) return
@@ -250,7 +296,28 @@ function Sale() {
             }
             onRemove={(key) => setLines((prev) => removeLine(prev, key))}
             saleResult={saleResult}
+            onPriceClick={setOverrideKey}
           />
+          <PriceOverrideDialog
+            line={overrideLine}
+            onOpenChange={(open) => {
+              if (!open) setOverrideKey(null)
+            }}
+            onCreated={handleOverrideCreated}
+            targetKind="SALE_LINE"
+          />
+          {lines
+            .filter((l) => l.override?.state === "PENDING")
+            .map((l) =>
+              l.override ? (
+                <PendingOverrideWatcher
+                  key={l.override.id}
+                  overrideId={l.override.id}
+                  lineKey={l.key}
+                  onDecided={handleOverrideDecided}
+                />
+              ) : null,
+            )}
         </div>
 
         {/* Right pane (desktop): customer + checkout */}
@@ -263,6 +330,7 @@ function Sale() {
             onCheckout={handleCheckout}
             isPaused={mutation.isPaused}
             isPending={mutation.isPending}
+            waitingForOverride={waitingForOverride}
           />
         </div>
       </div>
@@ -279,8 +347,40 @@ function Sale() {
           onCheckout={handleCheckout}
           isPaused={mutation.isPaused}
           isPending={mutation.isPending}
+          waitingForOverride={waitingForOverride}
         />
       </div>
     </div>
   )
+}
+
+/**
+ * Polls one PENDING override until the admin decides it (FR-010). One instance
+ * is rendered per pending line — a component per query keeps hooks out of
+ * loops. Unmounts once the decision is applied (the line stops being PENDING).
+ */
+function PendingOverrideWatcher({
+  overrideId,
+  lineKey,
+  onDecided,
+}: {
+  overrideId: string
+  lineKey: string
+  onDecided: (key: string, decided: PricingOverridePublic) => void
+}) {
+  const { data } = useQuery({
+    queryKey: ["pricing-override", overrideId],
+    queryFn: () => PricingOverridesService.getPricingOverride({ overrideId }),
+    // v5 function form — keep polling every 4s until a decision lands.
+    refetchInterval: (query) =>
+      query.state.data === undefined || query.state.data.state === "PENDING"
+        ? 4_000
+        : false,
+  })
+
+  useEffect(() => {
+    if (data && data.state !== "PENDING") onDecided(lineKey, data)
+  }, [data, lineKey, onDecided])
+
+  return null
 }
