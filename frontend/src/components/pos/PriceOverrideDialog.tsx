@@ -100,7 +100,7 @@ export function PriceOverrideDialog({
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            Current price: {line ? formatThb(line.unitPriceThb) : ""}. Large
+            List price: {line ? formatThb(line.unitPriceThb) : ""}. Large
             changes are sent to an admin for approval.
           </p>
           <div className="space-y-2">
@@ -117,7 +117,7 @@ export function PriceOverrideDialog({
               className="text-muted-foreground min-h-5 text-sm"
             >
               {pct !== null
-                ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}% vs. current price`
+                ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}% vs. list price`
                 : ""}
             </p>
           </div>

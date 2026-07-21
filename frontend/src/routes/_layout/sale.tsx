@@ -167,6 +167,7 @@ function Sale() {
           "total_cogs_thb" in data ? data.total_cogs_thb : undefined,
       })
       setLines([])
+      setOverrideKey(null)
       showSuccessToast("Sale completed.")
       // Return focus to the scan field so the next sale can begin immediately.
       scanRef.current?.focus()
@@ -368,7 +369,7 @@ function PendingOverrideWatcher({
   lineKey: string
   onDecided: (key: string, decided: PricingOverridePublic) => void
 }) {
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ["pricing-override", overrideId],
     queryFn: () => PricingOverridesService.getPricingOverride({ overrideId }),
     // v5 function form — keep polling every 4s until a decision lands.
@@ -388,5 +389,12 @@ function PendingOverrideWatcher({
     if (data && data.state !== "PENDING") onDecidedRef.current(lineKey, data)
   }, [data, lineKey])
 
+  if (isError) {
+    return (
+      <p aria-live="polite" className="text-muted-foreground text-sm">
+        Couldn't check approval status — retrying…
+      </p>
+    )
+  }
   return null
 }

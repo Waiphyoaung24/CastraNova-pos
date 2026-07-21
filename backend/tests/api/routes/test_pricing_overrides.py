@@ -3,10 +3,10 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session
+from tests.utils.user import authentication_token_from_email_with_role
 
 from app import crud
 from app.models import ProductCreate, TrackingMode, UserRole
-from tests.utils.user import authentication_token_from_email_with_role
 
 
 def _seed_product(db: Session) -> uuid.UUID:
@@ -172,6 +172,7 @@ def test_get_pricing_override_as_admin(
     client: TestClient,
     staff_token_headers: dict[str, str],
     superuser_token_headers: dict[str, str],
+    bkk_admin_token_headers: dict[str, str],
     db: Session,
 ) -> None:
     pid = _seed_product(db)
@@ -183,6 +184,13 @@ def test_get_pricing_override_as_admin(
     r = client.get(
         f"/api/v1/pricing-overrides/{created['id']}",
         headers=superuser_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "PENDING"
+
+    r = client.get(
+        f"/api/v1/pricing-overrides/{created['id']}",
+        headers=bkk_admin_token_headers,
     )
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "PENDING"

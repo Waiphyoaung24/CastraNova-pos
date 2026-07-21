@@ -106,7 +106,7 @@ export function ScanCart({
                       type="button"
                       variant="ghost"
                       className="num h-auto px-2 py-1 underline decoration-dotted underline-offset-4"
-                      aria-label={`Change price of ${code}`}
+                      aria-label={`Change price of ${code}, ${formatThb(lineUnitPriceThb(line))}`}
                       onClick={() => onPriceClick(line.key)}
                     >
                       {formatThb(lineUnitPriceThb(line))}
