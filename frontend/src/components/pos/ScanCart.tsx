@@ -1,5 +1,6 @@
 import { Minus, Plus, ScanLine, Trash2 } from "lucide-react"
 import { EmptyState } from "@/components/EmptyState"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -9,7 +10,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { type CartLine, cartSubtotalThb } from "@/lib/sale-cart"
+import {
+  type CartLine,
+  cartSubtotalThb,
+  lineUnitPriceThb,
+} from "@/lib/sale-cart"
 
 /**
  * Post-sale totals from the backend (authoritative). COGS/margin are admin-only.
@@ -29,6 +34,8 @@ interface ScanCartProps {
   onRemove: (key: string) => void
   /** Post-sale totals; enables the COGS/margin region for admins. */
   saleResult?: SaleResultSummary
+  /** When set, the price cell becomes a tap target to request an override. */
+  onPriceClick?: (key: string) => void
 }
 
 /**
@@ -36,7 +43,7 @@ interface ScanCartProps {
  * (SDK total). Strings are parsed here at the boundary; an unparseable value
  * surfaces loudly as "฿NaN" rather than silently corrupting arithmetic.
  */
-function formatThb(value: number | string): string {
+export function formatThb(value: number | string): string {
   const n = typeof value === "string" ? Number(value) : value
   return `฿${n.toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -54,6 +61,7 @@ export function ScanCart({
   onQuantityChange,
   onRemove,
   saleResult,
+  onPriceClick,
 }: ScanCartProps) {
   const subtotal = cartSubtotalThb(lines)
   const showCogs =
@@ -93,7 +101,28 @@ export function ScanCart({
                   {line.lineKind}
                 </TableCell>
                 <TableCell className="num text-right">
-                  {formatThb(line.unitPriceThb)}
+                  {onPriceClick ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="num h-auto px-2 py-1 underline decoration-dotted underline-offset-4"
+                      aria-label={`Change price of ${code}`}
+                      onClick={() => onPriceClick(line.key)}
+                    >
+                      {formatThb(lineUnitPriceThb(line))}
+                    </Button>
+                  ) : (
+                    formatThb(lineUnitPriceThb(line))
+                  )}
+                  {line.override?.state === "PENDING" ? (
+                    <Badge
+                      variant="outline"
+                      className="mt-1 block w-fit border-amber-500 text-amber-600 dark:text-amber-400"
+                    >
+                      Pending approval ·{" "}
+                      {formatThb(line.override.requestedPriceThb)}
+                    </Badge>
+                  ) : null}
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-center gap-1">
@@ -132,7 +161,7 @@ export function ScanCart({
                   </div>
                 </TableCell>
                 <TableCell className="num text-right">
-                  {formatThb(line.unitPriceThb * line.quantity)}
+                  {formatThb(lineUnitPriceThb(line) * line.quantity)}
                 </TableCell>
                 <TableCell>
                   <Button
