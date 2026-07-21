@@ -3,10 +3,10 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session
-from tests.utils.user import authentication_token_from_email_with_role
 
 from app import crud
 from app.models import ProductCreate, TrackingMode, UserRole
+from tests.utils.user import authentication_token_from_email_with_role
 
 
 def _seed_product(db: Session) -> uuid.UUID:
