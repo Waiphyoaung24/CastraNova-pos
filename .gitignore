@@ -17,3 +17,4 @@ compose.local.yml
 preview/
 
 .env
+.worktrees/
