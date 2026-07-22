@@ -143,6 +143,90 @@ def test_connect_does_not_reap_another_users_codes(
     assert len(other_rows) == 1
 
 
+def test_connect_is_rate_limited_per_user(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    _user, headers = user_and_headers
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        codes = [
+            client.post(
+                f"{PREFIX}/notifications/telegram/connect", headers=headers
+            ).status_code
+            for _ in range(20)
+        ]
+        assert all(c == 200 for c in codes)
+        r21 = client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+        assert r21.status_code == 429
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+def test_one_users_limit_does_not_block_another_user(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    """The whole point of the custom key_func. Both users share a client IP
+    here, so if request.state were unpopulated when key_func ran they would
+    share the IP-fallback bucket and user B would 429."""
+    _user_a, headers_a = user_and_headers
+    email_b = random_email()
+    headers_b = authentication_token_from_email(client=client, email=email_b, db=db)
+
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        for _ in range(20):
+            client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers_a)
+        assert (
+            client.post(
+                f"{PREFIX}/notifications/telegram/connect", headers=headers_a
+            ).status_code
+            == 429
+        )
+
+        r_b = client.post(
+            f"{PREFIX}/notifications/telegram/connect", headers=headers_b
+        )
+        assert r_b.status_code == 200, r_b.text
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+def test_confirm_is_rate_limited_per_user(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _user, headers = user_and_headers
+    monkeypatch.setattr(
+        notify, "_post", lambda *a, **k: _resp(200, {"ok": True, "result": []})
+    )
+    notify.reset_telegram_updates_cache()
+    body = {"code": "deadbeef" * 4}
+
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        codes = [
+            client.post(
+                f"{PREFIX}/notifications/telegram/confirm", headers=headers, json=body
+            ).status_code
+            for _ in range(60)
+        ]
+        assert all(c == 200 for c in codes)
+        r61 = client.post(
+            f"{PREFIX}/notifications/telegram/confirm", headers=headers, json=body
+        )
+        assert r61.status_code == 429
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
 # --- confirm ---------------------------------------------------------------
 
 
