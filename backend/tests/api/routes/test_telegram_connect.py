@@ -104,6 +104,45 @@ def test_connect_code_only_uses_telegrams_allowed_start_parameter_charset(
     assert len(code) <= 64
 
 
+def test_connect_reaps_the_users_previous_codes(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    """Bounds the table at ~1 row per user without a scheduler. A superseded
+    code was already unusable the moment a fresh one was minted."""
+    user, headers = user_and_headers
+
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+    r3 = client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+    assert r3.status_code == 200, r3.text
+
+    rows = db.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.user_id == user.id)
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].code == r3.json()["code"]
+
+
+def test_connect_does_not_reap_another_users_codes(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    other_email = random_email()
+    other_headers = authentication_token_from_email(
+        client=client, email=other_email, db=db
+    )
+    other = crud.get_user_by_email(session=db, email=other_email)
+    assert other is not None
+
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=other_headers)
+    _user, headers = user_and_headers
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+
+    other_rows = db.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.user_id == other.id)
+    ).all()
+    assert len(other_rows) == 1
+
+
 # --- confirm ---------------------------------------------------------------
 
 
