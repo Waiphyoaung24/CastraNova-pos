@@ -1,4 +1,4 @@
-import { Bluetooth, ScanLine } from "lucide-react"
+import { ScanLine } from "lucide-react"
 import {
   forwardRef,
   type ReactNode,
@@ -12,7 +12,6 @@ import {
 import { CameraScanFallback } from "@/components/CameraScanFallback"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useBluetoothScanner } from "@/hooks/useScannerConfig"
 
 export interface ScanFieldHandle {
   focus: () => void
@@ -34,9 +33,6 @@ interface ScanFieldProps {
   onValueChange?: (value: string) => void
   /** Clear and refocus the field after each scan (rapid-scan flows). */
   clearOnScan?: boolean
-  /** Override the device config: allow the on-screen keyboard. Defaults to
-   * "no Bluetooth scanner connected" from {@link useBluetoothScanner}. */
-  allowKeyboard?: boolean
   /** Renders a submit button with this label (e.g. "Search"). */
   submitLabel?: string
   /** Show the "Scan with camera" fallback. Default true. */
@@ -45,8 +41,6 @@ interface ScanFieldProps {
   /** Optional status node rendered below (callers wire their own aria-live). */
   status?: ReactNode
   disabled?: boolean
-  /** Show the device scanner config toggle. Default true. */
-  showConfig?: boolean
 }
 
 /**
@@ -67,13 +61,11 @@ export const ScanField = forwardRef<ScanFieldHandle, ScanFieldProps>(
       value,
       onValueChange,
       clearOnScan = false,
-      allowKeyboard,
       submitLabel,
       camera = true,
       autoFocus = true,
       status,
       disabled = false,
-      showConfig = true,
     },
     ref,
   ) {
@@ -81,13 +73,9 @@ export const ScanField = forwardRef<ScanFieldHandle, ScanFieldProps>(
     const generatedId = useId()
     const inputId = id ?? generatedId
     const [internal, setInternal] = useState("")
-    const [bluetoothConnected] = useBluetoothScanner()
 
     const isControlled = value !== undefined
     const current = isControlled ? value : internal
-    // When a wedge is paired, suppress the soft keyboard so it doesn't pop on
-    // tablets; physical typing and the wedge still work.
-    const keyboardAllowed = allowKeyboard ?? !bluetoothConnected
 
     useImperativeHandle(ref, () => ({
       focus: () => inputRef.current?.focus(),
@@ -134,7 +122,6 @@ export const ScanField = forwardRef<ScanFieldHandle, ScanFieldProps>(
             ref={inputRef}
             id={inputId}
             type="text"
-            inputMode={keyboardAllowed ? "text" : "none"}
             autoComplete="off"
             autoFocus={autoFocus}
             aria-label={ariaLabel ?? "Scan barcode"}
@@ -162,10 +149,9 @@ export const ScanField = forwardRef<ScanFieldHandle, ScanFieldProps>(
           ) : null}
         </div>
 
-        {camera || showConfig ? (
+        {camera ? (
           <div className="flex flex-wrap items-center gap-3">
-            {camera ? <CameraScanFallback onScan={handleCameraScan} /> : null}
-            {showConfig ? <ScannerConfigToggle /> : null}
+            <CameraScanFallback onScan={handleCameraScan} />
           </div>
         ) : null}
 
@@ -174,25 +160,3 @@ export const ScanField = forwardRef<ScanFieldHandle, ScanFieldProps>(
     )
   },
 )
-
-/** Device-local toggle: "is a Bluetooth scanner paired to this station?". */
-function ScannerConfigToggle() {
-  const [connected, setConnected] = useBluetoothScanner()
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      aria-pressed={connected}
-      onClick={() => setConnected(!connected)}
-      className="text-muted-foreground"
-      title="Toggle whether a Bluetooth/HID scanner is paired to this device"
-    >
-      <Bluetooth
-        className={connected ? "size-4 text-primary" : "size-4"}
-        aria-hidden="true"
-      />
-      Bluetooth scanner: {connected ? "On" : "Off"}
-    </Button>
-  )
-}
