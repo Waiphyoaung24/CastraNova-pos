@@ -1101,21 +1101,24 @@ def consume_quantity_fifo(
         )
         remaining -= take
 
-    # FR-016 low-stock crossing: flag a FRESH downward crossing below the per-SKU
-    # threshold (was at/above before, now below). Read-only product fetch + a set
-    # insert — no new locks, no change to FIFO/409 semantics. The route pops these
-    # post-commit and dispatches a background alert.
+    # FR-016 low-stock: flag any consumption that leaves on-hand below the
+    # per-SKU threshold, not just the first crossing -- quantity_needed > 0 is
+    # enforced above, so every call here is a real decrease, and each one that
+    # ends below threshold is its own low-stock fact worth alerting on. Read-only
+    # product fetch + a set insert — no new locks, no change to FIFO/409
+    # semantics. The route pops these post-commit and dispatches a background
+    # alert.
     after = total_available - quantity_needed
     product = session.get(Product, product_id)
     threshold = product.default_min_stock_level if product else None
-    if threshold is not None and total_available >= threshold and after < threshold:
+    if threshold is not None and after < threshold:
         session.info.setdefault("low_stock_crossed", set()).add(product_id)
 
     return cost_lines
 
 
 def pop_low_stock_crossed(session: Session) -> set[uuid.UUID]:
-    """Return and clear the product_ids flagged as crossing below their low-stock
+    """Return and clear the product_ids flagged as ending below their low-stock
     threshold during this session's consumption (FR-016)."""
     crossed: set[uuid.UUID] = session.info.get("low_stock_crossed", set())
     session.info["low_stock_crossed"] = set()
