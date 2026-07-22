@@ -108,6 +108,10 @@ def test_connect_code_only_uses_telegrams_allowed_start_parameter_charset(
 
 
 def _stub_updates(monkeypatch: pytest.MonkeyPatch, *updates: dict[str, Any]) -> None:
+    # confirm_telegram calls get_telegram_updates_cached(), which sits on a
+    # shared, short-TTL cache -- reset it so this stub's result isn't shadowed
+    # by a still-fresh entry left over from an earlier test in the same run.
+    notify.reset_telegram_updates_cache()
     monkeypatch.setattr(notify, "get_telegram_updates", lambda: list(updates))
 
 

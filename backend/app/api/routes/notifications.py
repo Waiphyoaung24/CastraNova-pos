@@ -76,7 +76,7 @@ def confirm_telegram(
     requiring an explicit "I've done it" click."""
     match = None
     try:
-        for update in notify.get_telegram_updates():
+        for update in notify.get_telegram_updates_cached():
             parsed = notify.parse_start_code(update)
             if parsed is not None and parsed[2] == payload.code:
                 match = parsed
