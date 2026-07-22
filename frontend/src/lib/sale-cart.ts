@@ -1,4 +1,8 @@
-import type { OverrideState, SaleCreateRequest, SaleLineInput } from "@/client/types.gen"
+import type {
+  OverrideState,
+  SaleCreateRequest,
+  SaleLineInput,
+} from "@/client/types.gen"
 import type { ScanLookupResult } from "@/hooks/useScanLookup"
 
 // ---------------------------------------------------------------------------
@@ -140,7 +144,9 @@ export function removeLine(lines: CartLine[], key: string): CartLine[] {
 
 /** AUTO_APPROVED / APPROVED change the effective price; PENDING / REJECTED don't. */
 function overrideActive(o: LineOverride | undefined): o is LineOverride {
-  return o !== undefined && (o.state === "AUTO_APPROVED" || o.state === "APPROVED")
+  return (
+    o !== undefined && (o.state === "AUTO_APPROVED" || o.state === "APPROVED")
+  )
 }
 
 /** Set/replace the override on the line with `key`; unknown key returns `lines`. */

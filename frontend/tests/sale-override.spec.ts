@@ -183,6 +183,84 @@ test.describe("Sale price override (FR-010)", () => {
     await expect(page.getByText("Sale completed.")).toBeVisible()
   })
 
+  test("two pending overrides poll and resolve independently", async ({
+    page,
+  }) => {
+    const a = await seedSellablePart()
+    const b = await seedSellablePart()
+    await startSale(page, a)
+    await scanCode(page, b.sku)
+    await expect(
+      page.getByRole("cell", { name: b.sku, exact: true }),
+    ).toBeVisible()
+
+    await requestOverride(page, a.sku, "900", "bulk discount")
+    await expect(page.getByText(/Pending approval/)).toBeVisible()
+    await requestOverride(page, b.sku, "900", "bulk discount")
+    await expect(page.getByText(/Pending approval/)).toHaveCount(2)
+
+    // Decide in the opposite order of creation: approve b first.
+    const aId = await pendingOverrideIdFor(a.productId)
+    const bId = await pendingOverrideIdFor(b.productId)
+    await PricingOverridesService.decidePricingOverride({
+      overrideId: bId,
+      requestBody: { decision: "APPROVED" },
+    })
+    await expect(
+      page.getByRole("button", { name: `Change price of ${b.sku}` }),
+    ).toHaveText("฿900.00", { timeout: 15_000 })
+    // a's watcher is untouched: still pending, checkout still gated.
+    await expect(page.getByText(/Pending approval/)).toHaveCount(1)
+    await expect(
+      page.getByRole("button", { name: "Complete sale" }),
+    ).toBeDisabled()
+
+    await PricingOverridesService.decidePricingOverride({
+      overrideId: aId,
+      requestBody: { decision: "REJECTED" },
+    })
+    await expect(
+      page.getByText("Override rejected — price reverted."),
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.getByRole("button", { name: `Change price of ${a.sku}` }),
+    ).toHaveText("฿1,800.00")
+    await expect(page.getByText(/Pending approval/)).toHaveCount(0)
+    await expect(
+      page.getByRole("button", { name: "Complete sale" }),
+    ).toBeEnabled()
+  })
+
+  test("price is not tappable while an override is pending (no duplicate requests)", async ({
+    page,
+  }) => {
+    const seeded = await seedSellablePart()
+    await startSale(page, seeded)
+
+    await requestOverride(page, seeded.sku, "900", "bulk discount")
+    await expect(page.getByText(/Pending approval/)).toBeVisible()
+
+    // The price cell reverts to plain text while PENDING — a second request
+    // (which would orphan the first in the admin queue) can't start.
+    await expect(
+      page.getByRole("button", { name: `Change price of ${seeded.sku}` }),
+    ).toHaveCount(0)
+
+    // Exactly one request reached the queue; reject it to clean up.
+    const overrideId = await pendingOverrideIdFor(seeded.productId)
+    const res = await PricingOverridesService.listPricingOverrides({
+      state: "PENDING",
+      limit: 100,
+    })
+    expect(
+      res.data.filter((o) => o.product_id === seeded.productId),
+    ).toHaveLength(1)
+    await PricingOverridesService.decidePricingOverride({
+      overrideId,
+      requestBody: { decision: "REJECTED" },
+    })
+  })
+
   test("over threshold: rejection reverts to retail and unlocks checkout", async ({
     page,
   }) => {

@@ -1,7 +1,11 @@
 import { useMutation } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 
-import { type OverrideTargetKind, PricingOverridesService } from "@/client"
+import {
+  type ApiError,
+  type OverrideTargetKind,
+  PricingOverridesService,
+} from "@/client"
 import { formatThb } from "@/components/pos/ScanCart"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,6 +20,7 @@ import { Label } from "@/components/ui/label"
 import useCustomToast from "@/hooks/useCustomToast"
 import { canSubmitOverride, deviationPct } from "@/lib/pricing-overrides"
 import type { CartLine, LineOverride } from "@/lib/sale-cart"
+import { handleError } from "@/utils"
 
 interface PriceOverrideDialogProps {
   /** The cart line being repriced; null keeps the dialog closed. */
@@ -75,8 +80,10 @@ export function PriceOverrideDialog({
       )
       onOpenChange(false)
     },
-    onError: () =>
-      showErrorToast("Could not request the price change. Please try again."),
+    // Surface the server reason (e.g. "Product not found", a 422 bound) — these
+    // are user-actionable and retrying will never clear them (same rationale as
+    // the sale mutation's onError).
+    onError: (err: ApiError) => handleError.call(showErrorToast, err),
   })
 
   const parsed = Number(price)

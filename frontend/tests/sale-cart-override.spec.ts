@@ -40,7 +40,10 @@ function unitLine(key: string, price: number): CartLine {
   }
 }
 
-function override(state: OverrideState, requestedPriceThb = 1750): LineOverride {
+function override(
+  state: OverrideState,
+  requestedPriceThb = 1750,
+): LineOverride {
   return { id: `ovr-${state}`, state, requestedPriceThb }
 }
 
@@ -131,9 +134,9 @@ test("cartHasPendingOverride is true only while a PENDING override exists", () =
     "APPROVED",
     "REJECTED",
   ] as OverrideState[]) {
-    expect(cartHasPendingOverride(applyOverride(base, "b", override(state)))).toBe(
-      false,
-    )
+    expect(
+      cartHasPendingOverride(applyOverride(base, "b", override(state))),
+    ).toBe(false)
   }
 })
 
@@ -169,6 +172,28 @@ test("buildSaleRequest still sends no price fields (backend authoritative)", () 
   })
 })
 
+test("buildSaleRequest maps mixed override states per line in one call", () => {
+  let lines = [
+    partLine("a", 1800),
+    partLine("b", 500),
+    unitLine("c", 12000),
+    partLine("d", 900),
+    partLine("e", 700),
+  ]
+  lines = applyOverride(lines, "a", override("AUTO_APPROVED", 1750))
+  lines = applyOverride(lines, "b", override("PENDING", 450))
+  lines = applyOverride(lines, "c", override("APPROVED", 10000))
+  lines = applyOverride(lines, "d", override("REJECTED", 100))
+  const req = buildSaleRequest(lines, "cust-1", "idem-1")
+  expect(req.lines.map((l) => l.pricing_override_request_id)).toEqual([
+    "ovr-AUTO_APPROVED",
+    undefined,
+    "ovr-APPROVED",
+    undefined,
+    undefined,
+  ])
+})
+
 // --- quantity / removal preserve the override --------------------------------
 
 test("setLineQuantity preserves the override; quantity edits keep the approved unit price", () => {
@@ -183,7 +208,11 @@ test("setLineQuantity preserves the override; quantity edits keep the approved u
 })
 
 test("removeLine drops the line together with its override", () => {
-  const lines = applyOverride([partLine("a", 1800)], "a", override("PENDING", 900))
+  const lines = applyOverride(
+    [partLine("a", 1800)],
+    "a",
+    override("PENDING", 900),
+  )
   expect(removeLine(lines, "a")).toEqual([])
 })
 
@@ -197,11 +226,21 @@ test("deviationPct is signed: (1800 -> 1750) ~ -2.8, (12000 -> 10000) ~ -16.7", 
 })
 
 test("canSubmitOverride requires a positive price and a non-blank reason", () => {
-  expect(canSubmitOverride({ priceThb: "1750", reason: "matched quote" })).toBe(true)
-  expect(canSubmitOverride({ priceThb: "", reason: "matched quote" })).toBe(false)
-  expect(canSubmitOverride({ priceThb: "0", reason: "matched quote" })).toBe(false)
-  expect(canSubmitOverride({ priceThb: "-5", reason: "matched quote" })).toBe(false)
-  expect(canSubmitOverride({ priceThb: "abc", reason: "matched quote" })).toBe(false)
+  expect(canSubmitOverride({ priceThb: "1750", reason: "matched quote" })).toBe(
+    true,
+  )
+  expect(canSubmitOverride({ priceThb: "", reason: "matched quote" })).toBe(
+    false,
+  )
+  expect(canSubmitOverride({ priceThb: "0", reason: "matched quote" })).toBe(
+    false,
+  )
+  expect(canSubmitOverride({ priceThb: "-5", reason: "matched quote" })).toBe(
+    false,
+  )
+  expect(canSubmitOverride({ priceThb: "abc", reason: "matched quote" })).toBe(
+    false,
+  )
   expect(canSubmitOverride({ priceThb: "1750", reason: "" })).toBe(false)
   expect(canSubmitOverride({ priceThb: "1750", reason: "   " })).toBe(false)
 })

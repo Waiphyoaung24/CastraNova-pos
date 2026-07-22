@@ -101,7 +101,9 @@ export function ScanCart({
                   {line.lineKind}
                 </TableCell>
                 <TableCell className="num text-right">
-                  {onPriceClick ? (
+                  {/* While PENDING the price is plain text: re-requesting would
+                      orphan the first request in the admin queue. */}
+                  {onPriceClick && line.override?.state !== "PENDING" ? (
                     <Button
                       type="button"
                       variant="ghost"

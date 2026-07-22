@@ -32,8 +32,8 @@ import {
   addScanToCart,
   applyOverride,
   buildSaleRequest,
-  cartHasPendingOverride,
   type CartLine,
+  cartHasPendingOverride,
   clearOverride,
   type LineOverride,
   removeLine,
@@ -377,6 +377,9 @@ function PendingOverrideWatcher({
       query.state.data === undefined || query.state.data.state === "PENDING"
         ? 4_000
         : false,
+    // The 4s interval IS the retry mechanism: default retries would burst up
+    // to 4 requests per failed tick against PRICING_OVERRIDE_POLL_RATE_LIMIT.
+    retry: false,
   })
 
   // Toast fns from useCustomToast change identity every render, which would
