@@ -277,7 +277,7 @@ def test_configure_logging_suppresses_telegram_token_in_httpx_log(
     assert not any(TELEGRAM_TOKEN in m for m in messages)
 
 
-def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
+def test_get_telegram_updates_returns_result_and_requests_the_newest_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
@@ -293,10 +293,33 @@ def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
 
     assert result == [{"update_id": 1}]
     assert calls[0]["url"] == f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-    # Never acknowledging updates (no poller, no offset state) means the
-    # request must never carry an offset -- Telegram would stop re-sending
-    # already-seen updates the moment one is.
-    assert "offset" not in calls[0]["json"]
+    # A negative offset reads the newest window without acknowledging
+    # anything (no poller, no offset state) -- see _GET_UPDATES_WINDOW.
+    assert calls[0]["json"] == {"offset": -notify._GET_UPDATES_WINDOW}
+
+
+def test_get_telegram_updates_requests_the_newest_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a negative offset Telegram returns the OLDEST 100 unconfirmed
+    updates, so a fresh /start falls outside the window once the queue is busy
+    and connect silently fails until the backlog ages out at 24h."""
+    captured: dict[str, Any] = {}
+
+    def fake_post(
+        url: str,  # noqa: ARG001
+        *,
+        headers: dict[str, str],  # noqa: ARG001
+        json: dict[str, Any],
+    ) -> httpx.Response:
+        captured["json"] = json
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+
+    notify.get_telegram_updates()
+
+    assert captured["json"] == {"offset": -100}
 
 
 def test_get_telegram_updates_5xx_raises_retryable_single_raw_attempt(

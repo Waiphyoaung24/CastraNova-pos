@@ -53,6 +53,16 @@ TELEGRAM_GET_UPDATES_URL_TEMPLATE = "https://api.telegram.org/bot{token}/getUpda
 
 _TIMEOUT = 10.0
 
+# Read the NEWEST updates, not the oldest. With no offset, Telegram returns
+# "updates starting with the earliest unconfirmed update" capped at limit
+# (default and max 100). This module never confirms updates -- they leave the
+# queue only by ageing out at 24h -- so once >100 unconfirmed updates pile up,
+# a freshly-sent /start sits outside the window and connect silently fails.
+# A negative offset reads from the end of the queue instead. It confirms
+# nothing, so there is still no offset state to persist or coordinate across
+# workers, which is the property the no-offset design was protecting.
+_GET_UPDATES_WINDOW = 100
+
 logger = logging.getLogger(__name__)
 
 
@@ -182,16 +192,24 @@ def get_telegram_updates() -> list[dict[str, Any]]:
     acknowledging any of them.
 
     Deliberately never advances the update offset: Telegram retains
-    unacknowledged updates for ~24h and returns up to 100 per call, so this
-    trades an unbounded update backlog for having no poller and no offset
-    state to persist or coordinate across workers. Used to resolve enrollment
-    codes sent via ``/start <code>`` — see ``parse_start_code``.
+    unacknowledged updates for ~24h, so this trades an unbounded update
+    backlog for having no poller and no offset state to persist or coordinate
+    across workers.
+
+    Reads the newest ``_GET_UPDATES_WINDOW`` updates via a negative offset --
+    see that constant for why the default (oldest-first) window is a
+    correctness bug here. Used to resolve enrollment codes sent via
+    ``/start <code>`` -- see ``parse_start_code``.
     """
     if not settings.TELEGRAM_BOT_TOKEN:
         raise PermanentNotifyError("TELEGRAM_TOKEN not configured")
     url = TELEGRAM_GET_UPDATES_URL_TEMPLATE.format(token=settings.TELEGRAM_BOT_TOKEN)
     try:
-        response = _post(url, headers={"Content-Type": "application/json"}, json={})
+        response = _post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"offset": -_GET_UPDATES_WINDOW},
+        )
     except httpx.TransportError as exc:
         # Deliberately not chaining the URL/exc text — it carries the token.
         raise RetryableNotifyError("transport error") from exc
