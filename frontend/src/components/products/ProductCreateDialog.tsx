@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
-import { type ReactNode, useId, useState } from "react"
+import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
   type ProductCreate,
@@ -44,6 +44,7 @@ export function ProductCreateDialog() {
   const minStockId = useId()
   const trackingId = useId()
 
+  const contentRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [sku, setSku] = useState("")
   const [modelName, setModelName] = useState("")
@@ -105,7 +106,14 @@ export function ProductCreateDialog() {
           New product
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        ref={contentRef}
+        className="sm:max-w-lg"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          contentRef.current?.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>New product</DialogTitle>
         </DialogHeader>

@@ -53,8 +53,15 @@ test("brand and tracking filters narrow the products list", async ({
     trackingMode: "QUANTITY",
   })
 
-  const rowA = page.getByRole("row", { name: new RegExp(skuA) })
-  const rowB = page.getByRole("row", { name: new RegExp(skuB) })
+  // Catalog rows are role="button" with aria-label="Edit {model_name}" (not
+  // role="row" — that's overridden), and both products share a model name
+  // here, so filter by each SKU's visible cell text to tell them apart.
+  const rowA = page
+    .getByRole("button", { name: "Edit E2E Filter Target" })
+    .filter({ hasText: skuA })
+  const rowB = page
+    .getByRole("button", { name: "Edit E2E Filter Target" })
+    .filter({ hasText: skuB })
   await expect(rowA).toBeVisible()
   await expect(rowB).toBeVisible()
 

@@ -37,7 +37,12 @@ test("an admin can retire a product and bring it back", async ({ page }) => {
   await create.getByLabel("Repair price (THB)").fill("200")
   await create.getByRole("button", { name: "Create product" }).click()
 
-  const row = page.getByRole("row", { name: new RegExp(sku) })
+  // Catalog rows are role="button" with aria-label="Edit {model_name}" (not
+  // role="row" — that's overridden), and the label doesn't include the SKU,
+  // so filter by the SKU's visible cell text to pick out this run's row.
+  const row = page
+    .getByRole("button", { name: "Edit E2E Retire Target" })
+    .filter({ hasText: sku })
   await expect(row).toBeVisible()
   // A new product starts active.
   await expect(row.getByText("Active", { exact: true })).toBeVisible()
@@ -60,7 +65,7 @@ test("an admin can retire a product and bring it back", async ({ page }) => {
 
   // Retire it via the Edit dialog.
   await page.goto("/products")
-  await row.getByRole("button", { name: "Edit" }).click()
+  await row.click()
   const dialog = page.getByRole("dialog", { name: /Edit product/ })
   await expect(dialog).toBeVisible()
   await dialog.getByLabel("Active").uncheck()
@@ -83,7 +88,7 @@ test("an admin can retire a product and bring it back", async ({ page }) => {
 
   // Reactivating restores it — retiring is reversible.
   await page.goto("/products")
-  await row.getByRole("button", { name: "Edit" }).click()
+  await row.click()
   await expect(dialog).toBeVisible()
   await dialog.getByLabel("Active").check()
   await dialog.getByRole("button", { name: "Save" }).click()

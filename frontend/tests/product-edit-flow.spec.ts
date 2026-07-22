@@ -17,20 +17,28 @@ test("editing a product's retail price records it in price history", async ({
 }) => {
   await page.goto("/products")
 
-  // Create a throwaway product via the create form.
+  // Create a throwaway product via the create form, behind the "New product"
+  // dialog (ProductCreateDialog).
   const sku = `E2E-${rand()}`
-  await page.getByLabel("SKU").fill(sku)
-  await page.getByLabel("Model name").fill("E2E Edit Target")
-  await page.getByLabel("Retail price (THB)").fill("1000")
-  await page.getByLabel("Repair price (THB)").fill("200")
-  await page.getByRole("button", { name: "Create product" }).click()
+  await page.getByRole("button", { name: "New product" }).click()
+  const create = page.getByRole("dialog", { name: "New product" })
+  await create.getByLabel("SKU").fill(sku)
+  await create.getByLabel("Model name").fill("E2E Edit Target")
+  await create.getByLabel("Retail price (THB)").fill("1000")
+  await create.getByLabel("Repair price (THB)").fill("200")
+  await create.getByRole("button", { name: "Create product" }).click()
 
-  // Wait for the new row to appear in the catalog table.
-  const row = page.getByRole("row", { name: new RegExp(sku) })
+  // Wait for the new row to appear in the catalog table. Catalog rows are
+  // role="button" with aria-label="Edit {model_name}" (not role="row" —
+  // that's overridden), and the label doesn't include the SKU, so filter by
+  // the SKU's visible cell text to pick out this run's row.
+  const row = page
+    .getByRole("button", { name: "Edit E2E Edit Target" })
+    .filter({ hasText: sku })
   await expect(row).toBeVisible()
 
   // Open that product's Edit dialog and change the retail price.
-  await row.getByRole("button", { name: "Edit" }).click()
+  await row.click()
   const dialog = page.getByRole("dialog", { name: /Edit product/ })
   await expect(dialog).toBeVisible()
   await dialog.getByLabel("Retail price (THB)").fill("1500")
