@@ -5,6 +5,7 @@ real HTTP happens; tenacity's sleep is stubbed so retry tests run instantly.
 """
 
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -277,7 +278,7 @@ def test_configure_logging_suppresses_telegram_token_in_httpx_log(
     assert not any(TELEGRAM_TOKEN in m for m in messages)
 
 
-def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
+def test_get_telegram_updates_returns_result_and_requests_the_newest_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
@@ -293,10 +294,33 @@ def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
 
     assert result == [{"update_id": 1}]
     assert calls[0]["url"] == f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-    # Never acknowledging updates (no poller, no offset state) means the
-    # request must never carry an offset -- Telegram would stop re-sending
-    # already-seen updates the moment one is.
-    assert "offset" not in calls[0]["json"]
+    # A negative offset reads the newest window without acknowledging
+    # anything (no poller, no offset state) -- see _GET_UPDATES_WINDOW.
+    assert calls[0]["json"] == {"offset": -notify._GET_UPDATES_WINDOW}
+
+
+def test_get_telegram_updates_requests_the_newest_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a negative offset Telegram returns the OLDEST 100 unconfirmed
+    updates, so a fresh /start falls outside the window once the queue is busy
+    and connect silently fails until the backlog ages out at 24h."""
+    captured: dict[str, Any] = {}
+
+    def fake_post(
+        url: str,  # noqa: ARG001
+        *,
+        headers: dict[str, str],  # noqa: ARG001
+        json: dict[str, Any],
+    ) -> httpx.Response:
+        captured["json"] = json
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+
+    notify.get_telegram_updates()
+
+    assert captured["json"] == {"offset": -100}
 
 
 def test_get_telegram_updates_5xx_raises_retryable_single_raw_attempt(
@@ -366,6 +390,98 @@ def test_get_telegram_updates_never_logs_the_token_on_error(
         assert TELEGRAM_TOKEN not in str(exc)
     else:
         pytest.fail("expected RetryableNotifyError")
+
+
+def test_cached_updates_collapse_repeat_calls_within_the_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+        calls["n"] += 1
+        return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    first = notify.get_telegram_updates_cached()
+    second = notify.get_telegram_updates_cached()
+
+    assert calls["n"] == 1
+    assert first == second == [{"update_id": 1}]
+
+
+def test_cached_updates_refetch_after_the_ttl_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+        calls["n"] += 1
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(notify.time, "monotonic", lambda: clock["t"])
+
+    notify.get_telegram_updates_cached()
+    clock["t"] += notify.TELEGRAM_UPDATES_CACHE_TTL_SECONDS + 0.1
+    notify.get_telegram_updates_cached()
+
+    assert calls["n"] == 2
+
+
+def test_a_failed_fetch_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Caching a transient failure would freeze it for the whole TTL and stall
+    a legitimate connect."""
+    calls = {"n": 0}
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _resp(503)
+        return _resp(200, {"ok": True, "result": [{"update_id": 7}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates_cached()
+
+    assert notify.get_telegram_updates_cached() == [{"update_id": 7}]
+    assert calls["n"] == 2
+
+
+def test_concurrent_threads_collapse_to_one_outbound_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """confirm_telegram is a sync def, so FastAPI runs it in a threadpool --
+    several threads per worker race the same cache slot."""
+    import threading
+
+    calls = {"n": 0}
+    count_lock = threading.Lock()
+
+    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+        with count_lock:
+            calls["n"] += 1
+        time.sleep(0.05)  # widen the race window
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    threads = [
+        threading.Thread(target=notify.get_telegram_updates_cached) for _ in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert calls["n"] == 1
 
 
 def test_parse_start_code_extracts_chat_id_username_and_code() -> None:

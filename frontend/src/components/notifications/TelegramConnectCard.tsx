@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { NotificationsService } from "@/client"
+import { type ApiError, NotificationsService } from "@/client"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -81,6 +81,19 @@ export function TelegramConnectCard() {
     setPollStartedAt(null)
     setConfirmError(error)
   }, [confirmQuery.data])
+
+  // The confirm rate limit tripping is terminal for this attempt: more polling
+  // cannot help, and without this the card would spin silently to the
+  // 2-minute timeout. Narrow to 429 on purpose -- other transport errors are
+  // genuinely retryable and the poll should ride them out.
+  useEffect(() => {
+    const error = confirmQuery.error
+    if (!error) return
+    if ((error as ApiError).status !== 429) return
+    setActiveCode(null)
+    setPollStartedAt(null)
+    setConfirmError("Too many connection attempts. Wait a minute, then retry.")
+  }, [confirmQuery.error])
 
   // Give up client-side after POLL_TIMEOUT_MS so the card doesn't poll
   // forever if the user never taps Start.

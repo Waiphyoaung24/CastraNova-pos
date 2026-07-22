@@ -14,6 +14,8 @@ must never reach a log or an exception message.
 """
 
 import logging
+import threading
+import time
 import uuid
 from typing import Any
 
@@ -52,6 +54,16 @@ TELEGRAM_SEND_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_GET_UPDATES_URL_TEMPLATE = "https://api.telegram.org/bot{token}/getUpdates"
 
 _TIMEOUT = 10.0
+
+# Read the NEWEST updates, not the oldest. With no offset, Telegram returns
+# "updates starting with the earliest unconfirmed update" capped at limit
+# (default and max 100). This module never confirms updates -- they leave the
+# queue only by ageing out at 24h -- so once >100 unconfirmed updates pile up,
+# a freshly-sent /start sits outside the window and connect silently fails.
+# A negative offset reads from the end of the queue instead. It confirms
+# nothing, so there is still no offset state to persist or coordinate across
+# workers, which is the property the no-offset design was protecting.
+_GET_UPDATES_WINDOW = 100
 
 logger = logging.getLogger(__name__)
 
@@ -182,16 +194,24 @@ def get_telegram_updates() -> list[dict[str, Any]]:
     acknowledging any of them.
 
     Deliberately never advances the update offset: Telegram retains
-    unacknowledged updates for ~24h and returns up to 100 per call, so this
-    trades an unbounded update backlog for having no poller and no offset
-    state to persist or coordinate across workers. Used to resolve enrollment
-    codes sent via ``/start <code>`` — see ``parse_start_code``.
+    unacknowledged updates for ~24h, so this trades an unbounded update
+    backlog for having no poller and no offset state to persist or coordinate
+    across workers.
+
+    Reads the newest ``_GET_UPDATES_WINDOW`` updates via a negative offset --
+    see that constant for why the default (oldest-first) window is a
+    correctness bug here. Used to resolve enrollment codes sent via
+    ``/start <code>`` -- see ``parse_start_code``.
     """
     if not settings.TELEGRAM_BOT_TOKEN:
         raise PermanentNotifyError("TELEGRAM_TOKEN not configured")
     url = TELEGRAM_GET_UPDATES_URL_TEMPLATE.format(token=settings.TELEGRAM_BOT_TOKEN)
     try:
-        response = _post(url, headers={"Content-Type": "application/json"}, json={})
+        response = _post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"offset": -_GET_UPDATES_WINDOW},
+        )
     except httpx.TransportError as exc:
         # Deliberately not chaining the URL/exc text — it carries the token.
         raise RetryableNotifyError("transport error") from exc
@@ -202,6 +222,54 @@ def get_telegram_updates() -> list[dict[str, Any]]:
     _classify(response)
     body: dict[str, Any] = response.json()
     return list(body.get("result", []))
+
+
+# One client poll interval (TelegramConnectCard polls every 3s). Multiple
+# staff connecting at once would otherwise each drive their own outbound call
+# for byte-identical data: getUpdates returns the bot's whole pending queue,
+# not a per-user view.
+TELEGRAM_UPDATES_CACHE_TTL_SECONDS = 3.0
+
+_updates_cache_lock = threading.Lock()
+_updates_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
+def get_telegram_updates_cached() -> list[dict[str, Any]]:
+    """``get_telegram_updates`` behind a short TTL, collapsing concurrent
+    pollers into one outbound call.
+
+    The lock is required, not defensive: ``confirm_telegram`` is a sync ``def``
+    so FastAPI runs it in a threadpool, and several threads per worker race
+    this slot. It is deliberately held across the fetch -- that is what makes
+    concurrent callers share one request rather than stampede. The cost is
+    that a slow Telegram response blocks other threads in this worker for up
+    to ``_TIMEOUT``; acceptable because the caller is a retrying poll.
+
+    Failures are deliberately NOT cached: freezing a transient blip for the
+    whole TTL would stall a legitimate connect. An empty result IS cached --
+    "nothing yet" is the dominant response during a poll and is exactly the
+    case worth collapsing.
+
+    The cached payload holds chat ids and usernames. It stays in memory and
+    must never be logged (the same discipline as the bot token itself).
+    """
+    global _updates_cache
+    with _updates_cache_lock:
+        now = time.monotonic()
+        cached = _updates_cache
+        if cached is not None and now - cached[0] < TELEGRAM_UPDATES_CACHE_TTL_SECONDS:
+            return cached[1]
+        updates = get_telegram_updates()
+        _updates_cache = (now, updates)
+        return updates
+
+
+def reset_telegram_updates_cache() -> None:
+    """Drop the cached window. Test seam -- production never needs this, since
+    entries expire on their own."""
+    global _updates_cache
+    with _updates_cache_lock:
+        _updates_cache = None
 
 
 def parse_start_code(update: dict[str, Any]) -> tuple[str, str | None, str] | None:

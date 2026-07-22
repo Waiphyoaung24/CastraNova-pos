@@ -3269,7 +3269,22 @@ def create_telegram_connect_code(
     (https://core.telegram.org/bots/features#deep-linking), so token_urlsafe
     would be equally valid here; hex is just unambiguous in a URL. Do NOT
     switch to plain base64 -- its '+', '/' and '=' are outside that set.
+
+    Also reaps this user's prior codes -- see the inline comment for why that
+    is safe against a concurrent confirm.
     """
+    # Reap this user's prior codes in the same transaction, so the table stays
+    # bounded at ~1 row per user who has ever connected without introducing a
+    # scheduler (the stack has none). Consistent with the re-runnable contract
+    # above: a superseded code was already unusable the moment this call minted
+    # a fresh one. Deleting a consumed row is safe -- confirm looks codes up by
+    # (code, user_id) and returns PENDING for a miss, exactly as it already
+    # does for an expired or unknown code.
+    for stale in session.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.user_id == user_id)
+    ).all():
+        session.delete(stale)
+
     record = TelegramConnectCode(
         user_id=user_id,
         code=secrets.token_hex(16),

@@ -104,10 +104,137 @@ def test_connect_code_only_uses_telegrams_allowed_start_parameter_charset(
     assert len(code) <= 64
 
 
+def test_connect_reaps_the_users_previous_codes(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    """Bounds the table at ~1 row per user without a scheduler. A superseded
+    code was already unusable the moment a fresh one was minted."""
+    user, headers = user_and_headers
+
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+    r3 = client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+    assert r3.status_code == 200, r3.text
+
+    rows = db.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.user_id == user.id)
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].code == r3.json()["code"]
+
+
+def test_connect_does_not_reap_another_users_codes(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    other_email = random_email()
+    other_headers = authentication_token_from_email(
+        client=client, email=other_email, db=db
+    )
+    other = crud.get_user_by_email(session=db, email=other_email)
+    assert other is not None
+
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=other_headers)
+    _user, headers = user_and_headers
+    client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+
+    other_rows = db.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.user_id == other.id)
+    ).all()
+    assert len(other_rows) == 1
+
+
+def test_connect_is_rate_limited_per_user(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    _user, headers = user_and_headers
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        codes = [
+            client.post(
+                f"{PREFIX}/notifications/telegram/connect", headers=headers
+            ).status_code
+            for _ in range(20)
+        ]
+        assert all(c == 200 for c in codes)
+        r21 = client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers)
+        assert r21.status_code == 429
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+def test_one_users_limit_does_not_block_another_user(
+    client: TestClient, db: Session, user_and_headers: tuple[User, dict[str, str]]
+) -> None:
+    """The whole point of the custom key_func. Both users share a client IP
+    here, so if request.state were unpopulated when key_func ran they would
+    share the IP-fallback bucket and user B would 429."""
+    _user_a, headers_a = user_and_headers
+    email_b = random_email()
+    headers_b = authentication_token_from_email(client=client, email=email_b, db=db)
+
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        for _ in range(20):
+            client.post(f"{PREFIX}/notifications/telegram/connect", headers=headers_a)
+        assert (
+            client.post(
+                f"{PREFIX}/notifications/telegram/connect", headers=headers_a
+            ).status_code
+            == 429
+        )
+
+        r_b = client.post(
+            f"{PREFIX}/notifications/telegram/connect", headers=headers_b
+        )
+        assert r_b.status_code == 200, r_b.text
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+def test_confirm_is_rate_limited_per_user(
+    client: TestClient,
+    db: Session,
+    user_and_headers: tuple[User, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _user, headers = user_and_headers
+    monkeypatch.setattr(
+        notify, "_post", lambda *a, **k: _resp(200, {"ok": True, "result": []})
+    )
+    notify.reset_telegram_updates_cache()
+    body = {"code": "deadbeef" * 4}
+
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        codes = [
+            client.post(
+                f"{PREFIX}/notifications/telegram/confirm", headers=headers, json=body
+            ).status_code
+            for _ in range(60)
+        ]
+        assert all(c == 200 for c in codes)
+        r61 = client.post(
+            f"{PREFIX}/notifications/telegram/confirm", headers=headers, json=body
+        )
+        assert r61.status_code == 429
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
 # --- confirm ---------------------------------------------------------------
 
 
 def _stub_updates(monkeypatch: pytest.MonkeyPatch, *updates: dict[str, Any]) -> None:
+    # confirm_telegram calls get_telegram_updates_cached(), which sits on a
+    # shared, short-TTL cache -- reset it so this stub's result isn't shadowed
+    # by a still-fresh entry left over from an earlier test in the same run.
+    notify.reset_telegram_updates_cache()
     monkeypatch.setattr(notify, "get_telegram_updates", lambda: list(updates))
 
 
