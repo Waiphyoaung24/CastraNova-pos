@@ -1,9 +1,15 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, bind_rate_limit_identity
 from app.core.config import settings
-from app.core.limiter import TELEGRAM_TEST_RATE_LIMIT, limiter
+from app.core.limiter import (
+    TELEGRAM_CONFIRM_RATE_LIMIT,
+    TELEGRAM_CONNECT_RATE_LIMIT,
+    TELEGRAM_TEST_RATE_LIMIT,
+    limiter,
+    user_or_remote_address,
+)
 from app.models import (
     Message,
     NotificationPreferencePublic,
@@ -47,9 +53,17 @@ def update_notification_preferences(
     )
 
 
-@router.post("/telegram/connect", response_model=TelegramConnectResponse)
+@router.post(
+    "/telegram/connect",
+    response_model=TelegramConnectResponse,
+    dependencies=[Depends(bind_rate_limit_identity)],
+)
+@limiter.limit(TELEGRAM_CONNECT_RATE_LIMIT, key_func=user_or_remote_address)
 def connect_telegram(
-    *, session: SessionDep, current_user: CurrentUser
+    *,
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
+    session: SessionDep,
+    current_user: CurrentUser,
 ) -> TelegramConnectResponse:
     """Mint a one-time code + t.me deep link. Re-runnable: calling again
     mints a fresh code, so switching Telegram accounts is one more tap, not a
@@ -64,9 +78,15 @@ def connect_telegram(
     )
 
 
-@router.post("/telegram/confirm", response_model=TelegramConfirmResult)
+@router.post(
+    "/telegram/confirm",
+    response_model=TelegramConfirmResult,
+    dependencies=[Depends(bind_rate_limit_identity)],
+)
+@limiter.limit(TELEGRAM_CONFIRM_RATE_LIMIT, key_func=user_or_remote_address)
 def confirm_telegram(
     *,
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
     session: SessionDep,
     current_user: CurrentUser,
     payload: TelegramConfirmRequest,
@@ -76,7 +96,7 @@ def confirm_telegram(
     requiring an explicit "I've done it" click."""
     match = None
     try:
-        for update in notify.get_telegram_updates():
+        for update in notify.get_telegram_updates_cached():
             parsed = notify.parse_start_code(update)
             if parsed is not None and parsed[2] == payload.code:
                 match = parsed
@@ -132,7 +152,7 @@ def test_telegram(
         raise HTTPException(status_code=400, detail="Telegram is not connected")
     ok, detail = notify.send_telegram_test(
         to=current_user.telegram_chat_id,
-        text="CastraNova POS: this is a test notification.",
+        text="✅ CastraNova POS\nYour Telegram notifications are working.",
     )
     return TelegramTestResult(ok=ok, detail=detail)
 

@@ -1101,21 +1101,24 @@ def consume_quantity_fifo(
         )
         remaining -= take
 
-    # FR-016 low-stock crossing: flag a FRESH downward crossing below the per-SKU
-    # threshold (was at/above before, now below). Read-only product fetch + a set
-    # insert — no new locks, no change to FIFO/409 semantics. The route pops these
-    # post-commit and dispatches a background alert.
+    # FR-016 low-stock: flag any consumption that leaves on-hand below the
+    # per-SKU threshold, not just the first crossing -- quantity_needed > 0 is
+    # enforced above, so every call here is a real decrease, and each one that
+    # ends below threshold is its own low-stock fact worth alerting on. Read-only
+    # product fetch + a set insert — no new locks, no change to FIFO/409
+    # semantics. The route pops these post-commit and dispatches a background
+    # alert.
     after = total_available - quantity_needed
     product = session.get(Product, product_id)
     threshold = product.default_min_stock_level if product else None
-    if threshold is not None and total_available >= threshold and after < threshold:
+    if threshold is not None and after < threshold:
         session.info.setdefault("low_stock_crossed", set()).add(product_id)
 
     return cost_lines
 
 
 def pop_low_stock_crossed(session: Session) -> set[uuid.UUID]:
-    """Return and clear the product_ids flagged as crossing below their low-stock
+    """Return and clear the product_ids flagged as ending below their low-stock
     threshold during this session's consumption (FR-016)."""
     crossed: set[uuid.UUID] = session.info.get("low_stock_crossed", set())
     session.info["low_stock_crossed"] = set()
@@ -3269,7 +3272,27 @@ def create_telegram_connect_code(
     (https://core.telegram.org/bots/features#deep-linking), so token_urlsafe
     would be equally valid here; hex is just unambiguous in a URL. Do NOT
     switch to plain base64 -- its '+', '/' and '=' are outside that set.
+
+    Also reaps this user's prior codes -- see the inline comment for why that
+    is safe against a concurrent confirm.
     """
+    # Serialize concurrent mints for the same user on their User row: without
+    # this, two overlapping connects can each miss the other's not-yet-visible
+    # code and leave two live rows. Locking the parent (not the code rows)
+    # covers the no-prior-rows case, where there is nothing else to lock.
+    session.exec(select(User).where(User.id == user_id).with_for_update()).one()
+    # Reap this user's prior codes in the same transaction, so the table stays
+    # bounded at ~1 row per user who has ever connected without introducing a
+    # scheduler (the stack has none). Consistent with the re-runnable contract
+    # above: a superseded code was already unusable the moment this call minted
+    # a fresh one. Deleting a consumed row is safe -- confirm looks codes up by
+    # (code, user_id) and returns PENDING for a miss, exactly as it already
+    # does for an expired or unknown code.
+    for stale in session.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.user_id == user_id)
+    ).all():
+        session.delete(stale)
+
     record = TelegramConnectCode(
         user_id=user_id,
         code=secrets.token_hex(16),

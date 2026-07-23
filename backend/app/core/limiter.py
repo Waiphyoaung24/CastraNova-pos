@@ -1,3 +1,4 @@
+from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -23,3 +24,24 @@ PRICING_OVERRIDE_RATE_LIMIT = "30/hour"  # threshold-probe + queue-flood guard
 PRICING_OVERRIDE_POLL_RATE_LIMIT = "120/minute"
 SYNC_INGEST_RATE_LIMIT = "120/hour"  # above any legit 7-day-queue replay burst
 TELEGRAM_TEST_RATE_LIMIT = "10/hour"  # it's a real outbound send to Telegram's API
+
+
+def user_or_remote_address(request: Request) -> str:
+    """Per-user rate-limit key, falling back to the client IP.
+
+    The fallback is deliberate: if a route ever loses its
+    ``bind_rate_limit_identity`` dependency, the limit degrades to today's
+    IP-keyed behaviour rather than raising or -- worse -- silently keying every
+    request in the process to one shared bucket.
+    """
+    key: str | None = getattr(request.state, "rate_limit_key", None)
+    return key or get_remote_address(request)
+
+
+# Both keyed per user (see user_or_remote_address), not per IP. As with every
+# limit in this module the buckets are per-process and the container runs 4
+# workers, so real ceilings are up to 4x these numbers -- they are
+# runaway-loop guards, not precise quotas. What actually bounds outbound
+# Telegram traffic is the TTL cache in services/notify.py.
+TELEGRAM_CONNECT_RATE_LIMIT = "20/hour"  # a deliberate tap that renders a QR PNG
+TELEGRAM_CONFIRM_RATE_LIMIT = "60/minute"  # 3x the client's 20/min poll rate

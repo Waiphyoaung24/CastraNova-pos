@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 
 import { type ProductPublic, ProductsService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -98,6 +98,7 @@ export function EditProductDialog({
   product: ProductPublic
   onClose: () => void
 }) {
+  const contentRef = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState<ProductEditDraft>(() =>
     productToDraft(product),
   )
@@ -136,7 +137,14 @@ export function EditProductDialog({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        ref={contentRef}
+        className="sm:max-w-md"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          contentRef.current?.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Edit product — {product.sku}</DialogTitle>
           <DialogDescription>

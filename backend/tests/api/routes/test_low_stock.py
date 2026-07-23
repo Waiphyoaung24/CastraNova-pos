@@ -431,12 +431,15 @@ def test_ticket_close_crossing_threshold_fires_alert(
 # --- no false alerts ----------------------------------------------------------
 
 
-def test_already_below_threshold_no_new_alert(
+def test_already_below_threshold_still_alerts_on_further_decrease(
     client: TestClient,
     staff_token_headers: dict[str, str],
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A sale that decreases on-hand while already below the threshold must
+    still push -- not just the first crossing. Every further drop while low
+    is itself a new low-stock fact worth alerting on."""
     monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
     _opt_in_admin(db)
     product = _make_quantity_product(db, min_level=5)
@@ -449,7 +452,58 @@ def test_already_below_threshold_no_new_alert(
         json=_sale_part_body(product.sku, customer_id, 1),  # 4 -> 3, still below
     )
     assert r.status_code == 200, r.text
-    assert _low_stock_logs(db, product.id) == []
+    sent = [
+        log
+        for log in _low_stock_logs(db, product.id)
+        if log.status == NotificationStatus.SENT
+    ]
+    assert len(sent) >= 1
+    # Order-independent: the single 4 -> 3 sale is this product's only
+    # consumption, so every row must carry on_hand == 3.
+    assert {log.payload["on_hand"] for log in sent} == {3}
+
+
+def test_sequential_sales_each_push_while_below_threshold(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reported scenario: min stock 3. 3 -> 2 pushes. Then, still at min
+    stock 3, 2 -> 1 must ALSO push -- not just the first crossing below the
+    threshold."""
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    _opt_in_admin(db)
+    product = _make_quantity_product(db, min_level=3)
+    _stock_quantity(db, product, 3)
+    customer_id = _make_customer(db)
+
+    r1 = client.post(
+        f"{PREFIX}/sales",
+        headers=staff_token_headers,
+        json=_sale_part_body(product.sku, customer_id, 1),  # 3 -> 2, crosses below 3
+    )
+    assert r1.status_code == 200, r1.text
+
+    r2 = client.post(
+        f"{PREFIX}/sales",
+        headers=staff_token_headers,
+        json=_sale_part_body(product.sku, customer_id, 1),  # 2 -> 1, still below 3
+    )
+    assert r2.status_code == 200, r2.text
+
+    sent = [
+        log
+        for log in _low_stock_logs(db, product.id)
+        if log.status == NotificationStatus.SENT
+    ]
+    # Recipients accumulate across the module's session-scoped `db` fixture (see
+    # the other tests in this file), so the exact row COUNT isn't stable across
+    # runs -- assert both push events happened at all, matching the `>= 1`
+    # convention used elsewhere in this file rather than an exact count.
+    on_hand_seen = {log.payload["on_hand"] for log in sent}
+    assert 2 in on_hand_seen  # the first crossing, 3 -> 2
+    assert 1 in on_hand_seen  # the second push, 2 -> 1 -- this is the bug fix
 
 
 def test_stays_above_threshold_no_alert(

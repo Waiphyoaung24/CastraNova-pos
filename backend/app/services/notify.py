@@ -14,6 +14,8 @@ must never reach a log or an exception message.
 """
 
 import logging
+import threading
+import time
 import uuid
 from typing import Any
 
@@ -38,6 +40,7 @@ from app.models import (
     NotificationStatus,
     PricingOverrideRequest,
     Product,
+    Project,
     ProjectPull,
     ProjectPullLine,
     User,
@@ -51,6 +54,16 @@ TELEGRAM_SEND_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_GET_UPDATES_URL_TEMPLATE = "https://api.telegram.org/bot{token}/getUpdates"
 
 _TIMEOUT = 10.0
+
+# Read the NEWEST updates, not the oldest. With no offset, Telegram returns
+# "updates starting with the earliest unconfirmed update" capped at limit
+# (default and max 100). This module never confirms updates -- they leave the
+# queue only by ageing out at 24h -- so once >100 unconfirmed updates pile up,
+# a freshly-sent /start sits outside the window and connect silently fails.
+# A negative offset reads from the end of the queue instead. It confirms
+# nothing, so there is still no offset state to persist or coordinate across
+# workers, which is the property the no-offset design was protecting.
+_GET_UPDATES_WINDOW = 100
 
 logger = logging.getLogger(__name__)
 
@@ -181,16 +194,24 @@ def get_telegram_updates() -> list[dict[str, Any]]:
     acknowledging any of them.
 
     Deliberately never advances the update offset: Telegram retains
-    unacknowledged updates for ~24h and returns up to 100 per call, so this
-    trades an unbounded update backlog for having no poller and no offset
-    state to persist or coordinate across workers. Used to resolve enrollment
-    codes sent via ``/start <code>`` — see ``parse_start_code``.
+    unacknowledged updates for ~24h, so this trades an unbounded update
+    backlog for having no poller and no offset state to persist or coordinate
+    across workers.
+
+    Reads the newest ``_GET_UPDATES_WINDOW`` updates via a negative offset --
+    see that constant for why the default (oldest-first) window is a
+    correctness bug here. Used to resolve enrollment codes sent via
+    ``/start <code>`` -- see ``parse_start_code``.
     """
     if not settings.TELEGRAM_BOT_TOKEN:
         raise PermanentNotifyError("TELEGRAM_TOKEN not configured")
     url = TELEGRAM_GET_UPDATES_URL_TEMPLATE.format(token=settings.TELEGRAM_BOT_TOKEN)
     try:
-        response = _post(url, headers={"Content-Type": "application/json"}, json={})
+        response = _post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json={"offset": -_GET_UPDATES_WINDOW},
+        )
     except httpx.TransportError as exc:
         # Deliberately not chaining the URL/exc text — it carries the token.
         raise RetryableNotifyError("transport error") from exc
@@ -201,6 +222,54 @@ def get_telegram_updates() -> list[dict[str, Any]]:
     _classify(response)
     body: dict[str, Any] = response.json()
     return list(body.get("result", []))
+
+
+# One client poll interval (TelegramConnectCard polls every 3s). Multiple
+# staff connecting at once would otherwise each drive their own outbound call
+# for byte-identical data: getUpdates returns the bot's whole pending queue,
+# not a per-user view.
+TELEGRAM_UPDATES_CACHE_TTL_SECONDS = 3.0
+
+_updates_cache_lock = threading.Lock()
+_updates_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
+def get_telegram_updates_cached() -> list[dict[str, Any]]:
+    """``get_telegram_updates`` behind a short TTL, collapsing concurrent
+    pollers into one outbound call.
+
+    The lock is required, not defensive: ``confirm_telegram`` is a sync ``def``
+    so FastAPI runs it in a threadpool, and several threads per worker race
+    this slot. It is deliberately held across the fetch -- that is what makes
+    concurrent callers share one request rather than stampede. The cost is
+    that a slow Telegram response blocks other threads in this worker for up
+    to ``_TIMEOUT``; acceptable because the caller is a retrying poll.
+
+    Failures are deliberately NOT cached: freezing a transient blip for the
+    whole TTL would stall a legitimate connect. An empty result IS cached --
+    "nothing yet" is the dominant response during a poll and is exactly the
+    case worth collapsing.
+
+    The cached payload holds chat ids and usernames. It stays in memory and
+    must never be logged (the same discipline as the bot token itself).
+    """
+    global _updates_cache
+    with _updates_cache_lock:
+        now = time.monotonic()
+        cached = _updates_cache
+        if cached is not None and now - cached[0] < TELEGRAM_UPDATES_CACHE_TTL_SECONDS:
+            return cached[1]
+        updates = get_telegram_updates()
+        _updates_cache = (now, updates)
+        return updates
+
+
+def reset_telegram_updates_cache() -> None:
+    """Drop the cached window. Test seam -- production never needs this, since
+    entries expire on their own."""
+    global _updates_cache
+    with _updates_cache_lock:
+        _updates_cache = None
 
 
 def parse_start_code(update: dict[str, Any]) -> tuple[str, str | None, str] | None:
@@ -326,34 +395,88 @@ def notify(
     return logs
 
 
+def _clean(value: Any) -> str:
+    """A payload value as display text; None and blank strings become ""."""
+    return "" if value is None else str(value).strip()
+
+
+def _field(*candidates: Any) -> str:
+    """The first candidate carrying display text, else "unknown". This is what
+    guarantees a message never renders the string "None"."""
+    for candidate in candidates:
+        text = _clean(candidate)
+        if text:
+            return text
+    return "unknown"
+
+
+def _describe(name: Any, code: Any, fallback: Any) -> str:
+    """ "name (code)", degrading to whichever one is present, then to an id.
+
+    A row named in a payload can be deleted between the send and the render,
+    so every label needs a floor.
+    """
+    label, extra = _clean(name), _clean(code)
+    if label and extra:
+        return f"{label} ({extra})"
+    return _field(label, extra, fallback)
+
+
 def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> str:
+    """Render one plain-text message. Sent without parse_mode, so emoji and
+    newlines render but markup does not.
+
+    Ids are payload-only: they stay in the append-only log for audit, but a
+    UUID means nothing to someone reading this on their phone.
+    """
     if event_type == NotificationEvent.PULL_SHORT:
+        project = _describe(
+            payload.get("project_name"),
+            payload.get("project_code"),
+            payload.get("project_id"),
+        )
         return (
-            f"Project pull {payload.get('pull_id')} settled SHORT "
-            f"({payload.get('short_line_count')} line(s) short)."
+            "⚠️ Project pull came up short\n"
+            f"Project: {project}\n"
+            f"Lines short: {_field(payload.get('short_line_count'))}"
         )
     if event_type == NotificationEvent.PULL_FULFILLED:
-        return f"Project pull {payload.get('pull_id')} fulfilled."
+        project = _describe(
+            payload.get("project_name"),
+            payload.get("project_code"),
+            payload.get("project_id"),
+        )
+        return f"✅ Project pull fulfilled\nProject: {project}"
     if event_type == NotificationEvent.LOW_STOCK:
+        item = _describe(
+            payload.get("model_name"),
+            payload.get("sku"),
+            payload.get("product_id"),
+        )
         return (
-            f"Low stock: {payload.get('sku')} — {payload.get('on_hand')} left "
-            f"(min {payload.get('min_stock_level')})."
+            "📉 Low stock\n"
+            f"Item: {item}\n"
+            f"On hand: {_field(payload.get('on_hand'))} "
+            f"(minimum {_field(payload.get('min_stock_level'))})"
         )
     if event_type == NotificationEvent.OVERRIDE_PENDING:
         # deviation_pct is a percentage, not a raw price — safe to surface.
+        item = _describe(
+            payload.get("model_name"),
+            payload.get("sku"),
+            payload.get("override_id"),
+        )
         return (
-            f"Pricing override pending approval: {payload.get('sku')} "
-            f"({payload.get('deviation_pct')}% deviation). "
-            f"Request {payload.get('override_id')}."
+            "🔔 Pricing override needs approval\n"
+            f"Item: {item}\n"
+            f"Deviation: {_field(payload.get('deviation_pct'))}%"
         )
     # Never push a raw payload (may carry financial fields). Each new event must
     # add an explicit, safe template here.
     raise NotImplementedError(f"No render template for {event_type!r}")
 
 
-def notify_pull_short(
-    *, session: Session, pull: ProjectPull
-) -> list[NotificationLog]:
+def notify_pull_short(*, session: Session, pull: ProjectPull) -> list[NotificationLog]:
     """Notify every BKK_ADMIN of a SHORT project pull (FR-018, Flow D)."""
     recipients = list(
         session.exec(select(User).where(User.role == UserRole.BKK_ADMIN)).all()
@@ -362,9 +485,12 @@ def notify_pull_short(
         select(ProjectPullLine).where(ProjectPullLine.project_pull_id == pull.id)
     ).all()
     short_line_count = sum(1 for ln in lines if ln.line_state == LineState.SHORT)
+    project = session.get(Project, pull.project_id)
     payload: dict[str, Any] = {
         "pull_id": str(pull.id),
         "project_id": str(pull.project_id),
+        "project_name": project.name if project else None,
+        "project_code": project.code if project else None,
         "customer_id": str(pull.customer_id),
         "short_line_count": short_line_count,
     }
@@ -383,9 +509,12 @@ def notify_pull_fulfilled(
     recipients = list(
         session.exec(select(User).where(User.role == UserRole.BKK_ADMIN)).all()
     )
+    project = session.get(Project, pull.project_id)
     payload: dict[str, Any] = {
         "pull_id": str(pull.id),
         "project_id": str(pull.project_id),
+        "project_name": project.name if project else None,
+        "project_code": project.code if project else None,
         "customer_id": str(pull.customer_id),
     }
     return notify(
@@ -432,6 +561,7 @@ def notify_low_stock(
         payload: dict[str, Any] = {
             "product_id": str(product.id),
             "sku": product.sku,
+            "model_name": product.model_name,
             "on_hand": on_hand,
             "min_stock_level": threshold,
         }
@@ -467,6 +597,7 @@ def notify_override_pending(
     payload: dict[str, Any] = {
         "override_id": str(override.id),
         "sku": product.sku if product else None,
+        "model_name": product.model_name if product else None,
         "deviation_pct": str(override.deviation_pct),
     }
     return notify(

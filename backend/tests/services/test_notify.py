@@ -5,6 +5,8 @@ real HTTP happens; tenacity's sleep is stubbed so retry tests run instantly.
 """
 
 import logging
+import threading
+import time
 import uuid
 from typing import Any
 
@@ -125,7 +127,9 @@ def _opt_in(
 def test_send_line_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200)
 
@@ -172,7 +176,9 @@ def test_send_line_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_send_telegram_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200, {"ok": True})
 
@@ -273,12 +279,14 @@ def test_configure_logging_suppresses_telegram_token_in_httpx_log(
     assert not any(TELEGRAM_TOKEN in m for m in messages)
 
 
-def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
+def test_get_telegram_updates_returns_result_and_requests_the_newest_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
 
@@ -287,10 +295,9 @@ def test_get_telegram_updates_returns_result_and_never_sends_an_offset(
 
     assert result == [{"update_id": 1}]
     assert calls[0]["url"] == f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-    # Never acknowledging updates (no poller, no offset state) means the
-    # request must never carry an offset -- Telegram would stop re-sending
-    # already-seen updates the moment one is.
-    assert "offset" not in calls[0]["json"]
+    # A negative offset reads the newest window without acknowledging
+    # anything (no poller, no offset state) -- see _GET_UPDATES_WINDOW.
+    assert calls[0]["json"] == {"offset": -notify._GET_UPDATES_WINDOW}
 
 
 def test_get_telegram_updates_5xx_raises_retryable_single_raw_attempt(
@@ -362,6 +369,96 @@ def test_get_telegram_updates_never_logs_the_token_on_error(
         pytest.fail("expected RetryableNotifyError")
 
 
+def test_cached_updates_collapse_repeat_calls_within_the_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        calls["n"] += 1
+        return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    first = notify.get_telegram_updates_cached()
+    second = notify.get_telegram_updates_cached()
+
+    assert calls["n"] == 1
+    assert first == second == [{"update_id": 1}]
+
+
+def test_cached_updates_refetch_after_the_ttl_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        calls["n"] += 1
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr("app.services.notify.time.monotonic", lambda: clock["t"])
+
+    notify.get_telegram_updates_cached()
+    clock["t"] += notify.TELEGRAM_UPDATES_CACHE_TTL_SECONDS + 0.1
+    notify.get_telegram_updates_cached()
+
+    assert calls["n"] == 2
+
+
+def test_a_failed_fetch_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Caching a transient failure would freeze it for the whole TTL and stall
+    a legitimate connect."""
+    calls = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _resp(503)
+        return _resp(200, {"ok": True, "result": [{"update_id": 7}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates_cached()
+
+    assert notify.get_telegram_updates_cached() == [{"update_id": 7}]
+    assert calls["n"] == 2
+
+
+def test_concurrent_threads_collapse_to_one_outbound_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """confirm_telegram is a sync def, so FastAPI runs it in a threadpool --
+    several threads per worker race the same cache slot."""
+    calls = {"n": 0}
+    count_lock = threading.Lock()
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        with count_lock:
+            calls["n"] += 1
+        time.sleep(0.05)  # widen the race window
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    threads = [
+        threading.Thread(target=notify.get_telegram_updates_cached) for _ in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert calls["n"] == 1
+
+
 def test_parse_start_code_extracts_chat_id_username_and_code() -> None:
     update = {
         "update_id": 123456,
@@ -399,7 +496,9 @@ def test_parse_start_code_ignores_unrelated_messages(update: dict[str, Any]) -> 
 def test_send_viber_status_zero_success(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200, {"status": 0})
 
@@ -441,9 +540,7 @@ def test_notify_line_success_one_sent_log(
         recipients=[user],
         payload={"k": "v"},
     )
-    line_logs = [
-        log for log in logs if log.channel == NotificationChannel.LINE
-    ]
+    line_logs = [log for log in logs if log.channel == NotificationChannel.LINE]
     assert len(line_logs) == 1
     log = line_logs[0]
     assert log.status == NotificationStatus.SENT
@@ -491,7 +588,9 @@ def test_notify_opt_out_no_send_no_log(
     monkeypatch.setattr(notify, "_post", _recording_post(sent))
     user = _make_user(db)
     # explicit disabled LINE pref + no VIBER pref at all
-    _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT, enabled=False)
+    _opt_in(
+        db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT, enabled=False
+    )
 
     logs = notify.notify(
         session=db,
@@ -529,9 +628,7 @@ def test_notify_opted_in_but_no_address_failed_not_enrolled(
 def test_notify_one_log_per_attempted_recipient_channel(
     db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        notify, "_post", lambda *a, **k: _resp(200, {"status": 0})
-    )
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200, {"status": 0}))
     user = _make_user(db)
     _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
     _opt_in(db, user, NotificationChannel.VIBER, NotificationEvent.PULL_SHORT)
@@ -766,9 +863,7 @@ def test_notify_pull_short_targets_bkk_admins_with_pref(
     staff = _make_user(db, role=UserRole.YGN_STAFF)
     _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
 
-    customer = crud.create_customer(
-        session=db, customer_in=CustomerCreate(name="C")
-    )
+    customer = crud.create_customer(session=db, customer_in=CustomerCreate(name="C"))
     project = crud.create_project(
         session=db,
         project_in=ProjectCreate(
@@ -813,18 +908,11 @@ def test_notify_pull_short_targets_bkk_admins_with_pref(
     sample = next(log for log in logs if log.target_user_id == admin.id)
     assert sample.payload["short_line_count"] == 1
     assert sample.payload["pull_id"] == str(pull.id)
+    assert sample.payload["project_name"] == project.name
+    assert sample.payload["project_code"] == project.code
 
 
 # --- notify_pull_fulfilled helper (FR-018) ------------------------------------
-
-
-def test_render_text_pull_fulfilled_mentions_pull_id() -> None:
-    text = notify._render_text(
-        event_type=NotificationEvent.PULL_FULFILLED,
-        payload={"pull_id": "the-pull-id"},
-    )
-    assert "the-pull-id" in text
-    assert "fulfilled" in text.lower()
 
 
 def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
@@ -845,9 +933,7 @@ def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
     staff = _make_user(db, role=UserRole.YGN_STAFF)
     _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.PULL_FULFILLED)
 
-    customer = crud.create_customer(
-        session=db, customer_in=CustomerCreate(name="C")
-    )
+    customer = crud.create_customer(session=db, customer_in=CustomerCreate(name="C"))
     project = crud.create_project(
         session=db,
         project_in=ProjectCreate(
@@ -868,10 +954,218 @@ def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
     targets = {log.target_user_id for log in logs}
     assert admin.id in targets
     assert staff.id not in targets
-    assert all(
-        log.event_type == NotificationEvent.PULL_FULFILLED for log in logs
-    )
+    assert all(log.event_type == NotificationEvent.PULL_FULFILLED for log in logs)
     sample = next(log for log in logs if log.target_user_id == admin.id)
     assert sample.payload["pull_id"] == str(pull.id)
+    assert sample.payload["project_name"] == project.name
+    assert sample.payload["project_code"] == project.code
     # FR-018 requires the FULFILLED push carry NO financial fields.
     assert_no_financial_keys(sample.payload)
+
+
+# --- payload names (2026-07-22 friendlier messages) ---------------------------
+
+
+def test_notify_low_stock_payload_carries_model_name(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import crud
+    from app.models import ProductCreate, TrackingMode
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.LOW_STOCK)
+
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"NS-{uuid.uuid4().hex[:8]}",
+            model_name="12mm Copper Elbow",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="10.00",
+            repair_price_thb="2.00",
+            default_min_stock_level=10,
+        ),
+    )
+
+    logs = notify.notify_low_stock(session=db, product_ids=[product.id])
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["model_name"] == "12mm Copper Elbow"
+    assert sample.payload["sku"] == product.sku
+    assert_no_financial_keys(sample.payload)
+
+
+def test_notify_override_pending_payload_carries_model_name(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decimal import Decimal
+
+    from app import crud
+    from app.models import (
+        OverrideState,
+        OverrideTargetKind,
+        PricingOverrideRequest,
+        ProductCreate,
+        TrackingMode,
+    )
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.OVERRIDE_PENDING)
+
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"NS-{uuid.uuid4().hex[:8]}",
+            model_name="12mm Copper Elbow",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="10.00",
+            repair_price_thb="2.00",
+        ),
+    )
+    override = PricingOverrideRequest(
+        target_kind=OverrideTargetKind.SALE_LINE,
+        product_id=product.id,
+        default_price_thb=Decimal("10.00"),
+        requested_price_thb=Decimal("8.75"),
+        deviation_pct=Decimal("12.5"),
+        reason="customer discount",
+        state=OverrideState.PENDING,
+        created_by_user_id=admin.id,
+    )
+    db.add(override)
+    db.commit()
+    db.refresh(override)
+
+    logs = notify.notify_override_pending(session=db, override=override)
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["model_name"] == "12mm Copper Elbow"
+    assert sample.payload["sku"] == product.sku
+    assert_no_financial_keys(sample.payload)
+
+
+# --- message copy (2026-07-22 friendlier messages) ----------------------------
+
+
+def test_render_text_pull_short_is_labeled_lines() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.PULL_SHORT,
+        payload={
+            "pull_id": "the-pull-id",
+            "project_id": "the-project-id",
+            "project_name": "Riverside Tower",
+            "project_code": "PRJ-001",
+            "short_line_count": 2,
+        },
+    )
+    assert text == (
+        "⚠️ Project pull came up short\n"
+        "Project: Riverside Tower (PRJ-001)\n"
+        "Lines short: 2"
+    )
+    # ids are payload-only now
+    assert "the-pull-id" not in text
+
+
+def test_render_text_pull_fulfilled_names_the_project() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.PULL_FULFILLED,
+        payload={
+            "pull_id": "the-pull-id",
+            "project_id": "the-project-id",
+            "project_name": "Riverside Tower",
+            "project_code": "PRJ-001",
+        },
+    )
+    assert text == "✅ Project pull fulfilled\nProject: Riverside Tower (PRJ-001)"
+    assert "the-pull-id" not in text
+
+
+def test_render_text_low_stock_names_the_product() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.LOW_STOCK,
+        payload={
+            "product_id": "the-product-id",
+            "sku": "SKU-1234",
+            "model_name": "12mm Copper Elbow",
+            "on_hand": 3,
+            "min_stock_level": 10,
+        },
+    )
+    assert text == (
+        "📉 Low stock\nItem: 12mm Copper Elbow (SKU-1234)\nOn hand: 3 (minimum 10)"
+    )
+
+
+def test_render_text_override_pending_names_the_product() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.OVERRIDE_PENDING,
+        payload={
+            "override_id": "the-override-id",
+            "sku": "SKU-1234",
+            "model_name": "12mm Copper Elbow",
+            "deviation_pct": "12.5",
+        },
+    )
+    assert text == (
+        "🔔 Pricing override needs approval\n"
+        "Item: 12mm Copper Elbow (SKU-1234)\n"
+        "Deviation: 12.5%"
+    )
+    assert "the-override-id" not in text
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            NotificationEvent.PULL_SHORT,
+            {"project_id": "the-project-id", "short_line_count": 2},
+        ),
+        (NotificationEvent.PULL_FULFILLED, {"project_id": "the-project-id"}),
+        (
+            NotificationEvent.LOW_STOCK,
+            {"product_id": "the-product-id", "on_hand": 3, "min_stock_level": 10},
+        ),
+        (
+            NotificationEvent.OVERRIDE_PENDING,
+            {"override_id": "the-override-id", "deviation_pct": "12.5"},
+        ),
+    ],
+)
+def test_render_text_falls_back_to_id_when_row_is_gone(
+    event_type: NotificationEvent, payload: dict[str, object]
+) -> None:
+    """A deleted Project/Product leaves the name keys absent. The label must
+    degrade to the id and must never render the string "None"."""
+    text = notify._render_text(event_type=event_type, payload=payload)
+    assert "None" not in text
+    assert "unknown" not in text
+    fallback = (
+        payload.get("project_id")
+        or payload.get("product_id")
+        or payload.get("override_id")
+    )
+    assert str(fallback) in text
+
+
+def test_render_text_never_renders_none_for_missing_quantities() -> None:
+    """Every key absent — the last line of defence against "None" reaching a
+    user's phone."""
+    for event_type in (
+        NotificationEvent.PULL_SHORT,
+        NotificationEvent.PULL_FULFILLED,
+        NotificationEvent.LOW_STOCK,
+        NotificationEvent.OVERRIDE_PENDING,
+    ):
+        text = notify._render_text(event_type=event_type, payload={})
+        assert "None" not in text
+
+
+def test_render_text_still_rejects_an_unknown_event() -> None:
+    """Every new event must add an explicit, safe template — never a raw dump."""
+    with pytest.raises(NotImplementedError):
+        notify._render_text(
+            event_type="not-an-event",  # type: ignore[arg-type]
+            payload={"retail_price_thb": "999.00"},
+        )

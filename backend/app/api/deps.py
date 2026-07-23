@@ -2,7 +2,7 @@ from collections.abc import Generator
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
 from pydantic import ValidationError
@@ -83,3 +83,17 @@ def get_admin(current_user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(get_admin)]
+
+
+def bind_rate_limit_identity(request: Request, current_user: CurrentUser) -> None:
+    """Stash the authenticated user's id where the limiter's key_func can read
+    it (see ``core.limiter.user_or_remote_address``).
+
+    Needed because ``get_remote_address`` keys on the client IP, and staff at
+    one site share a public IP -- an IP-keyed limit sized for one user's poll
+    would 429 the second person to connect. slowapi's key_func only receives
+    the Request, hence the handoff through ``request.state``. FastAPI resolves
+    dependencies before invoking the endpoint that slowapi's decorator wraps,
+    so this always runs first.
+    """
+    request.state.rate_limit_key = str(current_user.id)
