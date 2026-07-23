@@ -15,6 +15,9 @@ test("opening the New product dialog does not autofocus Model name", async ({
   await page.getByRole("button", { name: "New product" }).click()
   const dialog = page.getByRole("dialog", { name: "New product" })
   await expect(dialog).toBeVisible()
+  // Positive half: focus must land on the dialog container itself, not
+  // merely "not the Model name field".
+  await expect(dialog).toBeFocused()
   await expect(dialog.getByLabel("Model name")).not.toBeFocused()
 })
 
@@ -43,5 +46,8 @@ test("opening the Edit product dialog does not autofocus Model name", async ({
   await row.click()
   const dialog = page.getByRole("dialog", { name: /Edit product/ })
   await expect(dialog).toBeVisible()
+  // Positive half: focus must land on the dialog container itself, not
+  // merely "not the Model name field".
+  await expect(dialog).toBeFocused()
   await expect(dialog.getByLabel("Model name")).not.toBeFocused()
 })

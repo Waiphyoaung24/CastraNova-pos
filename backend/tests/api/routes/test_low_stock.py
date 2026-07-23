@@ -458,7 +458,9 @@ def test_already_below_threshold_still_alerts_on_further_decrease(
         if log.status == NotificationStatus.SENT
     ]
     assert len(sent) >= 1
-    assert sent[0].payload["on_hand"] == 3
+    # Order-independent: the single 4 -> 3 sale is this product's only
+    # consumption, so every row must carry on_hand == 3.
+    assert {log.payload["on_hand"] for log in sent} == {3}
 
 
 def test_sequential_sales_each_push_while_below_threshold(

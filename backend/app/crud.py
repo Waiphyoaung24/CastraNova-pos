@@ -3276,6 +3276,11 @@ def create_telegram_connect_code(
     Also reaps this user's prior codes -- see the inline comment for why that
     is safe against a concurrent confirm.
     """
+    # Serialize concurrent mints for the same user on their User row: without
+    # this, two overlapping connects can each miss the other's not-yet-visible
+    # code and leave two live rows. Locking the parent (not the code rows)
+    # covers the no-prior-rows case, where there is nothing else to lock.
+    session.exec(select(User).where(User.id == user_id).with_for_update()).one()
     # Reap this user's prior codes in the same transaction, so the table stays
     # bounded at ~1 row per user who has ever connected without introducing a
     # scheduler (the stack has none). Consistent with the re-runnable contract

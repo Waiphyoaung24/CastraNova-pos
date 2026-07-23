@@ -5,6 +5,7 @@ real HTTP happens; tenacity's sleep is stubbed so retry tests run instantly.
 """
 
 import logging
+import threading
 import time
 import uuid
 from typing import Any
@@ -299,30 +300,6 @@ def test_get_telegram_updates_returns_result_and_requests_the_newest_window(
     assert calls[0]["json"] == {"offset": -notify._GET_UPDATES_WINDOW}
 
 
-def test_get_telegram_updates_requests_the_newest_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without a negative offset Telegram returns the OLDEST 100 unconfirmed
-    updates, so a fresh /start falls outside the window once the queue is busy
-    and connect silently fails until the backlog ages out at 24h."""
-    captured: dict[str, Any] = {}
-
-    def fake_post(
-        url: str,  # noqa: ARG001
-        *,
-        headers: dict[str, str],  # noqa: ARG001
-        json: dict[str, Any],
-    ) -> httpx.Response:
-        captured["json"] = json
-        return _resp(200, {"ok": True, "result": []})
-
-    monkeypatch.setattr(notify, "_post", fake_post)
-
-    notify.get_telegram_updates()
-
-    assert captured["json"] == {"offset": -100}
-
-
 def test_get_telegram_updates_5xx_raises_retryable_single_raw_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -397,7 +374,7 @@ def test_cached_updates_collapse_repeat_calls_within_the_ttl(
 ) -> None:
     calls = {"n": 0}
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
         calls["n"] += 1
         return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
 
@@ -416,7 +393,7 @@ def test_cached_updates_refetch_after_the_ttl_expires(
 ) -> None:
     calls = {"n": 0}
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
         calls["n"] += 1
         return _resp(200, {"ok": True, "result": []})
 
@@ -424,7 +401,7 @@ def test_cached_updates_refetch_after_the_ttl_expires(
     notify.reset_telegram_updates_cache()
 
     clock = {"t": 1000.0}
-    monkeypatch.setattr(notify.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr("app.services.notify.time.monotonic", lambda: clock["t"])
 
     notify.get_telegram_updates_cached()
     clock["t"] += notify.TELEGRAM_UPDATES_CACHE_TTL_SECONDS + 0.1
@@ -438,7 +415,7 @@ def test_a_failed_fetch_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     a legitimate connect."""
     calls = {"n": 0}
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
             return _resp(503)
@@ -459,12 +436,10 @@ def test_concurrent_threads_collapse_to_one_outbound_call(
 ) -> None:
     """confirm_telegram is a sync def, so FastAPI runs it in a threadpool --
     several threads per worker race the same cache slot."""
-    import threading
-
     calls = {"n": 0}
     count_lock = threading.Lock()
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]):
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
         with count_lock:
             calls["n"] += 1
         time.sleep(0.05)  # widen the race window
