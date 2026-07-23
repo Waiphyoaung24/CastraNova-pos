@@ -258,6 +258,7 @@ export type PriceChangePublic = {
     id: string;
     changed_by_user_id: string;
     changed_at?: (string | null);
+    changed_by_full_name?: (string | null);
 };
 
 export type PricingOverrideCreate = {
@@ -346,6 +347,7 @@ export type ProductPublic = {
     default_min_stock_level?: (number | null);
     is_active?: boolean;
     id: string;
+    is_fresh?: boolean;
 };
 
 export type ProductPurchaseCost = {
@@ -359,6 +361,7 @@ export type ProductsPublic = {
 };
 
 export type ProductUpdate = {
+    sku?: (string | null);
     model_name?: (string | null);
     brand?: (string | null);
     category?: (string | null);

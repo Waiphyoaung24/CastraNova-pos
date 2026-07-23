@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
-import { type ReactNode, useId, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 
 import {
   type ProductCreate,
@@ -27,7 +27,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import useCustomToast from "@/hooks/useCustomToast"
-import { buildProductPayload, canCreateProduct } from "@/lib/product-create"
+import {
+  buildAutoSku,
+  buildProductPayload,
+  canCreateProduct,
+  generateSkuBase,
+  randomSkuSuffix,
+} from "@/lib/product-create"
 
 const TRACKING_MODES: TrackingMode[] = ["QUANTITY", "SERIALIZED"]
 
@@ -47,6 +53,11 @@ export function ProductCreateDialog() {
   const contentRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [sku, setSku] = useState("")
+  // Auto-suggest the SKU from brand + model until the user edits it by hand.
+  // The suffix is minted once per dialog session so it stays stable while the
+  // brand/model change (regenerated on reset).
+  const [skuDirty, setSkuDirty] = useState(false)
+  const [skuSuffix, setSkuSuffix] = useState(randomSkuSuffix)
   const [modelName, setModelName] = useState("")
   const [brand, setBrand] = useState("")
   const [category, setCategory] = useState("")
@@ -55,8 +66,21 @@ export function ProductCreateDialog() {
   const [repairPrice, setRepairPrice] = useState("")
   const [minStock, setMinStock] = useState("")
 
+  useEffect(() => {
+    if (skuDirty) return
+    setSku(buildAutoSku(generateSkuBase({ brand, modelName }), skuSuffix))
+  }, [brand, modelName, skuSuffix, skuDirty])
+
+  const handleSkuChange = (v: string) => {
+    setSku(v)
+    // A manual, non-empty edit locks auto-fill; clearing the field resumes it.
+    setSkuDirty(v.trim() !== "")
+  }
+
   const reset = () => {
     setSku("")
+    setSkuDirty(false)
+    setSkuSuffix(randomSkuSuffix())
     setModelName("")
     setBrand("")
     setCategory("")
@@ -123,8 +147,9 @@ export function ProductCreateDialog() {
             id={skuId}
             label="SKU"
             value={sku}
-            onChange={setSku}
+            onChange={handleSkuChange}
             placeholder="e.g. IP15P-256-BLK"
+            hint="Auto-generated from brand + model — edit to override."
           />
           <Field
             id={modelId}
@@ -184,7 +209,7 @@ export function ProductCreateDialog() {
           <SectionLabel>Pricing</SectionLabel>
           <Field
             id={retailId}
-            label="Retail price (THB)"
+            label="Project price (THB)"
             value={retailPrice}
             onChange={setRetailPrice}
             type="number"
@@ -233,6 +258,7 @@ function Field({
   type = "text",
   numeric = false,
   placeholder,
+  hint,
 }: {
   id: string
   label: string
@@ -243,6 +269,8 @@ function Field({
   numeric?: boolean
   /** Example/format hint shown when the field is empty. */
   placeholder?: string
+  /** Helper text shown under the input. */
+  hint?: string
 }) {
   return (
     <div className="space-y-2">
@@ -257,6 +285,7 @@ function Field({
         {...(numeric ? { inputMode: "decimal" as const } : {})}
         {...(type === "number" ? { min: 0 } : {})}
       />
+      {hint ? <p className="text-muted-foreground text-sm">{hint}</p> : null}
     </div>
   )
 }

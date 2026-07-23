@@ -498,6 +498,9 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(SQLModel):
+    # sku is editable only while the product is "fresh" (no stock/transactions);
+    # crud.update_product enforces that. Immutable once received/sold.
+    sku: str | None = Field(default=None, max_length=64)
     model_name: str | None = Field(default=None, max_length=255)
     brand: str | None = Field(default=None, max_length=255)
     category: str | None = Field(default=None, max_length=128)
@@ -511,6 +514,10 @@ class ProductUpdate(SQLModel):
 
 class ProductPublic(ProductBase):
     id: uuid.UUID
+    # Computed at read time (not stored): True when the product has no stock or
+    # transactions, i.e. its SKU can still be edited. Defaults to False (locked)
+    # so any caller that forgets to populate it fails safe.
+    is_fresh: bool = False
 
 
 class ProductsPublic(SQLModel):
@@ -601,6 +608,7 @@ class PriceChangePublic(PriceChangeBase):
     id: uuid.UUID
     changed_by_user_id: uuid.UUID
     changed_at: datetime | None = None
+    changed_by_full_name: str | None = None
 
 
 # --- Unit (SERIALIZED stock; state cache) -------------------------------------

@@ -52,6 +52,7 @@ from app.models import (
     PartBatch,
     PartMovement,
     PriceChange,
+    PriceChangePublic,
     PricingOverrideCreate,
     PricingOverrideRequest,
     Product,
@@ -584,6 +585,42 @@ def get_product(*, session: Session, product_id: uuid.UUID) -> Product | None:
     return session.get(Product, product_id)
 
 
+def is_product_fresh(*, session: Session, product_id: uuid.UUID) -> bool:
+    """True when the product has never entered the stock system — no ``Unit`` and
+    no ``PartBatch`` row references it. That is the exact condition under which
+    the SKU is safe to edit: ``batch_no`` (the only artifact that bakes the SKU
+    string in) is created only at receive time, and no sale/movement/ticket/pull
+    can exist without stock first."""
+    has_unit = session.exec(
+        select(Unit.id).where(Unit.product_id == product_id).limit(1)
+    ).first()
+    if has_unit is not None:
+        return False
+    has_batch = session.exec(
+        select(PartBatch.id).where(PartBatch.product_id == product_id).limit(1)
+    ).first()
+    return has_batch is None
+
+
+def products_fresh_ids(
+    *, session: Session, product_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Batched ``is_product_fresh`` for a page of products (no N+1): the given ids
+    minus any that appear in ``Unit`` or ``PartBatch``."""
+    if not product_ids:
+        return set()
+    ids = set(product_ids)
+    used_units = session.exec(
+        select(col(Unit.product_id)).where(col(Unit.product_id).in_(ids)).distinct()
+    ).all()
+    used_batches = session.exec(
+        select(col(PartBatch.product_id))
+        .where(col(PartBatch.product_id).in_(ids))
+        .distinct()
+    ).all()
+    return ids - (set(used_units) | set(used_batches))
+
+
 def _product_filter_clauses(
     *,
     q: str | None,
@@ -731,6 +768,17 @@ def update_product(
     changed_by_user_id: uuid.UUID,
 ) -> Product:
     data = product_in.model_dump(exclude_unset=True)
+    # SKU is editable only while the product is fresh (no stock/transactions).
+    new_sku = data.get("sku")
+    if new_sku is not None and new_sku != db_product.sku:
+        if not is_product_fresh(session=session, product_id=db_product.id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "SKU can only be changed before the product has any stock or "
+                    "transactions."
+                ),
+            )
     # Record a price_change row for each price field that actually changes (FR-002),
     # in the same transaction as the product update.
     for field in _PRICE_FIELDS:
@@ -748,21 +796,50 @@ def update_product(
     db_product.sqlmodel_update(data)
     db_product.updated_at = get_datetime_utc()
     session.add(db_product)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="SKU already exists")
     session.refresh(db_product)
     return db_product
 
 
 def list_price_history(
     *, session: Session, product_id: uuid.UUID
-) -> list[PriceChange]:
-    return list(
+) -> list[PriceChangePublic]:
+    rows = list(
         session.exec(
             select(PriceChange)
             .where(PriceChange.product_id == product_id)
             .order_by(col(PriceChange.changed_at).desc())
         ).all()
     )
+    if not rows:
+        return []
+    actor_ids = {r.changed_by_user_id for r in rows}
+    actors = {
+        u.id: u
+        for u in session.exec(select(User).where(col(User.id).in_(actor_ids))).all()
+    }
+    return [
+        PriceChangePublic(
+            id=r.id,
+            product_id=r.product_id,
+            field=r.field,
+            old_value=r.old_value,
+            new_value=r.new_value,
+            reason=r.reason,
+            changed_by_user_id=r.changed_by_user_id,
+            changed_at=r.changed_at,
+            changed_by_full_name=(
+                actor.full_name or actor.email
+                if (actor := actors.get(r.changed_by_user_id)) is not None
+                else None
+            ),
+        )
+        for r in rows
+    ]
 
 
 # --- Serialized receive (FR-005) ----------------------------------------------

@@ -1,11 +1,34 @@
 import re
 import uuid
+from decimal import Decimal
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app import crud
 from app.core.config import settings
+from app.models import SupplierCreate
 
 PREFIX = settings.API_V1_STR
+
+
+def _receive_quantity(db: Session, product_id: str) -> None:
+    """Give a product one QUANTITY receipt (a PartBatch) so it is no longer
+    'fresh' — used to assert the SKU edit lock and the is_fresh flag."""
+    admin = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert admin is not None
+    supplier = crud.create_supplier(
+        session=db, supplier_in=SupplierCreate(name=f"Sup-{uuid.uuid4().hex[:6]}")
+    )
+    crud.receive_quantity(
+        session=db,
+        product_id=uuid.UUID(product_id),
+        supplier_id=supplier.id,
+        received_qty=3,
+        purchase_cost_thb=Decimal("10.00"),
+        idempotency_key=uuid.uuid4(),
+        received_by_user_id=admin.id,
+    )
 
 
 def _product_body(sku: str, **over: object) -> dict[str, object]:
@@ -133,6 +156,7 @@ def test_price_change_recorded_on_update(
     assert rows[0]["field"] == "retail_price_thb"
     assert rows[0]["old_value"] == "1000.00"
     assert rows[0]["new_value"] == "1500.00"
+    assert rows[0]["changed_by_full_name"] == settings.FIRST_SUPERUSER
 
 
 def test_price_history_staff_forbidden(
@@ -159,6 +183,98 @@ def test_price_history_unknown_product_404(
         headers=superuser_token_headers,
     )
     assert r.status_code == 404
+
+
+def test_update_sku_on_fresh_product_succeeds(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    sku = f"FRESH-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        f"{PREFIX}/products/", headers=superuser_token_headers, json=_product_body(sku)
+    ).json()
+    new_sku = f"RENAMED-{uuid.uuid4().hex[:8]}"
+    r = client.patch(
+        f"{PREFIX}/products/{created['id']}",
+        headers=superuser_token_headers,
+        json={"sku": new_sku},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["sku"] == new_sku
+    # Renaming did not add stock, so the product stays fresh.
+    assert r.json()["is_fresh"] is True
+
+
+def test_update_sku_blocked_after_receive(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    sku = f"USED-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(sku, tracking_mode="QUANTITY"),
+    ).json()
+    _receive_quantity(db, created["id"])
+
+    r = client.patch(
+        f"{PREFIX}/products/{created['id']}",
+        headers=superuser_token_headers,
+        json={"sku": f"NOPE-{uuid.uuid4().hex[:8]}"},
+    )
+    assert r.status_code == 409, r.text
+    # Non-SKU fields still update on a used product.
+    ok = client.patch(
+        f"{PREFIX}/products/{created['id']}",
+        headers=superuser_token_headers,
+        json={"model_name": "Renamed model"},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["model_name"] == "Renamed model"
+
+
+def test_update_duplicate_sku_returns_409(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    taken = f"TAKEN-{uuid.uuid4().hex[:8]}"
+    client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(taken),
+    )
+    other = client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(f"OTHER-{uuid.uuid4().hex[:8]}"),
+    ).json()
+
+    r = client.patch(
+        f"{PREFIX}/products/{other['id']}",
+        headers=superuser_token_headers,
+        json={"sku": taken},
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_products_list_is_fresh_flag(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    sku = f"FLAG-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        json=_product_body(sku, tracking_mode="QUANTITY"),
+    ).json()
+
+    def _row() -> dict[str, object]:
+        listing = client.get(
+            f"{PREFIX}/products/",
+            headers=superuser_token_headers,
+            params={"q": sku},
+        ).json()
+        return next(p for p in listing["data"] if p["id"] == created["id"])
+
+    assert _row()["is_fresh"] is True
+    _receive_quantity(db, created["id"])
+    assert _row()["is_fresh"] is False
 
 
 def _page_count(pdf: bytes) -> int:

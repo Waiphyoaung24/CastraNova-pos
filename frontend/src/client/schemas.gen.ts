@@ -1271,6 +1271,17 @@ export const PriceChangePublicSchema = {
                 }
             ],
             title: 'Changed At'
+        },
+        changed_by_full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Changed By Full Name'
         }
     },
     type: 'object',
@@ -1674,6 +1685,11 @@ export const ProductPublicSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Id'
+        },
+        is_fresh: {
+            type: 'boolean',
+            title: 'Is Fresh',
+            default: false
         }
     },
     type: 'object',
@@ -1701,6 +1717,18 @@ export const ProductPurchaseCostSchema = {
 
 export const ProductUpdateSchema = {
     properties: {
+        sku: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sku'
+        },
         model_name: {
             anyOf: [
                 {
