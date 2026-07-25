@@ -341,3 +341,33 @@ def test_receive_quantity_omitting_received_date_uses_today(
     )
     assert r.status_code == 200, r.text
     assert r.json()["batch_no"].startswith(date.today().strftime("%Y%m%d"))
+
+
+def test_receive_quantity_replay_of_a_backdated_receive_succeeds(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    """The future-date guard runs BEFORE crud's replay lookup, so a retry must
+    still return the stored batch rather than tripping validation. It cannot
+    trip: the bound is date.today() + 1 and today never moves backwards, so the
+    accepted range only widens — a payload accepted once stays accepted."""
+    product_id, supplier_id, _ = seed_quantity_product
+    body = _body(product_id, supplier_id, received_date="2026-07-10")
+
+    r1 = client.post(
+        f"{PREFIX}/receipts/quantity", headers=superuser_token_headers, json=body
+    )
+    assert r1.status_code == 200, r1.text
+    db.expire_all()
+    batches_before = len(db.exec(select(PartBatch)).all())
+
+    r2 = client.post(
+        f"{PREFIX}/receipts/quantity", headers=superuser_token_headers, json=body
+    )
+    assert r2.status_code == 200, r2.text
+    assert r1.json()["id"] == r2.json()["id"]
+    assert r1.json()["batch_no"] == r2.json()["batch_no"]
+    db.expire_all()
+    assert len(db.exec(select(PartBatch)).all()) == batches_before

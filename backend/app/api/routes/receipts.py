@@ -34,7 +34,13 @@ def _resolve_received_at(received_date: date | None) -> datetime | None:
     The one-day tolerance on the future check absorbs timezone skew — the client
     sends its LOCAL date, and the local operating zones (Yangon UTC+6:30,
     Bangkok UTC+7) run ahead of UTC, so between local midnight and ~06:30 the
-    picked 'today' is one day past the server's UTC today."""
+    picked 'today' is one day past the server's UTC today.
+
+    This runs BEFORE crud's idempotency-replay lookup, which looks like it could
+    reject a retry of an already-stored receipt. It cannot: the bound is
+    ``date.today() + 1``, and ``date.today()`` never moves backwards, so the
+    accepted range only ever widens. A payload accepted once stays accepted, and
+    an offline replay resends the payload captured at entry time unchanged."""
     if received_date is None:
         return None
     if received_date > date.today() + timedelta(days=1):
