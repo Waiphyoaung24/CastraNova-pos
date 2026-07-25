@@ -1051,6 +1051,7 @@ def receive_quantity(
     supplier_batch_ref: str | None = None,
     expected_qty: int | None = None,
     note: str | None = None,
+    received_at: datetime | None = None,
 ) -> PartBatch:
     """Receive a QUANTITY batch: one part_batch (``remaining_qty == received_qty``)
     + one RECEIVED part_movement, in one transaction. Idempotent per request —
@@ -1080,13 +1081,20 @@ def receive_quantity(
     if not ygn:
         raise HTTPException(status_code=500, detail="YGN_WH location not seeded")
 
+    # An operator-picked receive date arrives already composed with a clock time
+    # (routes/receipts.py). Normalising to a concrete timestamp here — rather
+    # than leaving the column default to fire — lets batch_no share the same
+    # date, so a backdated receipt's label matches its received_at.
+    if received_at is None:
+        received_at = get_datetime_utc()
+
     batch = PartBatch(
         product_id=product_id,
         batch_no=next_batch_no(
             session=session,
             product_id=product_id,
             sku=product.sku,
-            today=date.today(),
+            today=received_at.date(),
         ),
         supplier_id=supplier_id,
         supplier_batch_ref=supplier_batch_ref,
@@ -1094,6 +1102,7 @@ def receive_quantity(
         remaining_qty=received_qty,
         purchase_cost_thb=purchase_cost_thb,
         received_by_user_id=received_by_user_id,
+        received_at=received_at,
     )
     session.add(batch)
     session.flush()  # assign the batch row before the movement FK references it
