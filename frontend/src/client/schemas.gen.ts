@@ -2711,6 +2711,18 @@ export const ReceiveQuantityRequestSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Idempotency Key'
+        },
+        received_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received Date'
         }
     },
     type: 'object',
@@ -2743,6 +2755,18 @@ export const ReceiveSerializedRequestSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Idempotency Key'
+        },
+        received_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received Date'
         }
     },
     type: 'object',

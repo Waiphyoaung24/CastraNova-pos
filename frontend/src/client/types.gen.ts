@@ -530,6 +530,7 @@ export type ReceiveQuantityRequest = {
     expected_qty?: (number | null);
     note?: (string | null);
     idempotency_key: string;
+    received_date?: (string | null);
 };
 
 export type ReceiveSerializedRequest = {
@@ -537,6 +538,7 @@ export type ReceiveSerializedRequest = {
     supplier_id: string;
     pieces: Array<ReceivePiece>;
     idempotency_key: string;
+    received_date?: (string | null);
 };
 
 export type ReceiveSerializedResponse = {

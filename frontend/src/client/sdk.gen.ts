@@ -471,7 +471,7 @@ export class NotificationsService {
             url: '/api/v1/notifications/telegram/disconnect'
         });
     }
-
+    
     /**
      * Test Telegram
      * Send a one-off probe message to the current user's connected
