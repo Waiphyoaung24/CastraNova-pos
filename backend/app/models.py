@@ -796,6 +796,9 @@ class ReceiveSerializedRequest(SQLModel):
     supplier_id: uuid.UUID
     pieces: list[ReceivePiece] = Field(min_length=1, max_length=500)
     idempotency_key: uuid.UUID
+    # Operator-picked arrival date; None → today. The server composes the stored
+    # timestamp (routes/receipts.py) so a wrong client clock cannot forge one.
+    received_date: date | None = None
 
 
 class ReceiveSerializedResponse(SQLModel):
@@ -1008,6 +1011,8 @@ class ReceiveQuantityRequest(SQLModel):
     expected_qty: int | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=400)
     idempotency_key: uuid.UUID
+    # Operator-picked arrival date; None → today. Also drives the batch_no prefix.
+    received_date: date | None = None
 
 
 # --- Pricing override (FR-010; M013) ------------------------------------------
