@@ -888,6 +888,7 @@ def receive_serialized(
     pieces: list[ReceivePiece],
     idempotency_key: uuid.UUID,
     received_by_user_id: uuid.UUID,
+    received_at: datetime | None = None,
 ) -> list[Unit]:
     """Receive SERIALIZED pieces: one unit + one RECEIVED movement each, in one
     transaction. Idempotent per request — replaying the same idempotency_key
@@ -927,6 +928,9 @@ def receive_serialized(
     _require_active_product(product)
 
     state = assert_unit_transition(UnitState.RECEIVED, MovementType.RECEIVED)
+    # One receipt is one delivery: every piece shares the arrival timestamp.
+    if received_at is None:
+        received_at = get_datetime_utc()
     units: list[Unit] = []
     for piece, move_key in zip(pieces, move_keys, strict=True):
         unit = Unit(
@@ -938,6 +942,7 @@ def receive_serialized(
             current_location_id=ygn.id,
             purchase_cost_thb=piece.purchase_cost_thb,
             received_by_user_id=received_by_user_id,
+            received_at=received_at,
         )
         session.add(unit)
         session.flush()
