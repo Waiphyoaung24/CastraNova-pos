@@ -124,10 +124,17 @@ if payload.received_date > date.today() + timedelta(days=1):
     raise HTTPException(status_code=422, detail="received_date cannot be in the future")
 ```
 
-The one-day tolerance is exactly the maximum skew for an ahead-of-UTC timezone, not a
-loose margin. Composition is unaffected: `datetime.combine(received_date, now_utc)` on
-a locally-"tomorrow" date yields a timestamp at most a few hours ahead of `now()`, which
-rounds to 0 holding days and sorts last in FIFO — the same as receiving it moments later.
+The one-day tolerance is exactly the maximum skew for the intended operating timezones,
+not a loose margin.
+
+It does mean a `today+1` date is accepted from *any* client, not only an ahead-of-UTC one.
+A client in UTC+12, or one with a misconfigured system clock, can therefore land a
+`received_at` up to ~24h ahead of real `now()` — not the few hours the Yangon/Bangkok case
+produces. The consequence is bounded and cosmetic: such stock reports 0 holding days and
+sorts last in FIFO, so it is consumed last. It cannot escalate privilege, and both
+endpoints are admin-only with the real entry time preserved on the movement ledger.
+Tightening this would require the client to send its UTC offset, which is itself
+client-controlled and so buys nothing.
 
 Replay is unaffected — an idempotent replay returns the stored row without re-dating it,
 because the existing replay branches return before any construction.
