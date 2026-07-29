@@ -51,7 +51,9 @@ test("channel margin defaults to this month and picks another one", async ({
   ).toBeVisible()
 })
 
-test("override exceptions picks a month with the keyboard", async ({ page }) => {
+test("override exceptions picks a month with the keyboard", async ({
+  page,
+}) => {
   await page.goto("/override-exceptions")
 
   const trigger = page.getByRole("button", { name: /^Month\b/ })
