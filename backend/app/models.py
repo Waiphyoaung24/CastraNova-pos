@@ -59,6 +59,9 @@ class MovementType(str, enum.Enum):
     MAINTENANCE_OUT = "MAINTENANCE_OUT"
     PROJECT_OUT = "PROJECT_OUT"
     ADJUSTED_OUT = "ADJUSTED_OUT"
+    # Sale return (m035): the only inbound event besides RECEIVED. Restores a
+    # SOLD unit to stock / re-credits the FIFO batches a PART line consumed.
+    RETURNED = "RETURNED"
 
 
 class ProjectPullState(str, enum.Enum):
@@ -1420,6 +1423,121 @@ class SaleCreateRequest(SQLModel):
     customer_id: uuid.UUID
     lines: list[SaleLineInput] = Field(min_length=1, max_length=100)
     idempotency_key: uuid.UUID
+
+
+# --- Sale return (m035; design 2026-07-25) ------------------------------------
+
+
+class SaleReturn(SQLModel, table=True):
+    # Insert-only in practice (no update/delete endpoint), but NOT trigger-
+    # protected: the append-only guarantee that matters lives on the movements
+    # this row produces (unit_movement / part_movement / cost_line), which the
+    # M021 reject_ledger_mutation triggers already cover.
+    # returned_at is the report's date key — every margin_report aggregation for
+    # returns closes over [start, end) on it, so it is indexed like sale.sold_at.
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_sale_return_idempotency_key"),
+        Index("ix_salereturn_returned_at", "returned_at"),
+        Index("ix_salereturn_sale_id", "sale_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sale_id: uuid.UUID = Field(foreign_key="sale.id", nullable=False)
+    created_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True
+    )
+    idempotency_key: uuid.UUID
+    reason: str = Field(max_length=512)
+    returned_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    total_refund_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    total_cogs_restored_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+
+
+class SaleReturnLine(SQLModel, table=True):
+    # The over-return invariant (SUM(quantity) per sale_line <= saleline.quantity)
+    # spans rows, so it is enforced in crud under a FOR UPDATE lock on the sale
+    # line, not by a CHECK.
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_salereturnline_quantity_positive"),
+        CheckConstraint(
+            "cogs_restored_thb >= 0", name="ck_salereturnline_cogs_nonneg"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sale_return_id: uuid.UUID = Field(
+        foreign_key="salereturn.id", nullable=False, index=True
+    )
+    sale_line_id: uuid.UUID = Field(
+        foreign_key="saleline.id", nullable=False, index=True
+    )
+    quantity: int
+    # Refund basis, snapshot-copied from the sale line at return time.
+    unit_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    # Exact cost restored, summed from the reversal cost_lines (UNIT lines: the
+    # unit's purchase_cost_thb). Never a re-derived average.
+    cogs_restored_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+
+
+class SaleReturnLineInput(SQLModel):
+    sale_line_id: uuid.UUID
+    # UNIT lines must be exactly 1 (checked in crud against the line kind).
+    quantity: int = Field(default=1, gt=0, le=1_000_000)
+
+
+class SaleReturnCreateRequest(SQLModel):
+    idempotency_key: uuid.UUID
+    reason: str = Field(min_length=1, max_length=512)
+    lines: list[SaleReturnLineInput] = Field(min_length=1, max_length=100)
+
+
+class SaleReturnLinePublic(SQLModel):
+    id: uuid.UUID
+    sale_line_id: uuid.UUID
+    quantity: int
+    unit_price_thb: Decimal
+    cogs_restored_thb: Decimal
+
+
+class SaleReturnPublic(SQLModel):
+    # Admin-only surface (returns are an admin desk action), so cost fields are
+    # exposed here deliberately — unlike SaleStaffPublic there is no staff variant.
+    id: uuid.UUID
+    sale_id: uuid.UUID
+    reason: str
+    returned_at: datetime
+    total_refund_thb: Decimal
+    total_cogs_restored_thb: Decimal
+    created_by_user_id: uuid.UUID
+    lines: list[SaleReturnLinePublic]
+
+
+class ReturnableLinePublic(SQLModel):
+    sale_line_id: uuid.UUID
+    line_kind: SaleLineKind
+    product_id: uuid.UUID | None
+    unit_id: uuid.UUID | None
+    label: str  # "SKU — Model name"
+    quantity_sold: int
+    quantity_returned: int
+    quantity_returnable: int
+    unit_price_thb: Decimal
+
+
+class ReturnableSalePublic(SQLModel):
+    sale_id: uuid.UUID
+    sold_at: datetime
+    customer_id: uuid.UUID
+    customer_name: str
+    lines: list[ReturnableLinePublic]
+
+
+class ReturnableSalesPublic(SQLModel):
+    sales: list[ReturnableSalePublic]
 
 
 # --- Service ticket (Maintenance, FR-008; M011) -------------------------------
