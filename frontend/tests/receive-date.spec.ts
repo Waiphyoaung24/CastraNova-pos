@@ -132,6 +132,26 @@ test("arrow keys refuse to move past today", async ({ page }) => {
   await expect(trigger).toHaveText(display(today))
 })
 
+test("paging to another month leaves the grid keyboard-reachable", async ({
+  page,
+}) => {
+  await page.goto("/receive")
+  await page.locator("#receive-date").click()
+  const dialog = page.getByRole("dialog", { name: "Choose date" })
+
+  // Roving tabindex: exactly one cell must stay tabbable, or the whole grid
+  // drops out of the tab order and the days become unreachable by keyboard.
+  await expect(dialog.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1)
+
+  // Stepping the month rebuilds the grid around a different window, which no
+  // longer contains the previously focused day.
+  await dialog.getByRole("button", { name: "Previous month" }).click()
+  await expect(dialog.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1)
+
+  await dialog.getByRole("button", { name: "Next month" }).click()
+  await expect(dialog.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1)
+})
+
 test("a backdated Quantity receive mints a batch_no with the backdated prefix", async ({
   page,
 }) => {

@@ -79,6 +79,26 @@ describe("buildMonthGrid", () => {
     expect(cells[41].outside).toBe(true)
   })
 
+  it("fills January's grid from the previous year", () => {
+    // 1 Jan 2026 is a Thursday, so the grid leads with 29-31 Dec 2025. JS Date
+    // normalises the negative day argument across the year boundary.
+    const cells = buildMonthGrid("2026-01")
+    expect(cells[0].iso).toBe("2025-12-29")
+    expect(cells[0].outside).toBe(true)
+    expect(cells[3].iso).toBe("2026-01-01")
+    expect(cells[3].outside).toBe(false)
+  })
+
+  it("fills December's grid into the following year", () => {
+    // 1 Dec 2026 is a Tuesday: one leading day, then 31 days, then January.
+    const cells = buildMonthGrid("2026-12")
+    expect(cells[0].iso).toBe("2026-11-30")
+    expect(cells[1].iso).toBe("2026-12-01")
+    expect(cells[31].iso).toBe("2026-12-31")
+    expect(cells[32].iso).toBe("2027-01-01")
+    expect(cells[41].iso).toBe("2027-01-10")
+  })
+
   it("handles a leap February", () => {
     const cells = buildMonthGrid("2028-02")
     const inMonth = cells.filter((c) => !c.outside)
@@ -176,6 +196,14 @@ describe("nextFocusDate", () => {
     expect(nextFocusDate("2026-03-31", "PageUp")).toBe("2026-02-28")
   })
 
+  it("clamps and rolls the year at once", () => {
+    // Jan 31 back a month lands in December, which is long enough to keep 31.
+    expect(nextFocusDate("2027-01-31", "PageUp")).toBe("2026-12-31")
+    // ...but back a month from Mar 31 2027 must still clamp to Feb 28.
+    expect(nextFocusDate("2027-03-31", "PageUp")).toBe("2027-02-28")
+    expect(nextFocusDate("2026-12-31", "PageDown")).toBe("2027-01-31")
+  })
+
   it("refuses to land on a disabled day", () => {
     // This is what stops a backdated receive from focusing a future date.
     expect(
@@ -207,6 +235,12 @@ describe("nextFocusMonth", () => {
 
   it("refuses to land on a disabled month", () => {
     expect(nextFocusMonth("2026-07", "ArrowRight", { max: "2026-07" })).toBe(
+      "2026-07",
+    )
+    expect(nextFocusMonth("2026-07", "ArrowLeft", { min: "2026-07" })).toBe(
+      "2026-07",
+    )
+    expect(nextFocusMonth("2026-07", "PageUp", { min: "2026-01" })).toBe(
       "2026-07",
     )
   })

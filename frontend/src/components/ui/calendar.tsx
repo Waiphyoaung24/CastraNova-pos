@@ -46,6 +46,24 @@ function useRovingFocus(focused: string) {
   return ref
 }
 
+/** Which cell carries `tabIndex={0}`. Exactly one must, or the grid drops out
+ * of the tab order entirely and its cells become unreachable by keyboard.
+ *
+ * `focused` is not guaranteed to be in this grid: stepping the caption moves
+ * the visible window without moving focus, and a stored value can sit outside
+ * `min`/`max`. Either way the preferred cell is missing or disabled, so fall
+ * back to the first selectable one rather than leaving every cell at -1. */
+function rovingKey(
+  cells: { disabled: boolean }[],
+  keys: string[],
+  focused: string,
+): string {
+  const preferred = keys.indexOf(focused)
+  if (preferred !== -1 && !cells[preferred].disabled) return focused
+  const fallback = cells.findIndex((cell) => !cell.disabled)
+  return fallback === -1 ? "" : keys[fallback]
+}
+
 type CalendarGridProps = {
   /** The visible month, `YYYY-MM`. */
   month: string
@@ -69,6 +87,11 @@ export function CalendarGrid({
   const cells = buildMonthGrid(month, bounds)
   const weeks = Array.from({ length: 6 }, (_, w) =>
     cells.slice(w * 7, w * 7 + 7),
+  )
+  const roving = rovingKey(
+    cells,
+    cells.map((cell) => cell.iso),
+    focused,
   )
   const focusRef = useRovingFocus(focused)
 
@@ -98,14 +121,14 @@ export function CalendarGrid({
           {week.map((cell) => (
             <button
               key={cell.iso}
-              ref={cell.iso === focused ? focusRef : undefined}
+              ref={cell.iso === roving ? focusRef : undefined}
               type="button"
               role="gridcell"
               aria-label={formatDisplay(cell.iso)}
               aria-selected={cell.iso === selected}
               aria-disabled={cell.disabled}
               disabled={cell.disabled}
-              tabIndex={cell.iso === focused ? 0 : -1}
+              tabIndex={cell.iso === roving ? 0 : -1}
               onClick={() => onSelect(cell.iso)}
               className={cn(
                 CELL,
@@ -146,6 +169,11 @@ export function MonthGrid({
 }: MonthGridProps) {
   const cells = buildYearGrid(year, bounds)
   const rows = Array.from({ length: 4 }, (_, r) => cells.slice(r * 3, r * 3 + 3))
+  const roving = rovingKey(
+    cells,
+    cells.map((cell) => cell.ym),
+    focused,
+  )
   const focusRef = useRovingFocus(focused)
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -159,26 +187,29 @@ export function MonthGrid({
       role="grid"
       aria-label="Months"
       onKeyDown={handleKeyDown}
-      className="grid w-63 grid-cols-3 gap-1"
+      className="flex w-63 flex-col gap-1"
     >
       {rows.map((row) => (
-        // `contents` keeps the CSS grid flat while preserving the row role.
-        <div key={row[0].ym} role="row" className="contents">
+        // Rows lay themselves out. An outer CSS grid with `display: contents`
+        // rows would be tidier, but browsers have a history of dropping
+        // `display: contents` elements from the accessibility tree, which would
+        // silently erase the row structure this grid depends on.
+        <div key={row[0].ym} role="row" className="flex gap-1">
           {row.map((cell) => (
             <button
               key={cell.ym}
-              ref={cell.ym === focused ? focusRef : undefined}
+              ref={cell.ym === roving ? focusRef : undefined}
               type="button"
               role="gridcell"
               aria-label={formatMonthDisplay(cell.ym)}
               aria-selected={cell.ym === selected}
               aria-disabled={cell.disabled}
               disabled={cell.disabled}
-              tabIndex={cell.ym === focused ? 0 : -1}
+              tabIndex={cell.ym === roving ? 0 : -1}
               onClick={() => onSelect(cell.ym)}
               className={cn(
                 CELL,
-                "h-11 w-full sm:h-9",
+                "h-11 flex-1 sm:h-9",
                 cell.current && cell.ym !== selected && "ring-1 ring-ring",
                 cell.ym === selected &&
                   "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",

@@ -144,6 +144,9 @@ export type DatePickerProps = {
   required?: boolean
   placeholder?: string
   className?: string
+  /** Fires whenever the popover opens or closes. A parent Dialog needs this to
+   * know one of its own pickers is up — see ProjectEditDialog. */
+  onOpenChange?: (open: boolean) => void
 }
 
 export function DatePicker({
@@ -157,6 +160,7 @@ export function DatePicker({
   required,
   placeholder = "Pick a date",
   className,
+  onOpenChange,
 }: DatePickerProps) {
   const bounds = { min, max }
   const monthBounds = {
@@ -164,7 +168,11 @@ export function DatePicker({
     max: max ? monthOf(max) : undefined,
   }
 
-  const [open, setOpen] = useState(false)
+  const [open, setRawOpen] = useState(false)
+  const setOpen = (next: boolean) => {
+    setRawOpen(next)
+    onOpenChange?.(next)
+  }
   const [view, setView] = useState<"days" | "months">("days")
   const [visibleMonth, setVisibleMonth] = useState(() =>
     value ? monthOf(value) : clampMonth(monthOf(todayISO()), monthBounds),
@@ -234,11 +242,14 @@ export function DatePicker({
             >
               <button
                 type="button"
-                aria-live="polite"
                 onClick={() => setView("months")}
                 className="rounded-md px-2 py-1 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
               >
-                {formatMonthDisplay(visibleMonth)}
+                {/* The live region is this inner span, not the button: a live
+                    region on an interactive control is tracked for focus as
+                    well, which makes some screen readers double-announce it or
+                    drop the announcement. Matches the year captions below. */}
+                <span aria-live="polite">{formatMonthDisplay(visibleMonth)}</span>
               </button>
             </Stepper>
             <CalendarGrid
@@ -318,6 +329,8 @@ export type MonthPickerProps = {
   disabled?: boolean
   placeholder?: string
   className?: string
+  /** Fires whenever the popover opens or closes. */
+  onOpenChange?: (open: boolean) => void
 }
 
 /** Opens straight into the year view — the same MonthGrid the DatePicker
@@ -334,9 +347,14 @@ export function MonthPicker({
   disabled,
   placeholder = "Pick a month",
   className,
+  onOpenChange,
 }: MonthPickerProps) {
   const bounds = { min, max }
-  const [open, setOpen] = useState(false)
+  const [open, setRawOpen] = useState(false)
+  const setOpen = (next: boolean) => {
+    setRawOpen(next)
+    onOpenChange?.(next)
+  }
   const [focused, setFocused] = useState(
     () => value || clampMonth(monthOf(todayISO()), bounds),
   )

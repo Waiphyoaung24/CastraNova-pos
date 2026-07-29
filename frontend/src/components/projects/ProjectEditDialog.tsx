@@ -58,6 +58,8 @@ export function ProjectEditDialog({
   // Baseline captured once at mount, so the dirty-check compares against what
   // the user started editing (not a value shifted by a background refetch).
   const [baseline] = useState(() => projectToEditDraft(project))
+  // Which of this dialog's own date pickers are open — see onOpenChange below.
+  const [pickerOpen, setPickerOpen] = useState({ start: false, end: false })
 
   function patch(p: Partial<ProjectEditDraft>) {
     setDraft((d) => ({ ...d, ...p }))
@@ -91,16 +93,10 @@ export function ProjectEditDialog({
         // and Radix fires every layer's handler rather than only the topmost —
         // so dismissing an open date picker used to tear down the edit form
         // with it. The picker's own layer closes it; this one stands down while
-        // it is still open. `data-state` distinguishes an open popover from one
-        // mid-exit-animation, which is still mounted but no longer owns Escape.
-        if (
-          !next &&
-          document.querySelector(
-            '[data-slot="popover-content"][data-state="open"]',
-          )
-        ) {
-          return
-        }
+        // one of ITS OWN pickers is open. Tracked as state rather than probed
+        // from the DOM, so an unrelated popover elsewhere on the page can never
+        // swallow a legitimate dismissal of this dialog.
+        if (!next && (pickerOpen.start || pickerOpen.end)) return
         if (!next) onClose()
       }}
     >
@@ -167,6 +163,7 @@ export function ProjectEditDialog({
                 labelledBy={`${startId}-label`}
                 value={draft.startDate}
                 onChange={(iso) => patch({ startDate: iso })}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, start: o }))}
                 placeholder="No start date"
               />
             </div>
@@ -179,6 +176,7 @@ export function ProjectEditDialog({
                 labelledBy={`${endId}-label`}
                 value={draft.endDate}
                 onChange={(iso) => patch({ endDate: iso })}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, end: o }))}
                 placeholder="No end date"
               />
             </div>
