@@ -1,4 +1,5 @@
 import type {
+  ProjectConsumptionRowPublic,
   ProjectDashboardAdminPublic,
   ProjectDashboardStaffPublic,
 } from "@/client/types.gen"
@@ -33,4 +34,15 @@ export function budgetRemaining(
 ): string | null {
   if (budget === null) return null
   return (Number(budget) - Number(consumed)).toFixed(2)
+}
+
+/**
+ * How a consumed-items row identifies itself: a SERIALIZED unit is its serial
+ * (that is the piece that left the warehouse), a QUANTITY part is its model and
+ * SKU. Mirrors the pull-fulfill panel's line label so the two screens name the
+ * same item the same way.
+ */
+export function consumedItemLabel(row: ProjectConsumptionRowPublic): string {
+  if (row.line_kind === "UNIT") return row.unit_serial ?? "(no serial)"
+  return `${row.model_name} (${row.product_sku})`
 }

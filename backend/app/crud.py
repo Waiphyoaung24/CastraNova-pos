@@ -60,6 +60,7 @@ from app.models import (
     ProductOption,
     ProductUpdate,
     Project,
+    ProjectConsumptionRowPublic,
     ProjectCreate,
     ProjectOption,
     ProjectPull,
@@ -4749,13 +4750,128 @@ def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decima
     return _q(part_cogs + unit_cogs)
 
 
+def _project_consumed_items(
+    *, session: Session, project_id: uuid.UUID
+) -> list[ProjectConsumptionRowPublic]:
+    """Every PROJECT_OUT movement against this project, newest first, with the
+    FIFO batch draws behind each PART row (FR-020 batch attribution).
+
+    Two legs because consumption spans both ledgers: QUANTITY parts draw from
+    cost_lines (possibly several batches per movement), while a SERIALIZED unit
+    carries its own purchase_cost_thb and has no batch to attribute.
+
+    Bulk-loaded throughout (mirrors _build_consumption_events): one query per
+    ledger plus one for the draws and one for the batch numbers — never N+1.
+
+    Deliberately NOT the source of the dashboard's consumed_cost_thb: that stays
+    a separate aggregate (_project_consumed_cost) so the Budget card is complete
+    and correct independently of anything that happens to this list."""
+    rows: list[ProjectConsumptionRowPublic] = []
+
+    # --- PART leg: movement -> cost_line -> batch --------------------------
+    part_movements = session.exec(
+        select(PartMovement)
+        .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+        .where(
+            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id) == project_id,
+        )
+    ).all()
+
+    draws_by_movement: dict[uuid.UUID, list[SkuConsumptionDrawAdminPublic]] = {}
+    if part_movements:
+        # Oldest batch first — the order FIFO actually consumed them in.
+        cost_lines = session.exec(
+            select(CostLine, PartBatch.batch_no)
+            .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
+            .where(col(CostLine.part_movement_id).in_([m.id for m in part_movements]))
+            .order_by(col(PartBatch.received_at), col(PartBatch.id))
+        ).all()
+        for cost_line, batch_no in cost_lines:
+            draws_by_movement.setdefault(cost_line.part_movement_id, []).append(
+                SkuConsumptionDrawAdminPublic(
+                    batch_no=batch_no,
+                    quantity=cost_line.quantity,
+                    unit_cost_thb=cost_line.unit_cost_thb,
+                    total_cost_thb=cost_line.total_cost_thb,
+                )
+            )
+
+    part_products = _products_by_id(session, {m.product_id for m in part_movements})
+    for movement in part_movements:
+        product = part_products.get(movement.product_id)
+        draws = draws_by_movement.get(movement.id, [])
+        rows.append(
+            ProjectConsumptionRowPublic(
+                line_kind=SaleLineKind.PART,
+                product_id=movement.product_id,
+                product_sku=(product.sku if product else "—"),
+                model_name=(product.model_name if product else "—"),
+                unit_serial=None,
+                quantity=movement.quantity,
+                occurred_at=movement.occurred_at,
+                # PROJECT_OUT always carries its pull; the guard satisfies mypy.
+                project_pull_id=cast(uuid.UUID, movement.project_pull_id),
+                total_cost_thb=_q(
+                    sum((d.total_cost_thb for d in draws), Decimal("0"))
+                ),
+                draws=draws,
+            )
+        )
+
+    # --- UNIT leg: the unit's own purchase cost, no batch ------------------
+    unit_rows = session.exec(
+        select(UnitMovement, Unit)
+        .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id) == project_id,
+        )
+    ).all()
+
+    unit_products = _products_by_id(session, {u.product_id for _, u in unit_rows})
+    for unit_movement, unit in unit_rows:
+        unit_product = unit_products.get(unit.product_id)
+        rows.append(
+            ProjectConsumptionRowPublic(
+                line_kind=SaleLineKind.UNIT,
+                product_id=unit.product_id,
+                product_sku=(unit_product.sku if unit_product else "—"),
+                model_name=(unit_product.model_name if unit_product else "—"),
+                unit_serial=unit.castranova_barcode,
+                quantity=1,
+                occurred_at=unit_movement.occurred_at,
+                project_pull_id=cast(uuid.UUID, unit_movement.project_pull_id),
+                total_cost_thb=_q(unit.purchase_cost_thb),
+                draws=[],
+            )
+        )
+
+    rows.sort(key=lambda r: r.occurred_at, reverse=True)
+    return rows
+
+
+def _products_by_id(
+    session: Session, product_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, Product]:
+    """Bulk product lookup for the consumed-items rows (SKU + model name)."""
+    if not product_ids:
+        return {}
+    products = session.exec(
+        select(Product).where(col(Product.id).in_(product_ids))
+    ).all()
+    return {p.id: p for p in products}
+
+
 def get_project_dashboard(
     *, session: Session, project_id: uuid.UUID
 ) -> dict[str, Any]:
     """Admin-superset dashboard for one project: its pull transactions plus
-    budget and consumed cost (reusing _project_consumed_cost). The route picks
-    the staff or admin schema by role; the budget/consumed_cost fields are
-    physically absent from the staff JSON."""
+    budget, consumed cost (reusing _project_consumed_cost) and the consumed-items
+    list with batch attribution. The route picks the staff or admin schema by
+    role; budget/consumed_cost/consumed_items are physically absent from the
+    staff JSON."""
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -4771,6 +4887,9 @@ def get_project_dashboard(
         "pulls": pull_rows,
         "budget_thb": project.budget_thb,
         "consumed_cost_thb": _project_consumed_cost(
+            session=session, project_id=project_id
+        ),
+        "consumed_items": _project_consumed_items(
             session=session, project_id=project_id
         ),
     }

@@ -2094,6 +2094,31 @@ class ProjectDashboardStaffPublic(SQLModel):
     # No budget / consumed_cost — staff redaction.
 
 
+class ProjectConsumptionRowPublic(SQLModel):
+    """One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+    ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+    is physically absent from the staff payload.
+
+    Reuses SkuConsumptionDrawAdminPublic for `draws`: a FIFO batch draw is the
+    same concept here as in the SKU consumption history (FR-015)."""
+
+    line_kind: SaleLineKind  # UNIT | PART
+    product_id: uuid.UUID
+    product_sku: str
+    model_name: str
+    # UNIT: the unit's castranova_barcode. NULL for PART (no serial).
+    unit_serial: str | None
+    quantity: int  # 1 for UNIT; part_movement.quantity for PART
+    occurred_at: datetime
+    project_pull_id: uuid.UUID
+    total_cost_thb: Decimal
+    # PART: one entry per batch the movement drew from. Always empty for UNIT —
+    # a serialized unit IS its own cost layer, there is no batch to attribute.
+    # Forward ref: the draw schema is declared further down (same pattern as
+    # SkuSearchResult.consumption).
+    draws: list["SkuConsumptionDrawAdminPublic"]
+
+
 class ProjectDashboardAdminPublic(ProjectDashboardStaffPublic):
     # Admin sees the full project (adds back budget_thb). consumed_cost_thb is
     # REQUIRED so a staff payload cannot upcast to admin; budget_thb is
@@ -2101,6 +2126,9 @@ class ProjectDashboardAdminPublic(ProjectDashboardStaffPublic):
     project: ProjectPublic  # type: ignore[assignment]
     budget_thb: Decimal | None
     consumed_cost_thb: Decimal
+    # Unbounded, newest first — the pulls list above it is unbounded too, and a
+    # truncated audit view would misrepresent itself as complete.
+    consumed_items: list[ProjectConsumptionRowPublic]
 
 
 # --- Override-exceptions report (FR-010; read-only) ---------------------------

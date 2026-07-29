@@ -1863,6 +1863,73 @@ export const ProductsPublicSchema = {
     title: 'ProductsPublic'
 } as const;
 
+export const ProjectConsumptionRowPublicSchema = {
+    properties: {
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
+        unit_serial: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Serial'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        },
+        project_pull_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Pull Id'
+        },
+        total_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cost Thb'
+        },
+        draws: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionDrawAdminPublic'
+            },
+            type: 'array',
+            title: 'Draws'
+        }
+    },
+    type: 'object',
+    required: ['line_kind', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'quantity', 'occurred_at', 'project_pull_id', 'total_cost_thb', 'draws'],
+    title: 'ProjectConsumptionRowPublic',
+    description: `One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+is physically absent from the staff payload.
+
+Reuses SkuConsumptionDrawAdminPublic for \`draws\`: a FIFO batch draw is the
+same concept here as in the SKU consumption history (FR-015).`
+} as const;
+
 export const ProjectCreateSchema = {
     properties: {
         code: {
@@ -1957,10 +2024,17 @@ export const ProjectDashboardAdminPublicSchema = {
             type: 'string',
             pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
             title: 'Consumed Cost Thb'
+        },
+        consumed_items: {
+            items: {
+                '$ref': '#/components/schemas/ProjectConsumptionRowPublic'
+            },
+            type: 'array',
+            title: 'Consumed Items'
         }
     },
     type: 'object',
-    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb'],
+    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb', 'consumed_items'],
     title: 'ProjectDashboardAdminPublic'
 } as const;
 
