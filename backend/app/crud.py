@@ -102,6 +102,8 @@ from app.models import (
     SupplierUpdate,
     SyncReviewItem,
     SyncReviewItemCreate,
+    SyncReviewPendingCounts,
+    SyncReviewReason,
     SyncReviewState,
     SystemSetting,
     TelegramConfirmOutcome,
@@ -2275,8 +2277,12 @@ def create_stock_adjustment(
 
 def create_sync_review_item(
     *, session: Session, data: SyncReviewItemCreate, submitted_by_user_id: uuid.UUID
-) -> SyncReviewItem:
+) -> tuple[SyncReviewItem, bool]:
     """Ingest a STALE/CONFLICT offline mutation into the admin review queue.
+
+    Returns ``(item, replayed)``. ``replayed`` is True when an existing row was
+    returned instead of a fresh insert — the caller uses it to avoid
+    re-notifying for an item already sitting in the queue.
 
     Idempotent by ``idempotency_key``: a re-POST of the same offline item
     returns the existing row (UNIQUE constraint + IntegrityError rollback path
@@ -2301,7 +2307,7 @@ def create_sync_review_item(
             stored_user_id=item.submitted_by_user_id,
             caller_user_id=submitted_by_user_id,
         )
-    return item
+    return item, replayed
 
 
 def get_sync_review_item(
@@ -2322,6 +2328,22 @@ def list_sync_review_items(
         stmt = stmt.where(col(SyncReviewItem.state) == state)
     stmt = stmt.order_by(col(SyncReviewItem.created_at)).offset(skip).limit(limit)
     return list(session.exec(stmt).all())
+
+
+def count_pending_sync_review_items(*, session: Session) -> SyncReviewPendingCounts:
+    """PENDING queue depth, split by reason — the numbers the admin alert
+    quotes. One grouped scan, served by ix_syncreviewitem_state_created."""
+    rows = session.execute(
+        sa_select(col(SyncReviewItem.reason), func.count())
+        .where(col(SyncReviewItem.state) == SyncReviewState.PENDING)
+        .group_by(col(SyncReviewItem.reason))
+    ).all()
+    by_reason: dict[SyncReviewReason, int] = {r: int(n) for r, n in rows}
+    stale = int(by_reason.get(SyncReviewReason.STALE, 0))
+    conflict = int(by_reason.get(SyncReviewReason.CONFLICT, 0))
+    return SyncReviewPendingCounts(
+        total=stale + conflict, stale=stale, conflict=conflict
+    )
 
 
 def resolve_sync_review_item(

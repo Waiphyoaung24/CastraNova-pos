@@ -53,12 +53,19 @@ def test_low_stock_is_open_to_staff() -> None:
         NotificationEvent.PULL_SHORT,
         NotificationEvent.PULL_FULFILLED,
         NotificationEvent.OVERRIDE_PENDING,
+        NotificationEvent.SYNC_REVIEW_PENDING,
     ],
 )
 def test_admin_only_events_are_hidden_from_staff(event: NotificationEvent) -> None:
-    # These three producers query User.role == BKK_ADMIN, so a staff checkbox
-    # for them could never deliver.
+    # These producers query User.role == BKK_ADMIN, so a staff checkbox for
+    # them could never deliver.
     assert event not in eligible_events(_user(UserRole.YGN_STAFF))
+
+
+def test_sync_review_pending_is_admin_only() -> None:
+    # The queue's list/resolve routes are get_admin-gated, so a staff
+    # recipient could be told about something they cannot open.
+    assert NotificationEvent.SYNC_REVIEW_PENDING in ADMIN_ONLY_EVENTS
 
 
 def test_eligibility_keys_off_role_not_superuser_flag() -> None:

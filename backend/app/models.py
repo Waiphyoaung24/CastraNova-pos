@@ -132,6 +132,7 @@ class NotificationEvent(str, enum.Enum):
     OVERRIDE_PENDING = "OVERRIDE_PENDING"
     PULL_FULFILLED = "PULL_FULFILLED"
     PULL_SHORT = "PULL_SHORT"
+    SYNC_REVIEW_PENDING = "SYNC_REVIEW_PENDING"
 
 
 class NotificationStatus(str, enum.Enum):
@@ -140,7 +141,7 @@ class NotificationStatus(str, enum.Enum):
 
 
 # Who may receive which event. These must agree with the recipient queries in
-# app.services.notify: the three below are fetched with
+# app.services.notify: the four below are fetched with
 # `User.role == UserRole.BKK_ADMIN`, while notify_low_stock has no role filter.
 # Offering a staff user a checkbox for an admin-only event would persist
 # enabled=True and then silently never deliver.
@@ -149,6 +150,7 @@ ADMIN_ONLY_EVENTS: frozenset["NotificationEvent"] = frozenset(
         NotificationEvent.PULL_SHORT,
         NotificationEvent.PULL_FULFILLED,
         NotificationEvent.OVERRIDE_PENDING,
+        NotificationEvent.SYNC_REVIEW_PENDING,
     }
 )
 ALL_ROLE_EVENTS: frozenset["NotificationEvent"] = frozenset(
@@ -1292,6 +1294,15 @@ class SyncReviewResolve(SQLModel):
     # state must be RESOLVED or DISCARDED (validated in crud).
     state: SyncReviewState
     note: str | None = Field(default=None, max_length=500)
+
+
+class SyncReviewPendingCounts(SQLModel):
+    # Named fields rather than a bare 3-tuple: three same-typed ints are
+    # trivially transposable at the call site, and the notify template reads
+    # all three.
+    total: int
+    stale: int
+    conflict: int
 
 
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------

@@ -17,6 +17,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -45,6 +46,7 @@ from app.models import (
     ProjectPullLine,
     User,
     UserRole,
+    get_datetime_utc,
 )
 
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
@@ -471,6 +473,24 @@ def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> s
             f"Item: {item}\n"
             f"Deviation: {_field(payload.get('deviation_pct'))}%"
         )
+    if event_type == NotificationEvent.SYNC_REVIEW_PENDING:
+        # Counts only — SyncReviewItem.payload is the raw held mutation and
+        # carries prices. Ids and payload fields stay in the append-only log.
+        total = int(payload.get("total") or 0)
+        stale = int(payload.get("stale") or 0)
+        conflict = int(payload.get("conflict") or 0)
+        head = (
+            "⚠️ 1 offline action needs review"
+            if total == 1
+            else f"⚠️ {total} offline actions need review"
+        )
+        parts: list[str] = []
+        if conflict:
+            parts.append(f"{conflict} conflict" + ("" if conflict == 1 else "s"))
+        if stale:
+            # "stale" is an adjective here — never pluralized.
+            parts.append(f"{stale} stale")
+        return f"{head}\n{', '.join(parts)}" if parts else head
     # Never push a raw payload (may carry financial fields). Each new event must
     # add an explicit, safe template here.
     raise NotImplementedError(f"No render template for {event_type!r}")
@@ -654,3 +674,74 @@ def notify_pull_fulfilled_bg(*, pull_id: uuid.UUID) -> None:
             notify_pull_fulfilled(session=session, pull=pull)
     except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
         logger.exception("notify_pull_fulfilled_bg failed for pull_id=%s", pull_id)
+
+
+# One burst of sync-review ingests must not become one message per item.
+# divertStaleMutations posts every stale item unawaited (query-client.ts:122),
+# so a reconnect lands several POSTs at once; conflicts then trickle in as
+# replays 409. The first item still notifies immediately -- this only mutes
+# the follow-ups.
+SYNC_REVIEW_COOLDOWN_SECONDS = 300
+
+
+def _sync_review_suppressed_user_ids(*, session: Session) -> set[uuid.UUID]:
+    """Admins already told about the queue inside the cooldown window.
+
+    Counts rows of ANY status, not just SENT. notify() logs a FAILED row for
+    an un-enrolled recipient, and if those did not suppress, every single
+    ingest would write another one for the same admin forever. The cost is
+    that a genuinely failed send waits out the window (spec 3.3).
+    """
+    cutoff = get_datetime_utc() - timedelta(seconds=SYNC_REVIEW_COOLDOWN_SECONDS)
+    rows = session.exec(
+        select(col(NotificationLog.target_user_id))
+        .where(
+            col(NotificationLog.event_type) == NotificationEvent.SYNC_REVIEW_PENDING,
+            col(NotificationLog.created_at) >= cutoff,
+        )
+        .distinct()
+    ).all()
+    return set(rows)
+
+
+def notify_sync_review_pending(*, session: Session) -> list[NotificationLog]:
+    """Notify every BKK_ADMIN outside the cooldown that offline mutations are
+    waiting in the review queue (FR-021).
+
+    The counts are read here, at send time, so the message reflects the queue
+    as it stands rather than as it stood when the triggering item arrived.
+    """
+    suppressed = _sync_review_suppressed_user_ids(session=session)
+    recipients = [
+        user
+        for user in session.exec(
+            select(User).where(User.role == UserRole.BKK_ADMIN)
+        ).all()
+        if user.id not in suppressed
+    ]
+    if not recipients:
+        return []
+    counts = crud.count_pending_sync_review_items(session=session)
+    if counts.total == 0:
+        return []  # triaged between ingest and dispatch
+    payload: dict[str, Any] = {
+        "total": counts.total,
+        "stale": counts.stale,
+        "conflict": counts.conflict,
+    }
+    return notify(
+        session=session,
+        event_type=NotificationEvent.SYNC_REVIEW_PENDING,
+        recipients=recipients,
+        payload=payload,
+    )
+
+
+def notify_sync_review_pending_bg() -> None:
+    """BackgroundTasks entrypoint for sync-review alerts. Opens its OWN session
+    and never raises out of the background task (best-effort)."""
+    try:
+        with Session(engine) as session:
+            notify_sync_review_pending(session=session)
+    except Exception:  # noqa: BLE001 — belt: best-effort, swallow + log
+        logger.exception("notify_sync_review_pending_bg failed")
