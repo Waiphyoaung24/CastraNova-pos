@@ -1169,3 +1169,28 @@ def test_render_text_still_rejects_an_unknown_event() -> None:
             event_type="not-an-event",  # type: ignore[arg-type]
             payload={"retail_price_thb": "999.00"},
         )
+
+
+def test_render_sync_review_pending_plural() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.SYNC_REVIEW_PENDING,
+        payload={"total": 3, "stale": 1, "conflict": 2},
+    )
+    assert text == "⚠️ 3 offline actions need review\n2 conflicts, 1 stale"
+
+
+def test_render_sync_review_pending_singular() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.SYNC_REVIEW_PENDING,
+        payload={"total": 1, "stale": 0, "conflict": 1},
+    )
+    assert text == "⚠️ 1 offline action needs review\n1 conflict"
+
+
+def test_render_sync_review_pending_omits_zero_reason() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.SYNC_REVIEW_PENDING,
+        payload={"total": 2, "stale": 2, "conflict": 0},
+    )
+    assert "conflict" not in text
+    assert text.endswith("2 stale")

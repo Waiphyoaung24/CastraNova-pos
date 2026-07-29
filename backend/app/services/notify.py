@@ -471,6 +471,24 @@ def _render_text(*, event_type: NotificationEvent, payload: dict[str, Any]) -> s
             f"Item: {item}\n"
             f"Deviation: {_field(payload.get('deviation_pct'))}%"
         )
+    if event_type == NotificationEvent.SYNC_REVIEW_PENDING:
+        # Counts only — SyncReviewItem.payload is the raw held mutation and
+        # carries prices. Ids and payload fields stay in the append-only log.
+        total = int(payload.get("total") or 0)
+        stale = int(payload.get("stale") or 0)
+        conflict = int(payload.get("conflict") or 0)
+        head = (
+            "⚠️ 1 offline action needs review"
+            if total == 1
+            else f"⚠️ {total} offline actions need review"
+        )
+        parts: list[str] = []
+        if conflict:
+            parts.append(f"{conflict} conflict" + ("" if conflict == 1 else "s"))
+        if stale:
+            # "stale" is an adjective here — never pluralized.
+            parts.append(f"{stale} stale")
+        return f"{head}\n{', '.join(parts)}" if parts else head
     # Never push a raw payload (may carry financial fields). Each new event must
     # add an explicit, safe template here.
     raise NotImplementedError(f"No render template for {event_type!r}")
