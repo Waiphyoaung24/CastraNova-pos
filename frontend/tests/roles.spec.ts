@@ -33,9 +33,9 @@ test.describe("Role select in Add User dialog", () => {
     await page.getByRole("button", { name: "Add User" }).click()
 
     // Fill the form
-    await page.getByPlaceholder("Email").fill(email)
-    await page.getByPlaceholder("Password").first().fill(password)
-    await page.getByPlaceholder("Password").last().fill(password)
+    await page.getByPlaceholder("user@example.com").fill(email)
+    await page.getByPlaceholder("At least 8 characters").fill(password)
+    await page.getByPlaceholder("Re-enter the password").fill(password)
 
     // Select "Admin" in the Role combobox (default is Staff, so we change it)
     await page.getByRole("dialog").getByRole("combobox").click()
