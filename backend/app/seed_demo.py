@@ -513,7 +513,7 @@ def seed(s: Session) -> None:
                 reason=reason,
             ),
             submitted_by_user_id=uid,
-        )
+        )[0]
         for kind, payload, reason, uid in [
             ("sale", {"sku": "CBL-USBC-2M", "qty": 2}, SyncReviewReason.STALE, users[1].id),
             ("sale", {"barcode": "unknown-123"}, SyncReviewReason.CONFLICT, users[2].id),

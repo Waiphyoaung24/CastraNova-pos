@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app import crud
 from app.api.deps import AdminUser, CurrentUser, SessionDep, get_admin
@@ -13,6 +13,7 @@ from app.models import (
     SyncReviewResolve,
     SyncReviewState,
 )
+from app.services import notify
 
 router = APIRouter(prefix="/sync-review", tags=["sync-review"])
 
@@ -27,13 +28,18 @@ def ingest_sync_review_item(
     request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
     session: SessionDep,
     current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
     data: SyncReviewItemCreate,
 ) -> SyncReviewItemStaffPublic:
     """Report a STALE/CONFLICT offline mutation for review (FR-021). Any
     authenticated device may ingest; idempotent on idempotency_key."""
-    item = crud.create_sync_review_item(
+    item, replayed = crud.create_sync_review_item(
         session=session, data=data, submitted_by_user_id=current_user.id
     )
+    # Only a genuine insert alerts admins — a device re-POSTing the same
+    # idempotency_key must not re-notify for an item already in the queue.
+    if not replayed:
+        background_tasks.add_task(notify.notify_sync_review_pending_bg)
     return SyncReviewItemStaffPublic.model_validate(item)
 
 
