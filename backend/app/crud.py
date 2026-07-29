@@ -2892,6 +2892,13 @@ def _return_part_line(
     # Re-lock the target batches in the SAME (received_at, id) order that
     # consume_quantity_fifo uses, so a concurrent sale and return on this product
     # acquire batch locks in one global order and cannot deadlock.
+    #
+    # populate_existing is load-bearing, not a micro-optimization: the cost-line
+    # join above already pulled these PartBatch rows into the identity map
+    # UNLOCKED. Without it SQLAlchemy hands back those stale objects and the
+    # `remaining_qty += qty` below is computed from a pre-lock value, silently
+    # clobbering a concurrent sale's decrement (a lost update — caught by
+    # tests/crud/test_return_concurrency.py).
     locked = {
         b.id: b
         for b in session.exec(
@@ -2899,6 +2906,7 @@ def _return_part_line(
             .where(col(PartBatch.id).in_([bid for bid, _, _ in plan]))
             .order_by(col(PartBatch.received_at), col(PartBatch.id))
             .with_for_update()
+            .execution_options(populate_existing=True)
         ).all()
     }
 
