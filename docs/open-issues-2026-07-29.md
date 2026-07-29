@@ -131,17 +131,25 @@ got the same treatment. Mirror it.
 
 ---
 
-## 7. E2E suite: 28 failures, largely downstream of §1
+## 7. E2E suite: 33 failures, largely downstream of §1
 
-**Run:** full suite on an isolated stack (own DB, `E2E_SKIP_DB_RESET=1`),
-`306/306` executed, **28 failed**.
+**Run:** full suite on an isolated stack (own DB, `E2E_SKIP_DB_RESET=1`).
+Final tally: **33 failed, 1 flaky, 272 passed** in 40.8 min.
 
-Affected specs: `admin`, `channel-margin-drilldown`, `product-active-toggle`,
-`product-dialog-focus`, `product-edit-flow`, `product-filters`,
-`project-edit-flow`, `reset-password`, `roles`, `sale`, `sale-return`,
-`stock-supplier-filter`, `stock-units`, `supplier-edit-flow`.
+| Spec | Failures |
+|---|---|
+| `sale.spec.ts` | 5 |
+| `reset-password.spec.ts` | 5 |
+| `user-settings.spec.ts` | 3 |
+| `supplier-edit-flow.spec.ts` | 3 |
+| `channel-margin-drilldown.spec.ts` | 3 |
+| `tickets.spec.ts` | 2 |
+| `stock-supplier-filter.spec.ts` | 2 |
+| `sale-return.spec.ts` | 2 |
+| `roles.spec.ts` | 2 |
+| `stock-units`, `project-edit-flow`, `product-filters`, `product-edit-flow`, `product-dialog-focus`, `product-active-toggle`, `admin` | 1 each |
 
-**Do not triage these as 14 separate bugs.** 51 log entries show tests being
+**Do not triage these as 16 separate bugs.** **66** log entries show tests being
 navigated to `/login` mid-run, and the failures are overwhelmingly
 `locator.click` / `locator.fill` timeouts *after* that bounce — i.e. the page
 was logged out, not broken. Fix §1 first, then re-run and re-triage whatever
