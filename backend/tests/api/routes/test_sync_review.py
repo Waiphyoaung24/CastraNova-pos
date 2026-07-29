@@ -331,3 +331,33 @@ def test_resolve_404(
         headers=superuser_token_headers,
     )
     assert r.status_code == 404
+
+
+def test_count_pending_splits_by_reason(db: Session) -> None:
+    before = crud.count_pending_sync_review_items(session=db)
+
+    _ingest(db, reason=SyncReviewReason.STALE)
+    _ingest(db, reason=SyncReviewReason.CONFLICT)
+    _ingest(db, reason=SyncReviewReason.CONFLICT)
+
+    after = crud.count_pending_sync_review_items(session=db)
+    assert after.stale == before.stale + 1
+    assert after.conflict == before.conflict + 2
+    assert after.total == after.stale + after.conflict
+
+
+def test_count_pending_excludes_resolved(db: Session) -> None:
+    item_id = _ingest(db, reason=SyncReviewReason.CONFLICT)
+    before = crud.count_pending_sync_review_items(session=db)
+
+    crud.resolve_sync_review_item(
+        session=db,
+        item_id=item_id,
+        admin_id=_admin_id(db),
+        new_state=SyncReviewState.RESOLVED,
+        note=None,
+    )
+
+    after = crud.count_pending_sync_review_items(session=db)
+    assert after.conflict == before.conflict - 1
+    assert after.total == before.total - 1

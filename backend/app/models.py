@@ -1293,6 +1293,15 @@ class SyncReviewResolve(SQLModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class SyncReviewPendingCounts(SQLModel):
+    # Named fields rather than a bare 3-tuple: three same-typed ints are
+    # trivially transposable at the call site, and the notify template reads
+    # all three.
+    total: int
+    stale: int
+    conflict: int
+
+
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------
 
 

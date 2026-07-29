@@ -96,6 +96,8 @@ from app.models import (
     SupplierUpdate,
     SyncReviewItem,
     SyncReviewItemCreate,
+    SyncReviewPendingCounts,
+    SyncReviewReason,
     SyncReviewState,
     SystemSetting,
     TelegramConfirmOutcome,
@@ -2316,6 +2318,22 @@ def list_sync_review_items(
         stmt = stmt.where(col(SyncReviewItem.state) == state)
     stmt = stmt.order_by(col(SyncReviewItem.created_at)).offset(skip).limit(limit)
     return list(session.exec(stmt).all())
+
+
+def count_pending_sync_review_items(*, session: Session) -> SyncReviewPendingCounts:
+    """PENDING queue depth, split by reason — the numbers the admin alert
+    quotes. One grouped scan, served by ix_syncreviewitem_state_created."""
+    rows = session.execute(
+        sa_select(col(SyncReviewItem.reason), func.count())
+        .where(col(SyncReviewItem.state) == SyncReviewState.PENDING)
+        .group_by(col(SyncReviewItem.reason))
+    ).all()
+    by_reason: dict[SyncReviewReason, int] = {r: int(n) for r, n in rows}
+    stale = int(by_reason.get(SyncReviewReason.STALE, 0))
+    conflict = int(by_reason.get(SyncReviewReason.CONFLICT, 0))
+    return SyncReviewPendingCounts(
+        total=stale + conflict, stale=stale, conflict=conflict
+    )
 
 
 def resolve_sync_review_item(
