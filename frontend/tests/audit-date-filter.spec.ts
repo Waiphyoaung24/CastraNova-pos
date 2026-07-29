@@ -31,7 +31,9 @@ function display(iso: string): string {
 
 const today = localISO(new Date())
 
-test("From and To are set from the grid and cleared again", async ({ page }) => {
+test("From and To are set from the grid and cleared again", async ({
+  page,
+}) => {
   await page.goto("/audit")
 
   // The trigger names itself "<label> <value>", e.g. "To Any date". Anchor on

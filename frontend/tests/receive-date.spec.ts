@@ -52,7 +52,9 @@ async function pickDate(page: Page, trigger: Locator, iso: string) {
   if (iso.slice(0, 7) !== today.slice(0, 7)) {
     await dialog.getByRole("button", { name: "Previous month" }).click()
   }
-  await dialog.getByRole("gridcell", { name: display(iso), exact: true }).click()
+  await dialog
+    .getByRole("gridcell", { name: display(iso), exact: true })
+    .click()
 }
 
 test("both Receive tabs default the date to today", async ({ page }) => {

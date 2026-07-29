@@ -8,6 +8,7 @@ import {
 } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { Button } from "@/components/ui/button"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Dialog,
   DialogContent,
@@ -144,21 +145,27 @@ export function ProjectEditDialog({
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor={startId}>Start date</Label>
-              <Input
+              <Label id={`${startId}-label`} htmlFor={startId}>
+                Start date
+              </Label>
+              <DatePicker
                 id={startId}
-                type="date"
+                labelledBy={`${startId}-label`}
                 value={draft.startDate}
-                onChange={(e) => patch({ startDate: e.target.value })}
+                onChange={(iso) => patch({ startDate: iso })}
+                placeholder="No start date"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={endId}>End date</Label>
-              <Input
+              <Label id={`${endId}-label`} htmlFor={endId}>
+                End date
+              </Label>
+              <DatePicker
                 id={endId}
-                type="date"
+                labelledBy={`${endId}-label`}
                 value={draft.endDate}
-                onChange={(e) => patch({ endDate: e.target.value })}
+                onChange={(iso) => patch({ endDate: iso })}
+                placeholder="No end date"
               />
             </div>
           </div>
