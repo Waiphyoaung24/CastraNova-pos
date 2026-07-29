@@ -1,7 +1,7 @@
-"""m035 sync review notification event
+"""m036 sync review notification event
 
 Revision ID: c4d5e6f7a8b9
-Revises: f1a2b3c4d5e6
+Revises: a2b3c4d5e6f7
 Create Date: 2026-07-29 00:00:00.000000
 
 Adds SYNC_REVIEW_PENDING to the notificationevent enum so admins can be
@@ -22,7 +22,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'c4d5e6f7a8b9'
-down_revision = 'f1a2b3c4d5e6'
+down_revision = 'a2b3c4d5e6f7'
 branch_labels = None
 depends_on = None
 
