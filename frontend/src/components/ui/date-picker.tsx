@@ -298,3 +298,97 @@ export function DatePicker({
     </Popover>
   )
 }
+
+export type MonthPickerProps = {
+  id?: string
+  /** id of the visible `<Label>` — see `FieldTriggerProps.labelledBy`. */
+  labelledBy?: string
+  /** ISO `YYYY-MM`, or `""` when unset. */
+  value: string
+  /** Receives the `YYYY-MM` string — not a change event. */
+  onChange: (ym: string) => void
+  min?: string
+  max?: string
+  disabled?: boolean
+  placeholder?: string
+  className?: string
+}
+
+/** Opens straight into the year view — the same MonthGrid the DatePicker
+ * caption drops to, which is what makes the report screens match the date
+ * pickers for free. No Today/Clear footer: both report screens always hold a
+ * month (`currentMonth()` seeds them) and `isValidMonth()` rejects "". */
+export function MonthPicker({
+  id,
+  labelledBy,
+  value,
+  onChange,
+  min,
+  max,
+  disabled,
+  placeholder = "Pick a month",
+  className,
+}: MonthPickerProps) {
+  const bounds = { min, max }
+  const [open, setOpen] = useState(false)
+  const [focused, setFocused] = useState(
+    () => value || clampMonth(monthOf(todayISO()), bounds),
+  )
+  const [visibleYear, setVisibleYear] = useState(() =>
+    Number((value || todayISO()).slice(0, 4)),
+  )
+
+  useEffect(() => {
+    if (!open) return
+    const start = value || clampMonth(monthOf(todayISO()), { min, max })
+    setFocused(start)
+    setVisibleYear(Number(start.slice(0, 4)))
+  }, [open, value, min, max])
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <FieldTrigger
+        id={id}
+        labelledBy={labelledBy}
+        label={value ? formatMonthDisplay(value) : placeholder}
+        isPlaceholder={!value}
+        disabled={disabled}
+        className={className}
+        onOpen={() => setOpen(true)}
+      />
+      <PopoverContent
+        align="start"
+        aria-label="Choose month"
+        className="w-auto rounded-lg p-3"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+        }}
+      >
+        <Stepper
+          prevLabel="Previous year"
+          onPrev={() => setVisibleYear((y) => y - 1)}
+          nextLabel="Next year"
+          onNext={() => setVisibleYear((y) => y + 1)}
+        >
+          <span aria-live="polite" className="text-sm font-medium">
+            {visibleYear}
+          </span>
+        </Stepper>
+        <MonthGrid
+          year={visibleYear}
+          selected={value}
+          focused={focused}
+          bounds={bounds}
+          onSelect={(ym) => {
+            onChange(ym)
+            setOpen(false)
+          }}
+          onFocusedChange={(ym) => {
+            setFocused(ym)
+            setVisibleYear(Number(ym.slice(0, 4)))
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}

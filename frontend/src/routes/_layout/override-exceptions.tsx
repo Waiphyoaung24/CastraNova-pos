@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/Common/PageHeader"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { MonthPicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -95,12 +95,14 @@ function OverrideExceptions() {
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="month">Month</Label>
-          <Input
+          <Label id="month-label" htmlFor="month">
+            Month
+          </Label>
+          <MonthPicker
             id="month"
-            type="month"
+            labelledBy="month-label"
             value={month}
-            onChange={(e) => setMonth(e.target.value)}
+            onChange={setMonth}
             className="w-full sm:w-48"
           />
         </div>

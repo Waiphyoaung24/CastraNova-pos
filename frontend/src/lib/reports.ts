@@ -11,7 +11,7 @@ export function formatThb(value: string): string {
 }
 
 /**
- * Current month as YYYY-MM — the shape an <input type="month"> emits and the
+ * Current month as YYYY-MM — the shape MonthPicker emits and the
  * channel-margin endpoint expects. `now` is injectable for deterministic tests.
  */
 export function currentMonth(now: Date = new Date()): string {
