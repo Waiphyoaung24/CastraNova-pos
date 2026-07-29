@@ -185,7 +185,7 @@ export type NewPassword = {
 
 export type NotificationChannel = 'LINE' | 'VIBER' | 'TELEGRAM';
 
-export type NotificationEvent = 'LOW_STOCK' | 'OVERRIDE_PENDING' | 'PULL_FULFILLED' | 'PULL_SHORT';
+export type NotificationEvent = 'LOW_STOCK' | 'OVERRIDE_PENDING' | 'PULL_FULFILLED' | 'PULL_SHORT' | 'SYNC_REVIEW_PENDING';
 
 export type NotificationPreferencePublic = {
     id: (string | null);

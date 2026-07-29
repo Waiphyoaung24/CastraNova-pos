@@ -929,7 +929,7 @@ export const NotificationChannelSchema = {
 
 export const NotificationEventSchema = {
     type: 'string',
-    enum: ['LOW_STOCK', 'OVERRIDE_PENDING', 'PULL_FULFILLED', 'PULL_SHORT'],
+    enum: ['LOW_STOCK', 'OVERRIDE_PENDING', 'PULL_FULFILLED', 'PULL_SHORT', 'SYNC_REVIEW_PENDING'],
     title: 'NotificationEvent'
 } as const;
 
