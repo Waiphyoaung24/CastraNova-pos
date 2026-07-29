@@ -79,7 +79,7 @@ CastraNova-POS is an **inventory tracking & management system**. Forked from `fa
 - **CodeRabbit whole-repo remediation done:** migration `m027` (saleline `quantity > 0`, product `retail/repair_price_thb >= 0` CHECKs, `systemsetting.updated_by_user_id` FK `ON DELETE SET NULL`) + `tickets.tsx` idempotency-key reuse on retry. Design/plan under `docs/superpowers/`.
 - **Telegram self-enrollment shipped** (m030/m031): a one-time-code connect flow binds a user's Telegram chat to their account (`telegramconnectcode` table, unique `telegram_chat_id`); LINE/Viber still have no enrollment path.
 - **Ledger/report indexes shipped** (m028/m029/m032/m033): FK and range-filter indexes on the append-only unit/part movement ledgers and the margin-report date columns.
-- **Alembic head: `m033`** (`e5f6a7b8c9d0`). Run `alembic upgrade head` on any DB still on an older revision.
+- **Alembic head: `m036`** (`c4d5e6f7a8b9`). Run `alembic upgrade head` on any DB still on an older revision. This line goes stale fast — several worktrees add migrations concurrently, so trust `alembic heads` over this doc.
 - **Known backlog:** `ServiceTicketPart` has no `idempotency_key`, so a multi-part ticket retry can duplicate part lines — add one (mirroring `Sale`/`PartMovement`) in a future hardening pass. Remaining deploy-checklist leftovers are tracked outside this file.
 
 ## Stack
