@@ -21,6 +21,7 @@ import { ScanField } from "@/components/ScanField"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -270,22 +271,22 @@ function SerializedTab() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="receive-date">
+          <Label id="receive-date-label" htmlFor="receive-date">
             Receive date
             <span aria-hidden="true" className="text-destructive">
               {" "}
               *
             </span>
           </Label>
-          <Input
+          <DatePicker
             id="receive-date"
-            type="date"
+            labelledBy="receive-date-label"
             className="h-11"
             max={todayISO()}
-            aria-required="true"
+            required
             disabled={mutation.isPending}
             value={receivedDate}
-            onChange={(e) => setReceivedDate(e.target.value)}
+            onChange={setReceivedDate}
           />
         </div>
       </div>
@@ -597,22 +598,25 @@ function QuantityTab() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor={`${fieldId}-received-date`}>
+          <Label
+            id={`${fieldId}-received-date-label`}
+            htmlFor={`${fieldId}-received-date`}
+          >
             Receive date
             <span aria-hidden="true" className="text-destructive">
               {" "}
               *
             </span>
           </Label>
-          <Input
+          <DatePicker
             id={`${fieldId}-received-date`}
-            type="date"
+            labelledBy={`${fieldId}-received-date-label`}
             className="h-11"
             max={todayISO()}
-            aria-required="true"
+            required
             disabled={mutation.isPending}
             value={draft.receivedDate}
-            onChange={(e) => patch("receivedDate", e.target.value)}
+            onChange={(iso) => patch("receivedDate", iso)}
           />
         </div>
       </div>
