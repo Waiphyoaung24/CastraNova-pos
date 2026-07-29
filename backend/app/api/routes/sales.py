@@ -4,14 +4,27 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlmodel import select
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_current_user, is_admin
+from app.api.deps import (
+    AdminUser,
+    CurrentUser,
+    SessionDep,
+    get_admin,
+    get_current_user,
+    is_admin,
+)
 from app.models import (
+    ReturnableSalesPublic,
     Sale,
     SaleCreateRequest,
     SaleLine,
     SaleLinePublic,
     SaleLineStaffPublic,
     SalePublic,
+    SaleReturn,
+    SaleReturnCreateRequest,
+    SaleReturnLine,
+    SaleReturnLinePublic,
+    SaleReturnPublic,
     SaleStaffPublic,
     User,
 )
@@ -61,6 +74,64 @@ def create_sale(
     if crossed:
         background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, sale=sale, user=current_user)
+
+
+def _return_to_public(*, session: SessionDep, ret: SaleReturn) -> SaleReturnPublic:
+    lines = session.exec(
+        select(SaleReturnLine).where(SaleReturnLine.sale_return_id == ret.id)
+    ).all()
+    return SaleReturnPublic(
+        id=ret.id,
+        sale_id=ret.sale_id,
+        reason=ret.reason,
+        returned_at=ret.returned_at,
+        total_refund_thb=ret.total_refund_thb,
+        total_cogs_restored_thb=ret.total_cogs_restored_thb,
+        created_by_user_id=ret.created_by_user_id,
+        lines=[SaleReturnLinePublic.model_validate(line) for line in lines],
+    )
+
+
+@router.post("/{sale_id}/returns", response_model=SaleReturnPublic)
+def create_sale_return(
+    *,
+    session: SessionDep,
+    admin: AdminUser,
+    sale_id: uuid.UUID,
+    payload: SaleReturnCreateRequest,
+) -> SaleReturnPublic:
+    """Record a customer return against a sale (admin-only, design 2026-07-25).
+
+    Restores stock at the original FIFO cost and reverses the sale's margin
+    contribution in the RETURN month. Refund is fixed at the original line price.
+    """
+    ret = crud.create_sale_return(
+        session=session,
+        sale_id=sale_id,
+        payload=payload,
+        created_by_user_id=admin.id,
+    )
+    return _return_to_public(session=session, ret=ret)
+
+
+# Declared before the /{sale_id} routes: a literal path segment must win over the
+# parameterized one, or "returnable" is parsed as a sale id.
+@router.get(
+    "/returnable",
+    response_model=ReturnableSalesPublic,
+    dependencies=[Depends(get_admin)],
+)
+def read_returnable_sales(
+    *,
+    session: SessionDep,
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+) -> ReturnableSalesPublic:
+    """Recent sales with still-returnable lines for one unit or one SKU.
+    Admin-only — it feeds the return flow and exposes line prices."""
+    return crud.list_returnable_sales(
+        session=session, castranova_barcode=castranova_barcode, sku=sku
+    )
 
 
 # Shared-team access (recorded decision D3, hardening spec 2026-06-11): any

@@ -70,6 +70,9 @@ from app.models import (
     ProjectStatus,
     ProjectUpdate,
     ReceivePiece,
+    ReturnableLinePublic,
+    ReturnableSalePublic,
+    ReturnableSalesPublic,
     Sale,
     SaleLine,
     SaleLineInput,
@@ -3078,6 +3081,107 @@ def create_sale_return(
         return winner
     session.refresh(ret)
     return ret
+
+
+_RETURNABLE_SALE_LIMIT = 20  # bounded, most-recent-first (hardening spec §7)
+
+
+def list_returnable_sales(
+    *,
+    session: Session,
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+    limit: int = _RETURNABLE_SALE_LIMIT,
+) -> ReturnableSalesPublic:
+    """Recent sales holding still-returnable lines for one unit or one SKU.
+
+    Fully-returned lines are omitted, so an empty result means "nothing here can
+    be returned" — which is exactly what the UI needs to decide between offering
+    a return and offering a write-off.
+    """
+    if (castranova_barcode is None) == (sku is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide exactly one of castranova_barcode or sku",
+        )
+
+    stmt = (
+        select(SaleLine, Sale)
+        .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
+        .order_by(col(Sale.sold_at).desc(), col(Sale.id))
+    )
+    if castranova_barcode is not None:
+        stmt = stmt.join(Unit, col(SaleLine.unit_id) == col(Unit.id)).where(
+            Unit.castranova_barcode == castranova_barcode
+        )
+    else:
+        product = session.exec(select(Product).where(Product.sku == sku)).first()
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        stmt = stmt.where(SaleLine.product_id == product.id)
+
+    # Over-fetch: fully-returned lines are filtered out below, so the raw row
+    # count is an upper bound on the sales we can actually offer.
+    rows = session.exec(stmt.limit(limit * 4)).all()
+
+    # Batched label lookups. A UNIT line carries unit_id, not product_id, so the
+    # product comes through Unit — same recovery the margin report does.
+    unit_ids = [sl.unit_id for sl, _ in rows if sl.unit_id is not None]
+    unit_product: dict[uuid.UUID, uuid.UUID] = (
+        {
+            u.id: u.product_id
+            for u in session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all()
+        }
+        if unit_ids
+        else {}
+    )
+
+    def _product_of(sale_line: SaleLine) -> uuid.UUID | None:
+        if sale_line.product_id is not None:
+            return sale_line.product_id
+        if sale_line.unit_id is None:
+            return None
+        return unit_product.get(sale_line.unit_id)
+
+    labels = _product_labels(
+        session,
+        [pid for pid in {_product_of(sl) for sl, _ in rows} if pid is not None],
+    )
+    customers = _customer_labels(session, [s.customer_id for _, s in rows])
+
+    by_sale: dict[uuid.UUID, ReturnableSalePublic] = {}
+    for sale_line, sale in rows:
+        returned = _returned_so_far(session=session, sale_line_id=sale_line.id)
+        returnable = sale_line.quantity - returned
+        if returnable <= 0:
+            continue
+        pid = _product_of(sale_line)
+        entry = by_sale.get(sale.id)
+        if entry is None:
+            if len(by_sale) >= limit:
+                continue
+            entry = ReturnableSalePublic(
+                sale_id=sale.id,
+                sold_at=sale.sold_at,
+                customer_id=sale.customer_id,
+                customer_name=customers.get(sale.customer_id, ""),
+                lines=[],
+            )
+            by_sale[sale.id] = entry
+        entry.lines.append(
+            ReturnableLinePublic(
+                sale_line_id=sale_line.id,
+                line_kind=sale_line.line_kind,
+                product_id=pid,
+                unit_id=sale_line.unit_id,
+                label=labels.get(pid, "") if pid else "",
+                quantity_sold=sale_line.quantity,
+                quantity_returned=returned,
+                quantity_returnable=returnable,
+                unit_price_thb=sale_line.unit_price_thb,
+            )
+        )
+    return ReturnableSalesPublic(sales=list(by_sale.values()))
 
 
 # --- Maintenance / service tickets (FR-008) -----------------------------------

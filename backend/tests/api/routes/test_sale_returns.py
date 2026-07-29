@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app import crud
@@ -400,3 +401,87 @@ def test_unit_line_quantity_must_be_one(db: Session) -> None:
     with pytest.raises(HTTPException) as exc:
         _return(db, sale=sale, sale_line_id=_line_of(db, sale).id, quantity=2)
     assert exc.value.status_code in (409, 422)
+
+
+# --- HTTP surface -------------------------------------------------------------
+
+
+def test_admin_can_post_a_return(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _seed(db)
+    product_id, sku = _part_product(db)
+    _receive(db, product_id=product_id, qty=2, cost="10.00")
+    sale = _sell_parts(db, sku=sku, qty=2, customer_id=_customer(db))
+
+    r = client.post(
+        f"{PREFIX}/sales/{sale.id}/returns",
+        headers=superuser_token_headers,
+        json={
+            "idempotency_key": str(uuid.uuid4()),
+            "reason": "faulty on arrival",
+            "lines": [{"sale_line_id": str(_line_of(db, sale).id), "quantity": 2}],
+        },
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sale_id"] == str(sale.id)
+    assert Decimal(body["total_refund_thb"]) == Decimal("200.00")
+    assert Decimal(body["total_cogs_restored_thb"]) == Decimal("20.00")
+    assert len(body["lines"]) == 1
+
+
+def test_staff_cannot_post_a_return(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    _seed(db)
+    product_id, sku = _part_product(db)
+    _receive(db, product_id=product_id, qty=1, cost="10.00")
+    sale = _sell_parts(db, sku=sku, qty=1, customer_id=_customer(db))
+
+    r = client.post(
+        f"{PREFIX}/sales/{sale.id}/returns",
+        headers=normal_user_token_headers,
+        json={
+            "idempotency_key": str(uuid.uuid4()),
+            "reason": "nope",
+            "lines": [{"sale_line_id": str(_line_of(db, sale).id), "quantity": 1}],
+        },
+    )
+    assert r.status_code == 403
+
+
+def test_missing_reason_is_422(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    _seed(db)
+    product_id, sku = _part_product(db)
+    _receive(db, product_id=product_id, qty=1, cost="10.00")
+    sale = _sell_parts(db, sku=sku, qty=1, customer_id=_customer(db))
+
+    r = client.post(
+        f"{PREFIX}/sales/{sale.id}/returns",
+        headers=superuser_token_headers,
+        json={
+            "idempotency_key": str(uuid.uuid4()),
+            "reason": "",
+            "lines": [{"sale_line_id": str(_line_of(db, sale).id), "quantity": 1}],
+        },
+    )
+    assert r.status_code == 422
+
+
+def test_unknown_sale_is_404(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    r = client.post(
+        f"{PREFIX}/sales/{uuid.uuid4()}/returns",
+        headers=superuser_token_headers,
+        json={
+            "idempotency_key": str(uuid.uuid4()),
+            "reason": "x",
+            "lines": [{"sale_line_id": str(uuid.uuid4()), "quantity": 1}],
+        },
+    )
+    assert r.status_code == 404
