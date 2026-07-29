@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/Common/PageHeader"
 import { PaginationControls } from "@/components/Common/PaginationControls"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -188,28 +188,34 @@ function Audit() {
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={fromId}>From</Label>
-          <Input
+          <Label id={`${fromId}-label`} htmlFor={fromId}>
+            From
+          </Label>
+          <DatePicker
             id={fromId}
-            type="date"
+            labelledBy={`${fromId}-label`}
             value={filter.fromDate}
-            onChange={(e) => {
-              setFilter((f) => ({ ...f, fromDate: e.target.value }))
+            onChange={(iso) => {
+              setFilter((f) => ({ ...f, fromDate: iso }))
               resetPage()
             }}
+            placeholder="Any date"
             className="w-full sm:w-44"
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={toId}>To</Label>
-          <Input
+          <Label id={`${toId}-label`} htmlFor={toId}>
+            To
+          </Label>
+          <DatePicker
             id={toId}
-            type="date"
+            labelledBy={`${toId}-label`}
             value={filter.toDate}
-            onChange={(e) => {
-              setFilter((f) => ({ ...f, toDate: e.target.value }))
+            onChange={(iso) => {
+              setFilter((f) => ({ ...f, toDate: iso }))
               resetPage()
             }}
+            placeholder="Any date"
             className="w-full sm:w-44"
           />
         </div>
