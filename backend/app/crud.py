@@ -2271,8 +2271,12 @@ def create_stock_adjustment(
 
 def create_sync_review_item(
     *, session: Session, data: SyncReviewItemCreate, submitted_by_user_id: uuid.UUID
-) -> SyncReviewItem:
+) -> tuple[SyncReviewItem, bool]:
     """Ingest a STALE/CONFLICT offline mutation into the admin review queue.
+
+    Returns ``(item, replayed)``. ``replayed`` is True when an existing row was
+    returned instead of a fresh insert — the caller uses it to avoid
+    re-notifying for an item already sitting in the queue.
 
     Idempotent by ``idempotency_key``: a re-POST of the same offline item
     returns the existing row (UNIQUE constraint + IntegrityError rollback path
@@ -2297,7 +2301,7 @@ def create_sync_review_item(
             stored_user_id=item.submitted_by_user_id,
             caller_user_id=submitted_by_user_id,
         )
-    return item
+    return item, replayed
 
 
 def get_sync_review_item(
