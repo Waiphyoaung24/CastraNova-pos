@@ -3976,6 +3976,31 @@ def _month_window(year: int, month: int) -> tuple[datetime, datetime]:
     return start, end
 
 
+# Synthetic channel-row key for returns. Deliberately NOT a Channel enum member:
+# Channel drives the report's channel FILTER, and "returns" is an event on the
+# SALE channel, not a fourth channel to slice by.
+_SALE_RETURN_KEY = "SALE_RETURN"
+_SALE_RETURN_LABEL = "SALE RETURNS"
+
+
+def _sale_return_totals(
+    session: Session, start: datetime, end: datetime
+) -> tuple[Decimal, Decimal]:
+    """(refund, cogs_restored) for returns RECORDED in the window. Keyed on
+    returned_at, never sold_at — that is what keeps past months immutable."""
+    refund, cogs = session.exec(
+        select(
+            func.coalesce(func.sum(SaleReturn.total_refund_thb), Decimal("0")),
+            func.coalesce(
+                func.sum(SaleReturn.total_cogs_restored_thb), Decimal("0")
+            ),
+        ).where(
+            col(SaleReturn.returned_at) >= start, col(SaleReturn.returned_at) < end
+        )
+    ).one()
+    return refund, cogs
+
+
 def _channel_rows(
     session: Session,
     start: datetime,
@@ -4050,7 +4075,7 @@ def _channel_rows(
         Channel.PROJECT: (_q(0), _q(proj_part_cogs + proj_unit_cogs)),
     }
     wanted = [channel] if channel is not None else list(totals)
-    return [
+    rows = [
         MarginBreakdownRow(
             key=ch.value,
             label=ch.value,
@@ -4061,6 +4086,23 @@ def _channel_rows(
         for ch in wanted
         for rev, cogs in [totals[ch]]
     ]
+    # Returns are an event on the SALE channel, so they appear whenever SALE
+    # does. Omitted entirely in a month with no returns — unlike the three
+    # channels, a zero row here is noise, not parity.
+    if channel in (None, Channel.SALE):
+        refund, restored = _sale_return_totals(session, start, end)
+        if refund or restored:
+            rev, cogs = _q(-refund), _q(-restored)
+            rows.append(
+                MarginBreakdownRow(
+                    key=_SALE_RETURN_KEY,
+                    label=_SALE_RETURN_LABEL,
+                    revenue_thb=rev,
+                    cogs_thb=cogs,
+                    margin_thb=rev - cogs,
+                )
+            )
+    return rows
 
 
 def _merge(
@@ -4130,6 +4172,35 @@ def _product_rows(
             .group_by(col(Unit.product_id))
         ).all():
             _merge(acc, product_id, Decimal("0"), cogs)
+        # Returns net into the product's row for the RETURN month (no separate
+        # returns row at this grain). A UNIT line carries unit_id not product_id,
+        # so the product is recovered through Unit — same COALESCE as above.
+        pid_r = func.coalesce(SaleLine.product_id, Unit.product_id)
+        for product_id, refund, restored in session.exec(
+            select(
+                pid_r,
+                func.coalesce(
+                    func.sum(
+                        SaleReturnLine.quantity * SaleReturnLine.unit_price_thb
+                    ),
+                    Decimal("0"),
+                ),
+                func.coalesce(
+                    func.sum(SaleReturnLine.cogs_restored_thb), Decimal("0")
+                ),
+            )
+            .join(SaleLine, col(SaleReturnLine.sale_line_id) == col(SaleLine.id))
+            .join(
+                SaleReturn, col(SaleReturnLine.sale_return_id) == col(SaleReturn.id)
+            )
+            .join(Unit, col(SaleLine.unit_id) == col(Unit.id), isouter=True)
+            .where(
+                col(SaleReturn.returned_at) >= start,
+                col(SaleReturn.returned_at) < end,
+            )
+            .group_by(pid_r)
+        ).all():
+            _merge(acc, product_id, -refund, -restored)
 
     if channel in (None, Channel.MAINTENANCE):
         # revenue by ServiceTicketPart.product_id
@@ -4241,6 +4312,25 @@ def _customer_rows(
             .group_by(col(Sale.customer_id))
         ).all():
             _merge(acc, cust_id, rev, cogs)
+        # Returns net into the customer's row for the RETURN month. Uses the
+        # SaleReturn header totals (exact, and identical to the sum of its lines
+        # used by the PRODUCT grouping — so the two groupings reconcile).
+        for cust_id, refund, restored in session.exec(
+            select(
+                Sale.customer_id,
+                func.coalesce(func.sum(SaleReturn.total_refund_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(SaleReturn.total_cogs_restored_thb), Decimal("0")
+                ),
+            )
+            .join(Sale, col(SaleReturn.sale_id) == col(Sale.id))
+            .where(
+                col(SaleReturn.returned_at) >= start,
+                col(SaleReturn.returned_at) < end,
+            )
+            .group_by(col(Sale.customer_id))
+        ).all():
+            _merge(acc, cust_id, -refund, -restored)
 
     if channel in (None, Channel.MAINTENANCE):
         for cust_id, rev in session.exec(
