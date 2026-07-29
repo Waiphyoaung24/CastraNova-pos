@@ -20,8 +20,8 @@ export function isValidBudget(value: string): boolean {
  * Either date alone is fine (an open-ended project is legitimate), and an equal
  * pair is fine (a one-day project).
  *
- * Both values come from <input type="date">, so they are ISO `yyyy-mm-dd` and
- * compare correctly as strings — no Date parsing, no timezone shift.
+ * Both values come from a DatePicker, so they are ISO `yyyy-mm-dd` and compare
+ * correctly as strings — no Date parsing, no timezone shift.
  */
 export function isValidDateRange(startDate: string, endDate: string): boolean {
   const start = startDate.trim()

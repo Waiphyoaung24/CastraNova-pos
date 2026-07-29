@@ -10,6 +10,7 @@ import {
 } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { Button } from "@/components/ui/button"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,8 @@ export function ProjectCreateDialog({
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
   const [budget, setBudget] = useState("")
+  // Which of this dialog's own date pickers are open — see onOpenChange below.
+  const [pickerOpen, setPickerOpen] = useState({ start: false, end: false })
 
   const reset = () => {
     setCode("")
@@ -80,6 +83,11 @@ export function ProjectCreateDialog({
       // Required by the Customer field's EntityCombobox — see EntityCombobox.tsx.
       modal={false}
       onOpenChange={(next) => {
+        // modal={false} keeps this Dialog listening for Escape at the document,
+        // and Radix fires every layer's handler rather than only the topmost —
+        // so dismissing an open date picker would otherwise discard the whole
+        // half-filled form. Mirrors ProjectEditDialog.
+        if (!next && (pickerOpen.start || pickerOpen.end)) return
         setOpen(next)
         if (!next) reset()
       }}
@@ -132,22 +140,30 @@ export function ProjectCreateDialog({
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor={startId}>Start date</Label>
-              <Input
+              <Label id={`${startId}-label`} htmlFor={startId}>
+                Start date
+              </Label>
+              <DatePicker
                 id={startId}
-                type="date"
+                labelledBy={`${startId}-label`}
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={setStartDate}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, start: o }))}
+                placeholder="No start date"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={endId}>End date</Label>
-              <Input
+              <Label id={`${endId}-label`} htmlFor={endId}>
+                End date
+              </Label>
+              <DatePicker
                 id={endId}
-                type="date"
+                labelledBy={`${endId}-label`}
                 value={endDate}
-                aria-invalid={datesOutOfOrder}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={setEndDate}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, end: o }))}
+                invalid={datesOutOfOrder}
+                placeholder="No end date"
               />
             </div>
           </div>

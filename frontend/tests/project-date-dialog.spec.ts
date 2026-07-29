@@ -31,6 +31,14 @@ function display(iso: string): string {
 
 const today = localISO(new Date())
 
+/** Always inside the visible grid: the 42 cells start on or before the 1st, so
+ * the leading days cover yesterday even on the first of the month. */
+function daysAgo(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return localISO(d)
+}
+
 /** Create a customer and a project, then open that project's edit dialog.
  * Mirrors tests/project-edit-flow.spec.ts — the seeded database is not
  * guaranteed to contain a project, so each test makes its own. */
@@ -63,6 +71,38 @@ async function openEditDialog(page: Page) {
   await expect(dialog).toBeVisible()
   return dialog
 }
+
+test("the create dialog picks dates and flags an out-of-order range", async ({
+  page,
+}) => {
+  await page.goto("/projects")
+  await page.getByRole("button", { name: "New project" }).click()
+  const dialog = page.getByRole("dialog", { name: "New project" })
+  await expect(dialog).toBeVisible()
+
+  const start = dialog.getByRole("button", { name: /^Start date\b/ })
+  await start.click()
+  const picker = page.getByRole("dialog", { name: "Choose date" })
+  await picker
+    .getByRole("gridcell", { name: display(today), exact: true })
+    .click()
+  await expect(picker).toHaveCount(0)
+  await expect(start).toHaveText(display(today))
+  // The half-filled form survives selecting a date.
+  await expect(dialog).toBeVisible()
+
+  // An end date before the start is rejected, and marks the trigger invalid.
+  const end = dialog.getByRole("button", { name: /^End date\b/ })
+  await end.click()
+  await page
+    .getByRole("dialog", { name: "Choose date" })
+    .getByRole("gridcell", { name: display(daysAgo(1)), exact: true })
+    .click()
+  await expect(
+    dialog.getByText("End date must be on or after the start date."),
+  ).toBeVisible()
+  await expect(end).toHaveAttribute("aria-invalid", "true")
+})
 
 test("the date picker opens, selects and returns focus inside the dialog", async ({
   page,
