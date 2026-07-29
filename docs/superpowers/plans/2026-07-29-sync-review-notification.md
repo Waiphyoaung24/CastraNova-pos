@@ -12,7 +12,8 @@
 
 ## Global Constraints
 
-- **Alembic head is `m033` (`e5f6a7b8c9d0`).** The new migration is `m034`, revision `f6a7b8c9d0e1`, `down_revision = 'e5f6a7b8c9d0'`.
+- **Alembic head on `dev_wth` is `m034` (`f1a2b3c4d5e6`).** The new migration is `m035`, revision `c4d5e6f7a8b9`, `down_revision = 'f1a2b3c4d5e6'`. Note `CLAUDE.md` still claims the head is `m033` — it is two revisions stale; trust `alembic heads`, not the doc.
+- **`feat/sale-returns` also defines an `m035`** (`a2b3c4d5e6f7`, sale return) off the same `f1a2b3c4d5e6` parent. Deliberately decoupled: this branch does not chain onto it, so the two are independent. Whichever branch merges into `dev_wth` **second** must repoint its `down_revision` at the other's revision, or `alembic upgrade head` fails on multiple heads. Check `alembic heads` after that merge.
 - **mypy strict is on.** Annotate every parameter and return type. No bare `Any` where a concrete type exists.
 - **Routes never run SQL.** All DB reads/writes go through `crud.py`. The one exception already in `notify.py` — it selects `User` / `NotificationPreference` directly — is the established pattern for the service layer, and the cooldown query follows it.
 - **Never put a `payload` field in message text.** `SyncReviewItem.payload` is the raw held mutation and carries prices. Counts only. `notify.py:474` states the rule.
@@ -27,7 +28,7 @@
 | File | Responsibility | Task |
 |---|---|---|
 | `backend/app/models.py` | `NotificationEvent.SYNC_REVIEW_PENDING`, `ADMIN_ONLY_EVENTS` membership, `SyncReviewPendingCounts` schema | 1, 2 |
-| `backend/app/alembic/versions/f6a7b8c9d0e1_m034_sync_review_notification_event.py` | Additive enum value | 1 |
+| `backend/app/alembic/versions/c4d5e6f7a8b9_m035_sync_review_notification_event.py` | Additive enum value | 1 |
 | `backend/app/crud.py` | `count_pending_sync_review_items`, `create_sync_review_item` returning `(item, replayed)` | 2, 5 |
 | `backend/app/services/notify.py` | Render template, cooldown filter, producer + `_bg` entrypoint | 3, 4 |
 | `backend/app/api/routes/sync_review.py` | Queues the background notify on a genuine insert | 5 |
@@ -43,7 +44,7 @@
 
 **Files:**
 - Modify: `backend/app/models.py:127-153`
-- Create: `backend/app/alembic/versions/f6a7b8c9d0e1_m034_sync_review_notification_event.py`
+- Create: `backend/app/alembic/versions/c4d5e6f7a8b9_m035_sync_review_notification_event.py`
 - Test: `backend/tests/services/test_notification_policy.py`
 
 **Interfaces:**
@@ -119,13 +120,13 @@ Expected: PASS (2 tests)
 
 - [ ] **Step 6: Write the migration**
 
-Create `backend/app/alembic/versions/f6a7b8c9d0e1_m034_sync_review_notification_event.py`:
+Create `backend/app/alembic/versions/c4d5e6f7a8b9_m035_sync_review_notification_event.py`:
 
 ```python
-"""m034 sync review notification event
+"""m035 sync review notification event
 
-Revision ID: f6a7b8c9d0e1
-Revises: e5f6a7b8c9d0
+Revision ID: c4d5e6f7a8b9
+Revises: f1a2b3c4d5e6
 Create Date: 2026-07-29 00:00:00.000000
 
 Adds SYNC_REVIEW_PENDING to the notificationevent enum so admins can be
@@ -145,8 +146,8 @@ not do.
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = 'f6a7b8c9d0e1'
-down_revision = 'e5f6a7b8c9d0'
+revision = 'c4d5e6f7a8b9'
+down_revision = 'f1a2b3c4d5e6'
 branch_labels = None
 depends_on = None
 
@@ -166,7 +167,7 @@ def downgrade() -> None:
 - [ ] **Step 7: Apply and verify the migration**
 
 Run: `cd backend && alembic upgrade head && alembic current`
-Expected: `alembic current` reports `f6a7b8c9d0e1 (head)`.
+Expected: `alembic current` reports `c4d5e6f7a8b9 (head)`.
 
 Then confirm the enum actually accepts the value:
 
@@ -176,8 +177,8 @@ Expected: five rows, including `SYNC_REVIEW_PENDING`.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/app/models.py backend/app/alembic/versions/f6a7b8c9d0e1_m034_sync_review_notification_event.py backend/tests/services/test_notification_policy.py
-git commit -m "feat(notify): add SYNC_REVIEW_PENDING event (m034)"
+git add backend/app/models.py backend/app/alembic/versions/c4d5e6f7a8b9_m035_sync_review_notification_event.py backend/tests/services/test_notification_policy.py
+git commit -m "feat(notify): add SYNC_REVIEW_PENDING event (m035)"
 ```
 
 ---
@@ -909,7 +910,7 @@ git commit -m "chore(client): regenerate SDK for SYNC_REVIEW_PENDING"
 
 ## Done criteria
 
-- `alembic current` reports `f6a7b8c9d0e1 (head)`.
+- `alembic current` reports `c4d5e6f7a8b9 (head)`.
 - `cd backend && pytest -q` reports 0 failed.
 - An admin opted into SYNC_REVIEW_PENDING receives one message on the first ingest and none for four more minutes.
 - A staff user opted in receives nothing.
