@@ -2,6 +2,7 @@ import type {
   ReceiveQuantityRequest,
   ReceiveSerializedRequest,
 } from "../client/types.gen"
+import { todayISO } from "./date-field"
 
 // Pure, React-free form logic for the Receive screen (Task 4.1).
 // Costs stay as strings end-to-end (money-boundary discipline); they are only
@@ -31,14 +32,10 @@ export type QuantityDraft = {
 // Receive date
 // ---------------------------------------------------------------------------
 
-/** Today as `YYYY-MM-DD` in the operator's LOCAL timezone — the shape an
- * `<input type="date">` emits. Deliberately not `toISOString()`, which is UTC
- * and would show the wrong calendar day either side of midnight. */
-export function todayISO(): string {
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-}
+// `todayISO` lives in `date-field.ts` now — a generic date module must not
+// depend on a receive-form module. Re-exported so `receive.tsx` and
+// `receive-form.test.ts` keep importing it from here.
+export { todayISO }
 
 /** A well-formed, non-future receive date. ISO dates compare correctly as
  * strings, so no Date parsing is needed. The server re-checks this — the guard
