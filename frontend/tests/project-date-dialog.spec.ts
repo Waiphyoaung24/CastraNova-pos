@@ -37,18 +37,25 @@ const today = localISO(new Date())
 async function openEditDialog(page: Page) {
   const customer = `E2E-Cust-${Date.now()}`
   await page.goto("/customers")
-  await page.getByLabel("Name").first().fill(customer)
-  await page.getByRole("button", { name: "Create customer" }).click()
+  // The create form lives behind a dialog, not inline on the page.
+  await page.getByRole("button", { name: "New customer" }).click()
+  const newCustomer = page.getByRole("dialog", { name: "New customer" })
+  await newCustomer.getByLabel("Name").fill(customer)
+  await newCustomer.getByRole("button", { name: "Create customer" }).click()
   await expect(page.getByText(customer)).toBeVisible()
 
   const code = `E2E-${Date.now()}`
   await page.goto("/projects")
   await page.getByRole("button", { name: "New project" }).click()
-  await page.getByLabel("Code").fill(code)
-  await page.getByLabel("Name").fill("E2E Project")
-  await page.getByRole("combobox").click()
+  // Scope to the dialog: the Projects page carries its own filter controls,
+  // and unscoped label lookups match those instead.
+  const newProject = page.getByRole("dialog", { name: "New project" })
+  await newProject.getByLabel("Code").fill(code)
+  await newProject.getByLabel("Name").fill("E2E Project")
+  await newProject.getByRole("combobox").click()
+  // Combobox options portal to the body, outside the dialog.
   await page.getByRole("option", { name: customer }).click()
-  await page.getByRole("button", { name: "Create project" }).click()
+  await newProject.getByRole("button", { name: "Create project" }).click()
 
   const row = page.getByRole("row", { name: new RegExp(code) })
   await row.getByRole("button", { name: "Edit" }).click()

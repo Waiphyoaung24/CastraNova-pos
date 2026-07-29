@@ -87,6 +87,20 @@ export function ProjectEditDialog({
       // Required by the Customer field's EntityCombobox — see EntityCombobox.tsx.
       modal={false}
       onOpenChange={(next) => {
+        // modal={false} keeps this Dialog listening for Escape at the document,
+        // and Radix fires every layer's handler rather than only the topmost —
+        // so dismissing an open date picker used to tear down the edit form
+        // with it. The picker's own layer closes it; this one stands down while
+        // it is still open. `data-state` distinguishes an open popover from one
+        // mid-exit-animation, which is still mounted but no longer owns Escape.
+        if (
+          !next &&
+          document.querySelector(
+            '[data-slot="popover-content"][data-state="open"]',
+          )
+        ) {
+          return
+        }
         if (!next) onClose()
       }}
     >

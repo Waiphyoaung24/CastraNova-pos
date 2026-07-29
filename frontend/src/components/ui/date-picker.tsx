@@ -217,6 +217,12 @@ export function DatePicker({
           // on the selected day rather than on the container.
           event.preventDefault()
         }}
+        onKeyDown={(event) => {
+          // Close on Escape from the popover's own subtree. Radix's layer
+          // dismissal is not enough inside a modal={false} Dialog, where the
+          // Dialog's handler also fires and ordering is not guaranteed.
+          if (event.key === "Escape") setOpen(false)
+        }}
       >
         {view === "days" ? (
           <>
@@ -362,6 +368,12 @@ export function MonthPicker({
         className="w-auto rounded-lg p-3"
         onOpenAutoFocus={(event) => {
           event.preventDefault()
+        }}
+        onKeyDown={(event) => {
+          // Close on Escape from the popover's own subtree. Radix's layer
+          // dismissal is not enough inside a modal={false} Dialog, where the
+          // Dialog's handler also fires and ordering is not guaranteed.
+          if (event.key === "Escape") setOpen(false)
         }}
       >
         <Stepper
