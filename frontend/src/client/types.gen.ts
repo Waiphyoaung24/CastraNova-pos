@@ -375,6 +375,27 @@ export type ProductUpdate = {
     is_active?: (boolean | null);
 };
 
+/**
+ * One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ * ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+ * is physically absent from the staff payload.
+ *
+ * Reuses SkuConsumptionDrawAdminPublic for `draws`: a FIFO batch draw is the
+ * same concept here as in the SKU consumption history (FR-015).
+ */
+export type ProjectConsumptionRowPublic = {
+    line_kind: SaleLineKind;
+    product_id: string;
+    product_sku: string;
+    model_name: string;
+    unit_serial: (string | null);
+    quantity: number;
+    occurred_at: string;
+    project_pull_id: string;
+    total_cost_thb: string;
+    draws: Array<SkuConsumptionDrawAdminPublic>;
+};
+
 export type ProjectCreate = {
     code: string;
     name: string;
@@ -390,6 +411,7 @@ export type ProjectDashboardAdminPublic = {
     pulls: Array<TransactionSummaryPublic>;
     budget_thb: (string | null);
     consumed_cost_thb: string;
+    consumed_items: Array<ProjectConsumptionRowPublic>;
 };
 
 export type ProjectDashboardStaffPublic = {
