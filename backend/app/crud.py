@@ -70,10 +70,16 @@ from app.models import (
     ProjectStatus,
     ProjectUpdate,
     ReceivePiece,
+    ReturnableLinePublic,
+    ReturnableSalePublic,
+    ReturnableSalesPublic,
     Sale,
     SaleLine,
     SaleLineInput,
     SaleLineKind,
+    SaleReturn,
+    SaleReturnCreateRequest,
+    SaleReturnLine,
     SerialMovementPublic,
     SerialSearchResult,
     ServiceTicket,
@@ -2752,6 +2758,462 @@ def create_sale(
     return sale
 
 
+# --- Sale returns (design 2026-07-25) -----------------------------------------
+
+
+def _sale_return_by_key(
+    *, session: Session, idempotency_key: uuid.UUID
+) -> SaleReturn | None:
+    return session.exec(
+        select(SaleReturn).where(SaleReturn.idempotency_key == idempotency_key)
+    ).first()
+
+
+def _returned_so_far(*, session: Session, sale_line_id: uuid.UUID) -> int:
+    """Units of a sale line already returned. Only meaningful while the sale
+    line is held FOR UPDATE — that lock is the serialization point."""
+    total = session.exec(
+        select(func.coalesce(func.sum(SaleReturnLine.quantity), 0)).where(
+            SaleReturnLine.sale_line_id == sale_line_id
+        )
+    ).one()
+    return int(total)
+
+
+def _return_unit_line(
+    *,
+    session: Session,
+    ret: SaleReturn,
+    sale_line: SaleLine,
+    quantity: int,
+    actor_user_id: uuid.UUID,
+    fallback_location_id: uuid.UUID,
+) -> Decimal:
+    """Walk a sold unit back to stock and return the cost restored.
+
+    The unit goes back to wherever it stood before the sale (the SOLD movement's
+    from_location_id), not to a generic bin, so its location history reads as a
+    clean round trip.
+    """
+    if quantity != 1:
+        raise HTTPException(
+            status_code=422, detail="UNIT line return quantity must be 1"
+        )
+    assert sale_line.unit_id is not None  # ck_saleline_unit_requires_unit_id
+    unit = session.exec(
+        select(Unit).where(Unit.id == sale_line.unit_id).with_for_update()
+    ).first()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    try:
+        new_state = assert_unit_transition(unit.current_state, MovementType.RETURNED)
+    except IllegalTransition:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unit cannot be returned from {unit.current_state.value}",
+        )
+
+    sold = session.exec(
+        select(UnitMovement)
+        .where(
+            UnitMovement.unit_id == unit.id,
+            UnitMovement.sale_id == sale_line.sale_id,
+            UnitMovement.event_type == MovementType.SOLD,
+        )
+        .order_by(col(UnitMovement.occurred_at).desc())
+    ).first()
+    back_to = (
+        sold.from_location_id
+        if sold is not None and sold.from_location_id is not None
+        else fallback_location_id
+    )
+
+    session.add(
+        UnitMovement(
+            unit_id=unit.id,
+            event_type=MovementType.RETURNED,
+            from_location_id=unit.current_location_id,
+            to_location_id=back_to,
+            sale_id=sale_line.sale_id,
+            actor_user_id=actor_user_id,
+            idempotency_key=uuid.uuid5(ret.idempotency_key, f"unit:{sale_line.id}"),
+        )
+    )
+    unit.current_state = new_state
+    unit.current_location_id = back_to
+    unit.updated_at = get_datetime_utc()
+    session.add(unit)
+    return unit.purchase_cost_thb
+
+
+def _return_part_line(
+    *,
+    session: Session,
+    ret: SaleReturn,
+    sale_line: SaleLine,
+    already_returned: int,
+    quantity: int,
+    actor_user_id: uuid.UUID,
+    from_location_id: uuid.UUID,
+    to_location_id: uuid.UUID,
+) -> Decimal:
+    """Roll back ``quantity`` units of a PART sale line onto the exact batches
+    the sale consumed, at the exact cost, and return the cost restored.
+
+    The sale's cost_lines record which batch supplied each unit. We walk them in
+    REVERSE consumption order (newest-received batch first) and skip the units a
+    prior partial return already restored, so repeated partial returns are
+    deterministic and never restore the same unit twice. The batch is a cost
+    bucket, not a physical bin: nobody knows which piece came back, and FIFO was
+    itself an accounting convention — the return reverses that convention.
+    """
+    assert sale_line.product_id is not None  # PART lines always carry a product
+    sold = session.exec(
+        select(PartMovement).where(
+            PartMovement.sale_id == sale_line.sale_id,
+            PartMovement.product_id == sale_line.product_id,
+            PartMovement.event_type == MovementType.SOLD,
+        )
+    ).first()
+    if sold is None:
+        raise HTTPException(
+            status_code=409, detail="Original consumption movement not found"
+        )
+
+    # Reverse consumption order == reverse FIFO. Ordering by the batch's
+    # (received_at, id) is deterministic across re-reads; cost_line.created_at
+    # is not (same-transaction inserts).
+    consumed = session.exec(
+        select(CostLine, PartBatch)
+        .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
+        .where(CostLine.part_movement_id == sold.id)
+        .order_by(col(PartBatch.received_at).desc(), col(PartBatch.id).desc())
+    ).all()
+
+    plan: list[tuple[uuid.UUID, int, Decimal]] = []  # (batch_id, qty, unit_cost)
+    to_skip, to_restore = already_returned, quantity
+    for cost_line, batch in consumed:
+        avail = cost_line.quantity
+        if to_skip:
+            skipped = min(to_skip, avail)
+            to_skip -= skipped
+            avail -= skipped
+        if avail and to_restore:
+            take = min(avail, to_restore)
+            plan.append((batch.id, take, cost_line.unit_cost_thb))
+            to_restore -= take
+        if to_restore == 0:
+            break
+    if to_restore:
+        # Belt-and-suspenders: the caller's over-return check should have caught
+        # this. Reaching here means the sale line and its cost lines disagree.
+        raise HTTPException(
+            status_code=409, detail="Return exceeds the quantity originally consumed"
+        )
+
+    # Re-lock the target batches in the SAME (received_at, id) order that
+    # consume_quantity_fifo uses, so a concurrent sale and return on this product
+    # acquire batch locks in one global order and cannot deadlock.
+    #
+    # populate_existing is load-bearing, not a micro-optimization: the cost-line
+    # join above already pulled these PartBatch rows into the identity map
+    # UNLOCKED. Without it SQLAlchemy hands back those stale objects and the
+    # `remaining_qty += qty` below is computed from a pre-lock value, silently
+    # clobbering a concurrent sale's decrement (a lost update — caught by
+    # tests/crud/test_return_concurrency.py).
+    locked = {
+        b.id: b
+        for b in session.exec(
+            select(PartBatch)
+            .where(col(PartBatch.id).in_([bid for bid, _, _ in plan]))
+            .order_by(col(PartBatch.received_at), col(PartBatch.id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+    }
+
+    movement = PartMovement(
+        product_id=sale_line.product_id,
+        event_type=MovementType.RETURNED,
+        quantity=quantity,
+        from_location_id=from_location_id,
+        to_location_id=to_location_id,
+        sale_id=sale_line.sale_id,
+        actor_user_id=actor_user_id,
+        idempotency_key=uuid.uuid5(ret.idempotency_key, f"part:{sale_line.id}"),
+    )
+    session.add(movement)
+    session.flush()
+
+    restored = Decimal("0.00")
+    for batch_id, qty, unit_cost in plan:
+        batch = locked[batch_id]
+        # Safe against ck_part_batch_qty_bounds (remaining_qty <= received_qty):
+        # a batch is only ever credited back units it supplied to THIS sale.
+        batch.remaining_qty += qty
+        batch.updated_at = get_datetime_utc()
+        session.add(batch)
+        session.add(
+            CostLine(
+                part_movement_id=movement.id,
+                part_batch_id=batch_id,
+                quantity=qty,
+                unit_cost_thb=unit_cost,
+                total_cost_thb=qty * unit_cost,
+            )
+        )
+        restored += qty * unit_cost
+    return restored
+
+
+def create_sale_return(
+    *,
+    session: Session,
+    sale_id: uuid.UUID,
+    payload: SaleReturnCreateRequest,
+    created_by_user_id: uuid.UUID,
+) -> SaleReturn:
+    """Record a customer return of one or more sale lines, admin-only.
+
+    Restores stock by APPENDING reversal movements (never mutating the ledgers):
+    PART lines re-credit the exact batches the sale consumed at the original
+    cost; UNIT lines walk SOLD -> IN_STOCK. Refund is fixed at the sale line's
+    unit_price_thb. Everything commits in one transaction — any failing line
+    rolls the whole return back. Idempotent on ``idempotency_key``.
+    """
+    replay = _sale_return_by_key(
+        session=session, idempotency_key=payload.idempotency_key
+    )
+    if replay is not None:
+        _assert_replay_actor(
+            stored_user_id=replay.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
+        if replay.sale_id != sale_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key already used for a different sale",
+            )
+        return replay
+
+    if session.get(Sale, sale_id) is None:
+        raise HTTPException(status_code=404, detail="Sale not found")
+
+    line_ids: set[uuid.UUID] = set()
+    for line in payload.lines:
+        if line.sale_line_id in line_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Duplicate sale_line_id; merge into one line",
+            )
+        line_ids.add(line.sale_line_id)
+
+    # Lock the cited sale lines in id order. This is the ONLY serialization point
+    # for two concurrent returns of the same line: SaleReturnLine rows may not
+    # exist yet, so FOR UPDATE on them would lock nothing.
+    sale_lines = {
+        sl.id: sl
+        for sl in session.exec(
+            select(SaleLine)
+            .where(col(SaleLine.id).in_(line_ids))
+            .order_by(col(SaleLine.id))
+            .with_for_update()
+        ).all()
+    }
+    for line in payload.lines:
+        sl = sale_lines.get(line.sale_line_id)
+        if sl is None or sl.sale_id != sale_id:
+            raise HTTPException(
+                status_code=404, detail="Sale line not part of this sale"
+            )
+
+    ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
+    customer_loc = session.exec(
+        select(Location).where(Location.code == "CUSTOMER")
+    ).first()
+    if not ygn or not customer_loc:
+        raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    ret = SaleReturn(
+        sale_id=sale_id,
+        created_by_user_id=created_by_user_id,
+        idempotency_key=payload.idempotency_key,
+        reason=payload.reason,
+        total_refund_thb=Decimal("0.00"),
+        total_cogs_restored_thb=Decimal("0.00"),
+    )
+    session.add(ret)
+    session.flush()
+
+    total_refund = Decimal("0.00")
+    total_cogs = Decimal("0.00")
+    # Deterministic line order so concurrent returns take unit/batch locks in the
+    # same order (mirrors create_sale's sorted part_reqs).
+    for line in sorted(payload.lines, key=lambda ln: str(ln.sale_line_id)):
+        sl = sale_lines[line.sale_line_id]
+        already = _returned_so_far(session=session, sale_line_id=sl.id)
+        if already + line.quantity > sl.quantity:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Over-return: {sl.quantity - already} returnable, "
+                    f"requested {line.quantity}"
+                ),
+            )
+        if sl.line_kind == SaleLineKind.UNIT:
+            cogs = _return_unit_line(
+                session=session,
+                ret=ret,
+                sale_line=sl,
+                quantity=line.quantity,
+                actor_user_id=created_by_user_id,
+                fallback_location_id=ygn.id,
+            )
+        else:
+            cogs = _return_part_line(
+                session=session,
+                ret=ret,
+                sale_line=sl,
+                already_returned=already,
+                quantity=line.quantity,
+                actor_user_id=created_by_user_id,
+                from_location_id=customer_loc.id,
+                to_location_id=ygn.id,
+            )
+        session.add(
+            SaleReturnLine(
+                sale_return_id=ret.id,
+                sale_line_id=sl.id,
+                quantity=line.quantity,
+                unit_price_thb=sl.unit_price_thb,
+                cogs_restored_thb=cogs,
+            )
+        )
+        total_refund += sl.unit_price_thb * line.quantity
+        total_cogs += cogs
+
+    ret.total_refund_thb = total_refund
+    ret.total_cogs_restored_thb = total_cogs
+    session.add(ret)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        winner = _sale_return_by_key(
+            session=session, idempotency_key=payload.idempotency_key
+        )
+        if winner is None:
+            raise
+        _assert_replay_actor(
+            stored_user_id=winner.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
+        return winner
+    session.refresh(ret)
+    return ret
+
+
+_RETURNABLE_SALE_LIMIT = 20  # bounded, most-recent-first (hardening spec §7)
+
+
+def list_returnable_sales(
+    *,
+    session: Session,
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+    limit: int = _RETURNABLE_SALE_LIMIT,
+) -> ReturnableSalesPublic:
+    """Recent sales holding still-returnable lines for one unit or one SKU.
+
+    Fully-returned lines are omitted, so an empty result means "nothing here can
+    be returned" — which is exactly what the UI needs to decide between offering
+    a return and offering a write-off.
+    """
+    if (castranova_barcode is None) == (sku is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide exactly one of castranova_barcode or sku",
+        )
+
+    stmt = (
+        select(SaleLine, Sale)
+        .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
+        .order_by(col(Sale.sold_at).desc(), col(Sale.id))
+    )
+    if castranova_barcode is not None:
+        stmt = stmt.join(Unit, col(SaleLine.unit_id) == col(Unit.id)).where(
+            Unit.castranova_barcode == castranova_barcode
+        )
+    else:
+        product = session.exec(select(Product).where(Product.sku == sku)).first()
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        stmt = stmt.where(SaleLine.product_id == product.id)
+
+    # Over-fetch: fully-returned lines are filtered out below, so the raw row
+    # count is an upper bound on the sales we can actually offer.
+    rows = session.exec(stmt.limit(limit * 4)).all()
+
+    # Batched label lookups. A UNIT line carries unit_id, not product_id, so the
+    # product comes through Unit — same recovery the margin report does.
+    unit_ids = [sl.unit_id for sl, _ in rows if sl.unit_id is not None]
+    unit_product: dict[uuid.UUID, uuid.UUID] = (
+        {
+            u.id: u.product_id
+            for u in session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all()
+        }
+        if unit_ids
+        else {}
+    )
+
+    def _product_of(sale_line: SaleLine) -> uuid.UUID | None:
+        if sale_line.product_id is not None:
+            return sale_line.product_id
+        if sale_line.unit_id is None:
+            return None
+        return unit_product.get(sale_line.unit_id)
+
+    labels = _product_labels(
+        session,
+        [pid for pid in {_product_of(sl) for sl, _ in rows} if pid is not None],
+    )
+    customers = _customer_labels(session, [s.customer_id for _, s in rows])
+
+    by_sale: dict[uuid.UUID, ReturnableSalePublic] = {}
+    for sale_line, sale in rows:
+        returned = _returned_so_far(session=session, sale_line_id=sale_line.id)
+        returnable = sale_line.quantity - returned
+        if returnable <= 0:
+            continue
+        pid = _product_of(sale_line)
+        entry = by_sale.get(sale.id)
+        if entry is None:
+            if len(by_sale) >= limit:
+                continue
+            entry = ReturnableSalePublic(
+                sale_id=sale.id,
+                sold_at=sale.sold_at,
+                customer_id=sale.customer_id,
+                customer_name=customers.get(sale.customer_id, ""),
+                lines=[],
+            )
+            by_sale[sale.id] = entry
+        entry.lines.append(
+            ReturnableLinePublic(
+                sale_line_id=sale_line.id,
+                line_kind=sale_line.line_kind,
+                product_id=pid,
+                unit_id=sale_line.unit_id,
+                label=labels.get(pid, "") if pid else "",
+                quantity_sold=sale_line.quantity,
+                quantity_returned=returned,
+                quantity_returnable=returnable,
+                unit_price_thb=sale_line.unit_price_thb,
+            )
+        )
+    return ReturnableSalesPublic(sales=list(by_sale.values()))
+
+
 # --- Maintenance / service tickets (FR-008) -----------------------------------
 
 
@@ -3544,6 +4006,31 @@ def _month_window(year: int, month: int) -> tuple[datetime, datetime]:
     return start, end
 
 
+# Synthetic channel-row key for returns. Deliberately NOT a Channel enum member:
+# Channel drives the report's channel FILTER, and "returns" is an event on the
+# SALE channel, not a fourth channel to slice by.
+_SALE_RETURN_KEY = "SALE_RETURN"
+_SALE_RETURN_LABEL = "SALE RETURNS"
+
+
+def _sale_return_totals(
+    session: Session, start: datetime, end: datetime
+) -> tuple[Decimal, Decimal]:
+    """(refund, cogs_restored) for returns RECORDED in the window. Keyed on
+    returned_at, never sold_at — that is what keeps past months immutable."""
+    refund, cogs = session.exec(
+        select(
+            func.coalesce(func.sum(SaleReturn.total_refund_thb), Decimal("0")),
+            func.coalesce(
+                func.sum(SaleReturn.total_cogs_restored_thb), Decimal("0")
+            ),
+        ).where(
+            col(SaleReturn.returned_at) >= start, col(SaleReturn.returned_at) < end
+        )
+    ).one()
+    return refund, cogs
+
+
 def _channel_rows(
     session: Session,
     start: datetime,
@@ -3618,7 +4105,7 @@ def _channel_rows(
         Channel.PROJECT: (_q(0), _q(proj_part_cogs + proj_unit_cogs)),
     }
     wanted = [channel] if channel is not None else list(totals)
-    return [
+    rows = [
         MarginBreakdownRow(
             key=ch.value,
             label=ch.value,
@@ -3629,6 +4116,23 @@ def _channel_rows(
         for ch in wanted
         for rev, cogs in [totals[ch]]
     ]
+    # Returns are an event on the SALE channel, so they appear whenever SALE
+    # does. Omitted entirely in a month with no returns — unlike the three
+    # channels, a zero row here is noise, not parity.
+    if channel in (None, Channel.SALE):
+        refund, restored = _sale_return_totals(session, start, end)
+        if refund or restored:
+            rev, cogs = _q(-refund), _q(-restored)
+            rows.append(
+                MarginBreakdownRow(
+                    key=_SALE_RETURN_KEY,
+                    label=_SALE_RETURN_LABEL,
+                    revenue_thb=rev,
+                    cogs_thb=cogs,
+                    margin_thb=rev - cogs,
+                )
+            )
+    return rows
 
 
 def _merge(
@@ -3698,6 +4202,35 @@ def _product_rows(
             .group_by(col(Unit.product_id))
         ).all():
             _merge(acc, product_id, Decimal("0"), cogs)
+        # Returns net into the product's row for the RETURN month (no separate
+        # returns row at this grain). A UNIT line carries unit_id not product_id,
+        # so the product is recovered through Unit — same COALESCE as above.
+        pid_r = func.coalesce(SaleLine.product_id, Unit.product_id)
+        for product_id, refund, restored in session.exec(
+            select(
+                pid_r,
+                func.coalesce(
+                    func.sum(
+                        SaleReturnLine.quantity * SaleReturnLine.unit_price_thb
+                    ),
+                    Decimal("0"),
+                ),
+                func.coalesce(
+                    func.sum(SaleReturnLine.cogs_restored_thb), Decimal("0")
+                ),
+            )
+            .join(SaleLine, col(SaleReturnLine.sale_line_id) == col(SaleLine.id))
+            .join(
+                SaleReturn, col(SaleReturnLine.sale_return_id) == col(SaleReturn.id)
+            )
+            .join(Unit, col(SaleLine.unit_id) == col(Unit.id), isouter=True)
+            .where(
+                col(SaleReturn.returned_at) >= start,
+                col(SaleReturn.returned_at) < end,
+            )
+            .group_by(pid_r)
+        ).all():
+            _merge(acc, product_id, -refund, -restored)
 
     if channel in (None, Channel.MAINTENANCE):
         # revenue by ServiceTicketPart.product_id
@@ -3809,6 +4342,25 @@ def _customer_rows(
             .group_by(col(Sale.customer_id))
         ).all():
             _merge(acc, cust_id, rev, cogs)
+        # Returns net into the customer's row for the RETURN month. Uses the
+        # SaleReturn header totals (exact, and identical to the sum of its lines
+        # used by the PRODUCT grouping — so the two groupings reconcile).
+        for cust_id, refund, restored in session.exec(
+            select(
+                Sale.customer_id,
+                func.coalesce(func.sum(SaleReturn.total_refund_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(SaleReturn.total_cogs_restored_thb), Decimal("0")
+                ),
+            )
+            .join(Sale, col(SaleReturn.sale_id) == col(Sale.id))
+            .where(
+                col(SaleReturn.returned_at) >= start,
+                col(SaleReturn.returned_at) < end,
+            )
+            .group_by(col(Sale.customer_id))
+        ).all():
+            _merge(acc, cust_id, -refund, -restored)
 
     if channel in (None, Channel.MAINTENANCE):
         for cust_id, rev in session.exec(

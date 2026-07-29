@@ -899,7 +899,7 @@ export const MinStockLevelUpdateSchema = {
 
 export const MovementTypeSchema = {
     type: 'string',
-    enum: ['RECEIVED', 'SOLD', 'MAINTENANCE_OUT', 'PROJECT_OUT', 'ADJUSTED_OUT'],
+    enum: ['RECEIVED', 'SOLD', 'MAINTENANCE_OUT', 'PROJECT_OUT', 'ADJUSTED_OUT', 'RETURNED'],
     title: 'MovementType'
 } as const;
 
@@ -2789,6 +2789,116 @@ export const ReceiveSerializedResponseSchema = {
     title: 'ReceiveSerializedResponse'
 } as const;
 
+export const ReturnableLinePublicSchema = {
+    properties: {
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        product_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Id'
+        },
+        unit_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Id'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        quantity_sold: {
+            type: 'integer',
+            title: 'Quantity Sold'
+        },
+        quantity_returned: {
+            type: 'integer',
+            title: 'Quantity Returned'
+        },
+        quantity_returnable: {
+            type: 'integer',
+            title: 'Quantity Returnable'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['sale_line_id', 'line_kind', 'product_id', 'unit_id', 'label', 'quantity_sold', 'quantity_returned', 'quantity_returnable', 'unit_price_thb'],
+    title: 'ReturnableLinePublic'
+} as const;
+
+export const ReturnableSalePublicSchema = {
+    properties: {
+        sale_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Id'
+        },
+        sold_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Sold At'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        customer_name: {
+            type: 'string',
+            title: 'Customer Name'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/ReturnableLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['sale_id', 'sold_at', 'customer_id', 'customer_name', 'lines'],
+    title: 'ReturnableSalePublic'
+} as const;
+
+export const ReturnableSalesPublicSchema = {
+    properties: {
+        sales: {
+            items: {
+                '$ref': '#/components/schemas/ReturnableSalePublic'
+            },
+            type: 'array',
+            title: 'Sales'
+        }
+    },
+    type: 'object',
+    required: ['sales'],
+    title: 'ReturnableSalesPublic'
+} as const;
+
 export const SaleCreateRequestSchema = {
     properties: {
         customer_id: {
@@ -3015,6 +3125,135 @@ export const SalePublicSchema = {
     type: 'object',
     required: ['id', 'customer_id', 'total_thb', 'total_cogs_thb', 'sold_at', 'lines'],
     title: 'SalePublic'
+} as const;
+
+export const SaleReturnCreateRequestSchema = {
+    properties: {
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        reason: {
+            type: 'string',
+            maxLength: 512,
+            minLength: 1,
+            title: 'Reason'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleReturnLineInput'
+            },
+            type: 'array',
+            maxItems: 100,
+            minItems: 1,
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['idempotency_key', 'reason', 'lines'],
+    title: 'SaleReturnCreateRequest'
+} as const;
+
+export const SaleReturnLineInputSchema = {
+    properties: {
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            maximum: 1000000,
+            exclusiveMinimum: 0,
+            title: 'Quantity',
+            default: 1
+        }
+    },
+    type: 'object',
+    required: ['sale_line_id'],
+    title: 'SaleReturnLineInput'
+} as const;
+
+export const SaleReturnLinePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        },
+        cogs_restored_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Cogs Restored Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_line_id', 'quantity', 'unit_price_thb', 'cogs_restored_thb'],
+    title: 'SaleReturnLinePublic'
+} as const;
+
+export const SaleReturnPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Id'
+        },
+        reason: {
+            type: 'string',
+            title: 'Reason'
+        },
+        returned_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Returned At'
+        },
+        total_refund_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Refund Thb'
+        },
+        total_cogs_restored_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cogs Restored Thb'
+        },
+        created_by_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Created By User Id'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleReturnLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_id', 'reason', 'returned_at', 'total_refund_thb', 'total_cogs_restored_thb', 'created_by_user_id', 'lines'],
+    title: 'SaleReturnPublic'
 } as const;
 
 export const SaleStaffPublicSchema = {

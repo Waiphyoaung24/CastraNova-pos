@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AuditListAuditData, AuditListAuditResponse, CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersReadOptionsResponse, CustomersListCountriesResponse, CustomersGetCustomerDashboardData, CustomersGetCustomerDashboardResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, DashboardsGetStockOnHandData, DashboardsGetStockOnHandResponse, DashboardsGetStockOnHandBatchesData, DashboardsGetStockOnHandBatchesResponse, DashboardsGetStockOnHandUnitsData, DashboardsGetStockOnHandUnitsResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenResponse, LoginLogoutResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, LowStockReadLowStockResponse, LowStockBulkSetMinStockLevelData, LowStockBulkSetMinStockLevelResponse, NotificationsReadNotificationPreferencesResponse, NotificationsUpdateNotificationPreferencesData, NotificationsUpdateNotificationPreferencesResponse, NotificationsConnectTelegramResponse, NotificationsConfirmTelegramData, NotificationsConfirmTelegramResponse, NotificationsDisconnectTelegramResponse, NotificationsTestTelegramResponse, NotificationsGetTelegramStatusResponse, PricingOverridesCreatePricingOverrideData, PricingOverridesCreatePricingOverrideResponse, PricingOverridesListPricingOverridesData, PricingOverridesListPricingOverridesResponse, PricingOverridesDecidePricingOverrideData, PricingOverridesDecidePricingOverrideResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsReadPurchaseCostsResponse, ProductsReadOptionsData, ProductsReadOptionsResponse, ProductsReadSkuLabelData, ProductsReadSkuLabelResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsSetMinStockLevelData, ProductsSetMinStockLevelResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectPullsCreateProjectPullData, ProjectPullsCreateProjectPullResponse, ProjectPullsReadProjectPullsData, ProjectPullsReadProjectPullsResponse, ProjectPullsReadProjectPullData, ProjectPullsReadProjectPullResponse, ProjectPullsFulfillProjectPullData, ProjectPullsFulfillProjectPullResponse, ProjectPullsCancelProjectPullData, ProjectPullsCancelProjectPullResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsReadOptionsResponse, ProjectsGetProjectDashboardData, ProjectsGetProjectDashboardResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, ReportsChannelMarginData, ReportsChannelMarginResponse, ReportsChannelMarginPdfData, ReportsChannelMarginPdfResponse, ReportsChannelMarginXlsxData, ReportsChannelMarginXlsxResponse, ReportsOverrideExceptionsData, ReportsOverrideExceptionsResponse, ReportsOverrideExceptionsPdfData, ReportsOverrideExceptionsPdfResponse, ReportsOverrideExceptionsXlsxData, ReportsOverrideExceptionsXlsxResponse, ReportsHoldingPeriodData, ReportsHoldingPeriodResponse, ReportsHoldingPeriodPdfData, ReportsHoldingPeriodPdfResponse, ReportsHoldingPeriodXlsxData, ReportsHoldingPeriodXlsxResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, SearchSearchSerialData, SearchSearchSerialResponse, SearchSearchSkuData, SearchSearchSkuResponse, ServiceTicketsRecordServiceTicketData, ServiceTicketsRecordServiceTicketResponse, ServiceTicketsReadServiceTicketData, ServiceTicketsReadServiceTicketResponse, StockAdjustmentsCreateStockAdjustmentData, StockAdjustmentsCreateStockAdjustmentResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersReadOptionsResponse, SuppliersListCountriesResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, SyncReviewIngestSyncReviewItemData, SyncReviewIngestSyncReviewItemResponse, SyncReviewListSyncReviewItemsData, SyncReviewListSyncReviewItemsResponse, SyncReviewResolveSyncReviewItemData, SyncReviewResolveSyncReviewItemResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadOptionsResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
+import type { AuditListAuditData, AuditListAuditResponse, CustomersReadCustomersData, CustomersReadCustomersResponse, CustomersCreateCustomerData, CustomersCreateCustomerResponse, CustomersReadOptionsResponse, CustomersListCountriesResponse, CustomersGetCustomerDashboardData, CustomersGetCustomerDashboardResponse, CustomersUpdateCustomerData, CustomersUpdateCustomerResponse, DashboardsGetStockOnHandData, DashboardsGetStockOnHandResponse, DashboardsGetStockOnHandBatchesData, DashboardsGetStockOnHandBatchesResponse, DashboardsGetStockOnHandUnitsData, DashboardsGetStockOnHandUnitsResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenResponse, LoginLogoutResponse, LoginTestTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, LoginRecoverPasswordHtmlContentData, LoginRecoverPasswordHtmlContentResponse, LowStockReadLowStockResponse, LowStockBulkSetMinStockLevelData, LowStockBulkSetMinStockLevelResponse, NotificationsReadNotificationPreferencesResponse, NotificationsUpdateNotificationPreferencesData, NotificationsUpdateNotificationPreferencesResponse, NotificationsConnectTelegramResponse, NotificationsConfirmTelegramData, NotificationsConfirmTelegramResponse, NotificationsDisconnectTelegramResponse, NotificationsTestTelegramResponse, NotificationsGetTelegramStatusResponse, PricingOverridesCreatePricingOverrideData, PricingOverridesCreatePricingOverrideResponse, PricingOverridesListPricingOverridesData, PricingOverridesListPricingOverridesResponse, PricingOverridesDecidePricingOverrideData, PricingOverridesDecidePricingOverrideResponse, PrivateCreateUserData, PrivateCreateUserResponse, ProductsReadProductsData, ProductsReadProductsResponse, ProductsCreateProductData, ProductsCreateProductResponse, ProductsReadPurchaseCostsResponse, ProductsReadOptionsData, ProductsReadOptionsResponse, ProductsReadSkuLabelData, ProductsReadSkuLabelResponse, ProductsUpdateProductData, ProductsUpdateProductResponse, ProductsSetMinStockLevelData, ProductsSetMinStockLevelResponse, ProductsReadPriceHistoryData, ProductsReadPriceHistoryResponse, ProjectPullsCreateProjectPullData, ProjectPullsCreateProjectPullResponse, ProjectPullsReadProjectPullsData, ProjectPullsReadProjectPullsResponse, ProjectPullsReadProjectPullData, ProjectPullsReadProjectPullResponse, ProjectPullsFulfillProjectPullData, ProjectPullsFulfillProjectPullResponse, ProjectPullsCancelProjectPullData, ProjectPullsCancelProjectPullResponse, ProjectsReadProjectsData, ProjectsReadProjectsResponse, ProjectsCreateProjectData, ProjectsCreateProjectResponse, ProjectsReadOptionsResponse, ProjectsGetProjectDashboardData, ProjectsGetProjectDashboardResponse, ProjectsUpdateProjectData, ProjectsUpdateProjectResponse, ReceiptsReceiveSerializedData, ReceiptsReceiveSerializedResponse, ReceiptsReceiveQuantityData, ReceiptsReceiveQuantityResponse, ReceiptsReadUnitLabelData, ReceiptsReadUnitLabelResponse, ReportsChannelMarginData, ReportsChannelMarginResponse, ReportsChannelMarginPdfData, ReportsChannelMarginPdfResponse, ReportsChannelMarginXlsxData, ReportsChannelMarginXlsxResponse, ReportsOverrideExceptionsData, ReportsOverrideExceptionsResponse, ReportsOverrideExceptionsPdfData, ReportsOverrideExceptionsPdfResponse, ReportsOverrideExceptionsXlsxData, ReportsOverrideExceptionsXlsxResponse, ReportsHoldingPeriodData, ReportsHoldingPeriodResponse, ReportsHoldingPeriodPdfData, ReportsHoldingPeriodPdfResponse, ReportsHoldingPeriodXlsxData, ReportsHoldingPeriodXlsxResponse, SalesCreateSaleData, SalesCreateSaleResponse, SalesCreateSaleReturnData, SalesCreateSaleReturnResponse, SalesReadReturnableSalesData, SalesReadReturnableSalesResponse, SalesReadSaleReceiptData, SalesReadSaleReceiptResponse, SearchSearchSerialData, SearchSearchSerialResponse, SearchSearchSkuData, SearchSearchSkuResponse, ServiceTicketsRecordServiceTicketData, ServiceTicketsRecordServiceTicketResponse, ServiceTicketsReadServiceTicketData, ServiceTicketsReadServiceTicketResponse, StockAdjustmentsCreateStockAdjustmentData, StockAdjustmentsCreateStockAdjustmentResponse, SuppliersReadSuppliersData, SuppliersReadSuppliersResponse, SuppliersCreateSupplierData, SuppliersCreateSupplierResponse, SuppliersReadOptionsResponse, SuppliersListCountriesResponse, SuppliersUpdateSupplierData, SuppliersUpdateSupplierResponse, SyncReviewIngestSyncReviewItemData, SyncReviewIngestSyncReviewItemResponse, SyncReviewListSyncReviewItemsData, SyncReviewListSyncReviewItemsResponse, SyncReviewResolveSyncReviewItemData, SyncReviewResolveSyncReviewItemResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadOptionsResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse } from './types.gen';
 
 export class AuditService {
     /**
@@ -1273,6 +1273,57 @@ export class SalesService {
             url: '/api/v1/sales',
             body: data.requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Create Sale Return
+     * Record a customer return against a sale (admin-only, design 2026-07-25).
+     *
+     * Restores stock at the original FIFO cost and reverses the sale's margin
+     * contribution in the RETURN month. Refund is fixed at the original line price.
+     * @param data The data for the request.
+     * @param data.saleId
+     * @param data.requestBody
+     * @returns SaleReturnPublic Successful Response
+     * @throws ApiError
+     */
+    public static createSaleReturn(data: SalesCreateSaleReturnData): CancelablePromise<SalesCreateSaleReturnResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/sales/{sale_id}/returns',
+            path: {
+                sale_id: data.saleId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Read Returnable Sales
+     * Recent sales with still-returnable lines for one unit or one SKU.
+     * Admin-only — it feeds the return flow and exposes line prices.
+     * @param data The data for the request.
+     * @param data.castranovaBarcode
+     * @param data.sku
+     * @returns ReturnableSalesPublic Successful Response
+     * @throws ApiError
+     */
+    public static readReturnableSales(data: SalesReadReturnableSalesData = {}): CancelablePromise<SalesReadReturnableSalesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/sales/returnable',
+            query: {
+                castranova_barcode: data.castranovaBarcode,
+                sku: data.sku
+            },
             errors: {
                 422: 'Validation Error'
             }

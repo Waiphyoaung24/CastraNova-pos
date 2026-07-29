@@ -176,7 +176,7 @@ export type MinStockLevelUpdate = {
     min_stock_level?: (number | null);
 };
 
-export type MovementType = 'RECEIVED' | 'SOLD' | 'MAINTENANCE_OUT' | 'PROJECT_OUT' | 'ADJUSTED_OUT';
+export type MovementType = 'RECEIVED' | 'SOLD' | 'MAINTENANCE_OUT' | 'PROJECT_OUT' | 'ADJUSTED_OUT' | 'RETURNED';
 
 export type NewPassword = {
     token: string;
@@ -545,6 +545,30 @@ export type ReceiveSerializedResponse = {
     units: Array<UnitPublic>;
 };
 
+export type ReturnableLinePublic = {
+    sale_line_id: string;
+    line_kind: SaleLineKind;
+    product_id: (string | null);
+    unit_id: (string | null);
+    label: string;
+    quantity_sold: number;
+    quantity_returned: number;
+    quantity_returnable: number;
+    unit_price_thb: string;
+};
+
+export type ReturnableSalePublic = {
+    sale_id: string;
+    sold_at: string;
+    customer_id: string;
+    customer_name: string;
+    lines: Array<ReturnableLinePublic>;
+};
+
+export type ReturnableSalesPublic = {
+    sales: Array<ReturnableSalePublic>;
+};
+
 export type SaleCreateRequest = {
     customer_id: string;
     lines: Array<SaleLineInput>;
@@ -587,6 +611,36 @@ export type SalePublic = {
     total_cogs_thb: string;
     sold_at: string;
     lines: Array<SaleLinePublic>;
+};
+
+export type SaleReturnCreateRequest = {
+    idempotency_key: string;
+    reason: string;
+    lines: Array<SaleReturnLineInput>;
+};
+
+export type SaleReturnLineInput = {
+    sale_line_id: string;
+    quantity?: number;
+};
+
+export type SaleReturnLinePublic = {
+    id: string;
+    sale_line_id: string;
+    quantity: number;
+    unit_price_thb: string;
+    cogs_restored_thb: string;
+};
+
+export type SaleReturnPublic = {
+    id: string;
+    sale_id: string;
+    reason: string;
+    returned_at: string;
+    total_refund_thb: string;
+    total_cogs_restored_thb: string;
+    created_by_user_id: string;
+    lines: Array<SaleReturnLinePublic>;
 };
 
 export type SaleStaffPublic = {
@@ -1394,6 +1448,20 @@ export type SalesCreateSaleData = {
 };
 
 export type SalesCreateSaleResponse = ((SalePublic | SaleStaffPublic));
+
+export type SalesCreateSaleReturnData = {
+    requestBody: SaleReturnCreateRequest;
+    saleId: string;
+};
+
+export type SalesCreateSaleReturnResponse = (SaleReturnPublic);
+
+export type SalesReadReturnableSalesData = {
+    castranovaBarcode?: (string | null);
+    sku?: (string | null);
+};
+
+export type SalesReadReturnableSalesResponse = (ReturnableSalesPublic);
 
 export type SalesReadSaleReceiptData = {
     saleId: string;
