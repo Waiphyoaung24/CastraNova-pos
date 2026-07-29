@@ -1194,3 +1194,149 @@ def test_render_sync_review_pending_omits_zero_reason() -> None:
     )
     assert "conflict" not in text
     assert text.endswith("2 stale")
+
+
+# --- sync-review producer -----------------------------------------------------
+
+
+def _ingest_pending(db: Session, reason: Any, submitted_by: uuid.UUID) -> None:
+    """Put one PENDING row in the queue. `submitted_by` must be a real user id
+    — the column carries an FK to user.id."""
+    from app import crud
+    from app.models import SyncReviewItemCreate
+
+    crud.create_sync_review_item(
+        session=db,
+        data=SyncReviewItemCreate(
+            idempotency_key=uuid.uuid4(),
+            mutation_kind="sale",
+            payload={"total_thb": "1200.00"},
+            reason=reason,
+        ),
+        submitted_by_user_id=submitted_by,
+    )
+
+
+def test_notify_sync_review_targets_admins_not_staff(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+    staff = _make_user(db, role=UserRole.YGN_STAFF)
+    _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.CONFLICT, admin.id)
+    logs = notify.notify_sync_review_pending(session=db)
+
+    targets = {log.target_user_id for log in logs}
+    assert admin.id in targets
+    assert staff.id not in targets
+
+
+def test_notify_sync_review_suppressed_inside_cooldown(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    first = notify.notify_sync_review_pending(session=db)
+    assert any(log.target_user_id == admin.id for log in first)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    second = notify.notify_sync_review_pending(session=db)
+    assert not any(log.target_user_id == admin.id for log in second)
+
+
+def test_notify_sync_review_sends_again_after_cooldown(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    notify.notify_sync_review_pending(session=db)
+
+    # Shrink the window rather than sleeping or back-dating a log row.
+    monkeypatch.setattr(notify, "SYNC_REVIEW_COOLDOWN_SECONDS", 0)
+    again = notify.notify_sync_review_pending(session=db)
+    assert any(log.target_user_id == admin.id for log in again)
+
+
+def test_notify_sync_review_cooldown_is_per_recipient(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    first_admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(
+        db, first_admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING
+    )
+
+    _ingest_pending(db, SyncReviewReason.CONFLICT, first_admin.id)
+    notify.notify_sync_review_pending(session=db)
+
+    # A second admin enrolls mid-burst — must still be reachable.
+    late_admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(
+        db, late_admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING
+    )
+
+    logs = notify.notify_sync_review_pending(session=db)
+    targets = {log.target_user_id for log in logs}
+    assert late_admin.id in targets
+    assert first_admin.id not in targets
+
+
+def test_notify_sync_review_failed_send_starts_cooldown(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A not-enrolled admin logs FAILED; that row must suppress the next
+    attempt, or every ingest writes another FAILED row forever (spec 3.3)."""
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(
+        db,
+        role=UserRole.BKK_ADMIN,
+        line_user_id=None,
+        telegram_chat_id=None,
+        viber_user_id=None,
+    )
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    first = notify.notify_sync_review_pending(session=db)
+    assert [log.status for log in first if log.target_user_id == admin.id] == [
+        NotificationStatus.FAILED
+    ]
+
+    second = notify.notify_sync_review_pending(session=db)
+    assert not any(log.target_user_id == admin.id for log in second)
+
+
+def test_notify_sync_review_payload_has_no_financial_keys(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.CONFLICT, admin.id)
+    logs = notify.notify_sync_review_pending(session=db)
+
+    assert logs
+    assert_no_financial_keys(logs[0].payload)
+    assert set(logs[0].payload) == {"total", "stale", "conflict"}
