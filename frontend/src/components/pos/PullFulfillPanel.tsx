@@ -181,12 +181,19 @@ export function PullFulfillPanel({
         </TableBody>
       </Table>
 
-      <div className="flex items-center justify-end gap-4">
-        <span className="text-muted-foreground text-sm">When you finish</span>
-        <Badge variant={projected === "FULFILLED" ? "default" : "destructive"}>
-          {projected === "FULFILLED" ? "All items ready" : "Some items short"}
-        </Badge>
-      </div>
+      {/* Forecast of the outcome you're about to save — only meaningful while
+          the pull can still be fulfilled. A settled pull states its real
+          outcome in the badge above instead. */}
+      {pull.state === "PENDING" ? (
+        <div className="flex items-center justify-end gap-4">
+          <span className="text-muted-foreground text-sm">When you finish</span>
+          <Badge
+            variant={projected === "FULFILLED" ? "default" : "destructive"}
+          >
+            {projected === "FULFILLED" ? "All items ready" : "Some items short"}
+          </Badge>
+        </div>
+      ) : null}
 
       <button
         type="button"

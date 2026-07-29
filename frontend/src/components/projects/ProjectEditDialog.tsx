@@ -33,6 +33,7 @@ import {
   type ProjectEditDraft,
   projectToEditDraft,
 } from "@/lib/project-edit"
+import { isValidDateRange } from "@/lib/project-form"
 
 export function ProjectEditDialog({
   project,
@@ -82,6 +83,7 @@ export function ProjectEditDialog({
 
   const isUnchanged = JSON.stringify(draft) === JSON.stringify(baseline)
   const canSave = canSaveProject(draft) && !isUnchanged && !mutation.isPending
+  const datesOutOfOrder = !isValidDateRange(draft.startDate, draft.endDate)
 
   return (
     <Dialog
@@ -177,10 +179,16 @@ export function ProjectEditDialog({
                 value={draft.endDate}
                 onChange={(iso) => patch({ endDate: iso })}
                 onOpenChange={(o) => setPickerOpen((p) => ({ ...p, end: o }))}
+                invalid={datesOutOfOrder}
                 placeholder="No end date"
               />
             </div>
           </div>
+          {datesOutOfOrder ? (
+            <p role="alert" className="text-destructive text-sm">
+              End date must be on or after the start date.
+            </p>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor={budgetId}>Budget (THB)</Label>
             <Input

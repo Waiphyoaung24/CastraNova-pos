@@ -56,6 +56,7 @@ const EVENT_TYPES: MovementType[] = [
   "MAINTENANCE_OUT",
   "PROJECT_OUT",
   "ADJUSTED_OUT",
+  "RETURNED",
 ]
 
 // Column widths in header order (When, By, Event, Model, Source, Qty, Notes);

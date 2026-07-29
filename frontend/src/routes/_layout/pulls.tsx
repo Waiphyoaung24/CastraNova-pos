@@ -198,8 +198,9 @@ function Pulls() {
     setSelectedPullId(pull.id)
     // Draft is seeded once here; a pull's lines are immutable after creation
     // (only fulfilled_qty/line_state change, at fulfill), so the 30s refetch
-    // cannot invalidate the draft's line-id mapping.
-    setFulfillDraft(seedFulfillDraft(pull.lines))
+    // cannot invalidate the draft's line-id mapping. State decides the seed: a
+    // PENDING pull starts at 0 to fulfill, a settled one mirrors what went out.
+    setFulfillDraft(seedFulfillDraft(pull.lines, pull.state))
     setScanNotice("")
   }, [])
 

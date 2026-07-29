@@ -3,10 +3,13 @@ import type {
   ProjectStatus,
   ProjectUpdate,
 } from "@/client/types.gen"
+import { isValidBudget, isValidDateRange } from "@/lib/project-form"
 
 // Pure form logic for the admin project EDIT dialog. `code` is read-only (the
 // project identity) and is never sent. name + customer are required; budget is
-// an optional non-negative number; blank dates/budget are sent as null.
+// an optional non-negative number; blank dates/budget are sent as null. The
+// budget and date-range rules are shared with the create form (project-form.ts)
+// so both dialogs accept exactly the same project.
 
 export interface ProjectEditDraft {
   name: string
@@ -15,13 +18,6 @@ export interface ProjectEditDraft {
   startDate: string
   endDate: string
   budget: string
-}
-
-function isValidBudget(value: string): boolean {
-  const trimmed = value.trim()
-  if (trimmed === "") return true // optional
-  const n = Number(trimmed)
-  return Number.isFinite(n) && n >= 0
 }
 
 export function projectToEditDraft(p: ProjectPublic): ProjectEditDraft {
@@ -36,7 +32,12 @@ export function projectToEditDraft(p: ProjectPublic): ProjectEditDraft {
 }
 
 export function canSaveProject(d: ProjectEditDraft): boolean {
-  return d.name.trim() !== "" && d.customerId !== "" && isValidBudget(d.budget)
+  return (
+    d.name.trim() !== "" &&
+    d.customerId !== "" &&
+    isValidBudget(d.budget) &&
+    isValidDateRange(d.startDate, d.endDate)
+  )
 }
 
 export function buildProjectUpdate(d: ProjectEditDraft): ProjectUpdate {

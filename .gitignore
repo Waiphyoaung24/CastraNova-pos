@@ -18,3 +18,4 @@ preview/
 
 .env
 .worktrees/
+backend/.test.env

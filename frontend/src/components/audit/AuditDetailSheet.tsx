@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Tag,
+  Undo2,
   Wrench,
 } from "lucide-react"
 import { type ReactNode, useState } from "react"
@@ -41,6 +42,9 @@ const EVENT_META: Record<string, { icon: LucideIcon; dir: Direction }> = {
   MAINTENANCE_OUT: { icon: Wrench, dir: "out" },
   PROJECT_OUT: { icon: Boxes, dir: "out" },
   ADJUSTED_OUT: { icon: SlidersHorizontal, dir: "out" },
+  // Inbound: a sale return puts stock back. Without this entry the fallback
+  // below would render it as "Stock out", which is the opposite of the truth.
+  RETURNED: { icon: Undo2, dir: "in" },
 }
 
 const DIRECTION: Record<

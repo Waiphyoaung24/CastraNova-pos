@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import useCustomToast from "@/hooks/useCustomToast"
 import { buildProjectPayload, canCreateProject } from "@/lib/project-create"
+import { isValidDateRange } from "@/lib/project-form"
 
 /** "New project" — the register form behind a dialog, off the Projects page header. */
 export function ProjectCreateDialog({
@@ -34,19 +35,29 @@ export function ProjectCreateDialog({
   const codeId = useId()
   const nameId = useId()
   const customerSelectId = useId()
+  const startId = useId()
+  const endId = useId()
+  const budgetId = useId()
 
   const [open, setOpen] = useState(false)
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
   const [customerId, setCustomerId] = useState("")
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
+  const [budget, setBudget] = useState("")
 
   const reset = () => {
     setCode("")
     setName("")
     setCustomerId("")
+    setStartDate("")
+    setEndDate("")
+    setBudget("")
   }
 
-  const draft = { code, name, customerId }
+  const draft = { code, name, customerId, startDate, endDate, budget }
+  const datesOutOfOrder = !isValidDateRange(startDate, endDate)
 
   const mutation = useMutation<ProjectPublic, Error, ProjectCreate>({
     mutationFn: (payload) =>
@@ -117,6 +128,45 @@ export function ProjectCreateDialog({
               searchPlaceholder="Search customers…"
               emptyText="No customers available"
               required
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor={startId}>Start date</Label>
+              <Input
+                id={startId}
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={endId}>End date</Label>
+              <Input
+                id={endId}
+                type="date"
+                value={endDate}
+                aria-invalid={datesOutOfOrder}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+          </div>
+          {datesOutOfOrder ? (
+            <p role="alert" className="text-destructive text-sm">
+              End date must be on or after the start date.
+            </p>
+          ) : null}
+          <div className="space-y-2">
+            <Label htmlFor={budgetId}>Budget (THB)</Label>
+            <Input
+              id={budgetId}
+              type="number"
+              min={0}
+              inputMode="decimal"
+              className="num"
+              placeholder="0.00"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
             />
           </div>
         </div>

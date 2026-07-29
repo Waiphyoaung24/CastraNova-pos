@@ -38,6 +38,7 @@ type FieldTriggerProps = {
   isPlaceholder: boolean
   disabled?: boolean
   required?: boolean
+  invalid?: boolean
   className?: string
   onOpen: () => void
 }
@@ -51,6 +52,7 @@ function FieldTrigger({
   isPlaceholder,
   disabled,
   required,
+  invalid,
   className,
   onOpen,
 }: FieldTriggerProps) {
@@ -61,6 +63,7 @@ function FieldTrigger({
         type="button"
         disabled={disabled}
         aria-required={required || undefined}
+        aria-invalid={invalid || undefined}
         aria-labelledby={labelledBy && id ? `${labelledBy} ${id}` : undefined}
         onKeyDown={(event) => {
           // APG: Down (and Alt+Down) opens the dialog. Enter and Space already
@@ -142,6 +145,9 @@ export type DatePickerProps = {
   disabled?: boolean
   /** Hides the Clear button. */
   required?: boolean
+  /** Marks the field as failing validation. `inputClassName` already carries
+   * the `aria-invalid:` styling, so the trigger turns destructive for free. */
+  invalid?: boolean
   placeholder?: string
   className?: string
   /** Fires whenever the popover opens or closes. A parent Dialog needs this to
@@ -158,6 +164,7 @@ export function DatePicker({
   max,
   disabled,
   required,
+  invalid,
   placeholder = "Pick a date",
   className,
   onOpenChange,
@@ -213,6 +220,7 @@ export function DatePicker({
         isPlaceholder={!value}
         disabled={disabled}
         required={required}
+        invalid={invalid}
         className={className}
         onOpen={() => setOpen(true)}
       />
