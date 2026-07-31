@@ -219,6 +219,37 @@ requires_app_role = pytest.mark.skipif(
 
 
 @requires_app_role
+def test_app_role_cannot_mutate_any_triggered_ledger() -> None:
+    app_engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+    try:
+        with app_engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT table_rel.relname,
+                           has_table_privilege(current_user, table_rel.oid, 'UPDATE'),
+                           has_table_privilege(current_user, table_rel.oid, 'DELETE')
+                    FROM pg_trigger AS trg
+                    JOIN pg_class AS table_rel ON table_rel.oid = trg.tgrelid
+                    JOIN pg_namespace AS table_ns
+                      ON table_ns.oid = table_rel.relnamespace
+                    JOIN pg_proc AS trigger_fn ON trigger_fn.oid = trg.tgfoid
+                    JOIN pg_namespace AS fn_ns ON fn_ns.oid = trigger_fn.pronamespace
+                    WHERE NOT trg.tgisinternal
+                      AND table_ns.nspname = 'public'
+                      AND fn_ns.nspname = 'public'
+                      AND trigger_fn.proname = 'reject_ledger_mutation'
+                    ORDER BY table_rel.relname
+                    """
+                )
+            ).all()
+            assert rows
+            assert all(not can_update and not can_delete for _, can_update, can_delete in rows)
+    finally:
+        app_engine.dispose()
+
+
+@requires_app_role
 @pytest.mark.parametrize(
     "table",
     ["unitmovement", "partmovement", "costline", "pricechange", "notificationlog"],

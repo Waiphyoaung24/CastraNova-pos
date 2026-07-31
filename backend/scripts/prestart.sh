@@ -17,5 +17,9 @@ python app/backend_pre_start.py
 # Run migrations
 alembic upgrade head
 
+# Dokploy PostgreSQL backups omit ACLs. Reapply the app role's desired grants
+# after every migration/restore, once every referenced table exists.
+python app/reconcile_app_role_grants.py
+
 # Create initial data in DB
 python app/initial_data.py
