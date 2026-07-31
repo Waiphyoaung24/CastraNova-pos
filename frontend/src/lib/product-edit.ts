@@ -6,6 +6,9 @@ import type { ProductPublic, ProductUpdate } from "@/client/types.gen"
 // is_active is always sent: retiring/reactivating is an ordinary edit here.
 
 export interface ProductEditDraft {
+  // Editable only while the product is fresh (no stock/transactions); the dialog
+  // disables the field otherwise. The backend enforces the same rule.
+  sku: string
   modelName: string
   brand: string
   category: string
@@ -24,6 +27,7 @@ function isValidPrice(value: string): boolean {
 
 export function productToDraft(p: ProductPublic): ProductEditDraft {
   return {
+    sku: p.sku,
     modelName: p.model_name,
     brand: p.brand ?? "",
     category: p.category ?? "",
@@ -40,6 +44,7 @@ export function productToDraft(p: ProductPublic): ProductEditDraft {
 
 export function canSaveProduct(d: ProductEditDraft): boolean {
   return (
+    d.sku.trim() !== "" &&
     d.modelName.trim() !== "" &&
     isValidPrice(d.retailPrice) &&
     isValidPrice(d.repairPrice)
@@ -52,6 +57,10 @@ export function buildProductUpdate(d: ProductEditDraft): ProductUpdate {
   const brand = d.brand.trim()
   const category = d.category.trim()
   return {
+    // Always sent; the backend only acts on it when it actually differs, and
+    // rejects a change on a non-fresh product. For a used product the field is
+    // disabled, so this equals the current SKU and is a no-op.
+    sku: d.sku.trim(),
     model_name: d.modelName.trim(),
     brand: brand === "" ? null : brand,
     category: category === "" ? null : category,

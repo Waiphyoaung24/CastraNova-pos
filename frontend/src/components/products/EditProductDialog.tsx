@@ -18,6 +18,11 @@ import { Label } from "@/components/ui/label"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
 import {
+  buildAutoSku,
+  generateSkuBase,
+  randomSkuSuffix,
+} from "@/lib/product-create"
+import {
   buildProductUpdate,
   canSaveProduct,
   type ProductEditDraft,
@@ -34,6 +39,7 @@ function EditField({
   numeric = false,
   disabled = false,
   placeholder,
+  hint,
 }: {
   label: string
   value: string
@@ -42,6 +48,7 @@ function EditField({
   numeric?: boolean
   disabled?: boolean
   placeholder?: string
+  hint?: string
 }) {
   const id = useId()
   return (
@@ -58,6 +65,7 @@ function EditField({
         {...(numeric ? { inputMode: "decimal" as const } : {})}
         {...(type === "number" ? { min: 0 } : {})}
       />
+      {hint ? <p className="text-muted-foreground text-xs">{hint}</p> : null}
     </div>
   )
 }
@@ -102,6 +110,11 @@ export function EditProductDialog({
   const [draft, setDraft] = useState<ProductEditDraft>(() =>
     productToDraft(product),
   )
+  // While the SKU is still editable (fresh product) and untouched by hand, it
+  // auto-follows brand + model like the create form. The suffix is minted once
+  // per dialog so it stays stable across brand/model edits.
+  const [skuDirty, setSkuDirty] = useState(false)
+  const [skuSuffix] = useState(randomSkuSuffix)
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -111,6 +124,37 @@ export function EditProductDialog({
 
   function patch(key: keyof ProductEditDraft, value: string) {
     setDraft((prev) => ({ ...prev, [key]: value }))
+  }
+
+  // Brand/model edits re-suggest the SKU only on a fresh product whose SKU the
+  // user hasn't hand-edited; otherwise they leave the SKU untouched.
+  function patchIdentity(key: "brand" | "modelName", value: string) {
+    setDraft((prev) => {
+      const next = { ...prev, [key]: value }
+      if (product.is_fresh && !skuDirty) {
+        next.sku = buildAutoSku(
+          generateSkuBase({ brand: next.brand, modelName: next.modelName }),
+          skuSuffix,
+        )
+      }
+      return next
+    })
+  }
+
+  function handleSkuChange(value: string) {
+    // A manual, non-empty edit locks auto-fill; clearing it resumes suggesting
+    // from the current brand + model.
+    const dirty = value.trim() !== ""
+    setSkuDirty(dirty)
+    setDraft((prev) => ({
+      ...prev,
+      sku: dirty
+        ? value
+        : buildAutoSku(
+            generateSkuBase({ brand: prev.brand, modelName: prev.modelName }),
+            skuSuffix,
+          ),
+    }))
   }
 
   const mutation = useMutation({
@@ -153,7 +197,17 @@ export function EditProductDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2 sm:grid-cols-2">
-          <EditField label="SKU" value={product.sku} disabled />
+          <EditField
+            label="SKU"
+            value={draft.sku}
+            onChange={product.is_fresh ? handleSkuChange : undefined}
+            disabled={!product.is_fresh}
+            hint={
+              product.is_fresh
+                ? "Auto-generated from brand + model — edit to override."
+                : "Locked — product already has stock or history."
+            }
+          />
           <EditField
             label="Tracking"
             value={product.tracking_mode ?? "QUANTITY"}
@@ -162,13 +216,13 @@ export function EditProductDialog({
           <EditField
             label="Model name"
             value={draft.modelName}
-            onChange={(v) => patch("modelName", v)}
+            onChange={(v) => patchIdentity("modelName", v)}
             placeholder="e.g. iPhone 15 Pro"
           />
           <EditField
             label="Brand"
             value={draft.brand}
-            onChange={(v) => patch("brand", v)}
+            onChange={(v) => patchIdentity("brand", v)}
             placeholder="e.g. Apple"
           />
           <EditField
@@ -186,7 +240,7 @@ export function EditProductDialog({
             placeholder="e.g. 5"
           />
           <EditField
-            label="Retail price (THB)"
+            label="Project price (THB)"
             value={draft.retailPrice}
             onChange={(v) => patch("retailPrice", v)}
             type="number"

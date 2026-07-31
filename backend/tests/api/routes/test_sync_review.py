@@ -36,7 +36,7 @@ def _ingest(
     )
     return crud.create_sync_review_item(
         session=db, data=data, submitted_by_user_id=_admin_id(db)
-    ).id
+    )[0].id
 
 
 def test_ingest_creates_pending_item(db: Session) -> None:
@@ -331,3 +331,90 @@ def test_resolve_404(
         headers=superuser_token_headers,
     )
     assert r.status_code == 404
+
+
+def test_count_pending_splits_by_reason(db: Session) -> None:
+    before = crud.count_pending_sync_review_items(session=db)
+
+    _ingest(db, reason=SyncReviewReason.STALE)
+    _ingest(db, reason=SyncReviewReason.CONFLICT)
+    _ingest(db, reason=SyncReviewReason.CONFLICT)
+
+    after = crud.count_pending_sync_review_items(session=db)
+    assert after.stale == before.stale + 1
+    assert after.conflict == before.conflict + 2
+    assert after.total == after.stale + after.conflict
+
+
+def test_count_pending_excludes_resolved(db: Session) -> None:
+    item_id = _ingest(db, reason=SyncReviewReason.CONFLICT)
+    before = crud.count_pending_sync_review_items(session=db)
+
+    crud.resolve_sync_review_item(
+        session=db,
+        item_id=item_id,
+        admin_id=_admin_id(db),
+        new_state=SyncReviewState.RESOLVED,
+        note=None,
+    )
+
+    after = crud.count_pending_sync_review_items(session=db)
+    assert after.conflict == before.conflict - 1
+    assert after.total == before.total - 1
+
+
+def test_ingest_returns_replayed_flag(db: Session) -> None:
+    key = uuid.uuid4()
+    data = SyncReviewItemCreate(
+        idempotency_key=key,
+        mutation_kind="sale",
+        payload={"customer_id": str(uuid.uuid4())},
+        reason=SyncReviewReason.CONFLICT,
+    )
+    first, replayed_first = crud.create_sync_review_item(
+        session=db, data=data, submitted_by_user_id=_admin_id(db)
+    )
+    second, replayed_second = crud.create_sync_review_item(
+        session=db, data=data, submitted_by_user_id=_admin_id(db)
+    )
+    assert replayed_first is False
+    assert replayed_second is True
+    assert first.id == second.id
+
+
+def test_route_notifies_once_per_genuine_insert(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.routes import sync_review as route
+
+    queued: list[str] = []
+    monkeypatch.setattr(
+        route.notify,
+        "notify_sync_review_pending_bg",
+        lambda: queued.append("sent"),
+    )
+
+    body = {
+        "idempotency_key": str(uuid.uuid4()),
+        "mutation_kind": "sale",
+        "payload": {"customer_id": str(uuid.uuid4())},
+        "reason": "CONFLICT",
+    }
+    first = client.post(
+        f"{settings.API_V1_STR}/sync-review",
+        headers=superuser_token_headers,
+        json=body,
+    )
+    assert first.status_code == 200
+    assert len(queued) == 1
+
+    # Same idempotency_key — a replay must NOT re-notify.
+    second = client.post(
+        f"{settings.API_V1_STR}/sync-review",
+        headers=superuser_token_headers,
+        json=body,
+    )
+    assert second.status_code == 200
+    assert len(queued) == 1

@@ -8,6 +8,7 @@ import {
 } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { Button } from "@/components/ui/button"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import {
   type ProjectEditDraft,
   projectToEditDraft,
 } from "@/lib/project-edit"
+import { isValidDateRange } from "@/lib/project-form"
 
 export function ProjectEditDialog({
   project,
@@ -57,6 +59,8 @@ export function ProjectEditDialog({
   // Baseline captured once at mount, so the dirty-check compares against what
   // the user started editing (not a value shifted by a background refetch).
   const [baseline] = useState(() => projectToEditDraft(project))
+  // Which of this dialog's own date pickers are open — see onOpenChange below.
+  const [pickerOpen, setPickerOpen] = useState({ start: false, end: false })
 
   function patch(p: Partial<ProjectEditDraft>) {
     setDraft((d) => ({ ...d, ...p }))
@@ -79,6 +83,7 @@ export function ProjectEditDialog({
 
   const isUnchanged = JSON.stringify(draft) === JSON.stringify(baseline)
   const canSave = canSaveProject(draft) && !isUnchanged && !mutation.isPending
+  const datesOutOfOrder = !isValidDateRange(draft.startDate, draft.endDate)
 
   return (
     <Dialog
@@ -86,6 +91,14 @@ export function ProjectEditDialog({
       // Required by the Customer field's EntityCombobox — see EntityCombobox.tsx.
       modal={false}
       onOpenChange={(next) => {
+        // modal={false} keeps this Dialog listening for Escape at the document,
+        // and Radix fires every layer's handler rather than only the topmost —
+        // so dismissing an open date picker used to tear down the edit form
+        // with it. The picker's own layer closes it; this one stands down while
+        // one of ITS OWN pickers is open. Tracked as state rather than probed
+        // from the DOM, so an unrelated popover elsewhere on the page can never
+        // swallow a legitimate dismissal of this dialog.
+        if (!next && (pickerOpen.start || pickerOpen.end)) return
         if (!next) onClose()
       }}
     >
@@ -144,24 +157,38 @@ export function ProjectEditDialog({
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor={startId}>Start date</Label>
-              <Input
+              <Label id={`${startId}-label`} htmlFor={startId}>
+                Start date
+              </Label>
+              <DatePicker
                 id={startId}
-                type="date"
+                labelledBy={`${startId}-label`}
                 value={draft.startDate}
-                onChange={(e) => patch({ startDate: e.target.value })}
+                onChange={(iso) => patch({ startDate: iso })}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, start: o }))}
+                placeholder="No start date"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={endId}>End date</Label>
-              <Input
+              <Label id={`${endId}-label`} htmlFor={endId}>
+                End date
+              </Label>
+              <DatePicker
                 id={endId}
-                type="date"
+                labelledBy={`${endId}-label`}
                 value={draft.endDate}
-                onChange={(e) => patch({ endDate: e.target.value })}
+                onChange={(iso) => patch({ endDate: iso })}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, end: o }))}
+                invalid={datesOutOfOrder}
+                placeholder="No end date"
               />
             </div>
           </div>
+          {datesOutOfOrder ? (
+            <p role="alert" className="text-destructive text-sm">
+              End date must be on or after the start date.
+            </p>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor={budgetId}>Budget (THB)</Label>
             <Input

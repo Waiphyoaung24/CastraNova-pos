@@ -176,7 +176,7 @@ export type MinStockLevelUpdate = {
     min_stock_level?: (number | null);
 };
 
-export type MovementType = 'RECEIVED' | 'SOLD' | 'MAINTENANCE_OUT' | 'PROJECT_OUT' | 'ADJUSTED_OUT';
+export type MovementType = 'RECEIVED' | 'SOLD' | 'MAINTENANCE_OUT' | 'PROJECT_OUT' | 'ADJUSTED_OUT' | 'RETURNED';
 
 export type NewPassword = {
     token: string;
@@ -185,7 +185,7 @@ export type NewPassword = {
 
 export type NotificationChannel = 'LINE' | 'VIBER' | 'TELEGRAM';
 
-export type NotificationEvent = 'LOW_STOCK' | 'OVERRIDE_PENDING' | 'PULL_FULFILLED' | 'PULL_SHORT';
+export type NotificationEvent = 'LOW_STOCK' | 'OVERRIDE_PENDING' | 'PULL_FULFILLED' | 'PULL_SHORT' | 'SYNC_REVIEW_PENDING';
 
 export type NotificationPreferencePublic = {
     id: (string | null);
@@ -258,6 +258,7 @@ export type PriceChangePublic = {
     id: string;
     changed_by_user_id: string;
     changed_at?: (string | null);
+    changed_by_full_name?: (string | null);
 };
 
 export type PricingOverrideCreate = {
@@ -346,6 +347,7 @@ export type ProductPublic = {
     default_min_stock_level?: (number | null);
     is_active?: boolean;
     id: string;
+    is_fresh?: boolean;
 };
 
 export type ProductPurchaseCost = {
@@ -359,6 +361,7 @@ export type ProductsPublic = {
 };
 
 export type ProductUpdate = {
+    sku?: (string | null);
     model_name?: (string | null);
     brand?: (string | null);
     category?: (string | null);
@@ -370,6 +373,27 @@ export type ProductUpdate = {
     repair_price_thb?: (number | string | null);
     default_min_stock_level?: (number | null);
     is_active?: (boolean | null);
+};
+
+/**
+ * One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ * ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+ * is physically absent from the staff payload.
+ *
+ * Reuses SkuConsumptionDrawAdminPublic for `draws`: a FIFO batch draw is the
+ * same concept here as in the SKU consumption history (FR-015).
+ */
+export type ProjectConsumptionRowPublic = {
+    line_kind: SaleLineKind;
+    product_id: string;
+    product_sku: string;
+    model_name: string;
+    unit_serial: (string | null);
+    quantity: number;
+    occurred_at: string;
+    project_pull_id: string;
+    total_cost_thb: string;
+    draws: Array<SkuConsumptionDrawAdminPublic>;
 };
 
 export type ProjectCreate = {
@@ -387,6 +411,7 @@ export type ProjectDashboardAdminPublic = {
     pulls: Array<TransactionSummaryPublic>;
     budget_thb: (string | null);
     consumed_cost_thb: string;
+    consumed_items: Array<ProjectConsumptionRowPublic>;
 };
 
 export type ProjectDashboardStaffPublic = {
@@ -527,6 +552,7 @@ export type ReceiveQuantityRequest = {
     expected_qty?: (number | null);
     note?: (string | null);
     idempotency_key: string;
+    received_date?: (string | null);
 };
 
 export type ReceiveSerializedRequest = {
@@ -534,10 +560,35 @@ export type ReceiveSerializedRequest = {
     supplier_id: string;
     pieces: Array<ReceivePiece>;
     idempotency_key: string;
+    received_date?: (string | null);
 };
 
 export type ReceiveSerializedResponse = {
     units: Array<UnitPublic>;
+};
+
+export type ReturnableLinePublic = {
+    sale_line_id: string;
+    line_kind: SaleLineKind;
+    product_id: (string | null);
+    unit_id: (string | null);
+    label: string;
+    quantity_sold: number;
+    quantity_returned: number;
+    quantity_returnable: number;
+    unit_price_thb: string;
+};
+
+export type ReturnableSalePublic = {
+    sale_id: string;
+    sold_at: string;
+    customer_id: string;
+    customer_name: string;
+    lines: Array<ReturnableLinePublic>;
+};
+
+export type ReturnableSalesPublic = {
+    sales: Array<ReturnableSalePublic>;
 };
 
 export type SaleCreateRequest = {
@@ -582,6 +633,36 @@ export type SalePublic = {
     total_cogs_thb: string;
     sold_at: string;
     lines: Array<SaleLinePublic>;
+};
+
+export type SaleReturnCreateRequest = {
+    idempotency_key: string;
+    reason: string;
+    lines: Array<SaleReturnLineInput>;
+};
+
+export type SaleReturnLineInput = {
+    sale_line_id: string;
+    quantity?: number;
+};
+
+export type SaleReturnLinePublic = {
+    id: string;
+    sale_line_id: string;
+    quantity: number;
+    unit_price_thb: string;
+    cogs_restored_thb: string;
+};
+
+export type SaleReturnPublic = {
+    id: string;
+    sale_id: string;
+    reason: string;
+    returned_at: string;
+    total_refund_thb: string;
+    total_cogs_restored_thb: string;
+    created_by_user_id: string;
+    lines: Array<SaleReturnLinePublic>;
 };
 
 export type SaleStaffPublic = {
@@ -1395,6 +1476,20 @@ export type SalesCreateSaleData = {
 };
 
 export type SalesCreateSaleResponse = ((SalePublic | SaleStaffPublic));
+
+export type SalesCreateSaleReturnData = {
+    requestBody: SaleReturnCreateRequest;
+    saleId: string;
+};
+
+export type SalesCreateSaleReturnResponse = (SaleReturnPublic);
+
+export type SalesReadReturnableSalesData = {
+    castranovaBarcode?: (string | null);
+    sku?: (string | null);
+};
+
+export type SalesReadReturnableSalesResponse = (ReturnableSalesPublic);
 
 export type SalesReadSaleReceiptData = {
     saleId: string;

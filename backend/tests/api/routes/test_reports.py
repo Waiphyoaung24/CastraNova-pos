@@ -314,11 +314,13 @@ def test_adjacent_month_not_counted(
         idempotency_key=uuid.uuid4(),
         created_by_user_id=admin.id,
     )
-    # Pin into August; query July (a month nothing else in this session writes
-    # to) -> the August sale must not be counted.
-    _pin_sale(db, sale.id, datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc))
+    # Pin into 2099-08; query the adjacent 2099-07 -> the 2099-08 sale must not be
+    # counted. The window is far-future (the suite's reserved empty range, cf.
+    # test_empty_month_all_zero) so wall-clock advancement can never drop another
+    # test's default-`now()`-dated sale into the queried month.
+    _pin_sale(db, sale.id, datetime(2099, 8, 1, 0, 0, tzinfo=timezone.utc))
     r = client.get(
-        f"{PREFIX}/reports/channel-margin?month=2026-07",
+        f"{PREFIX}/reports/channel-margin?month=2099-07",
         headers=superuser_token_headers,
     )
     assert r.status_code == 200, r.text

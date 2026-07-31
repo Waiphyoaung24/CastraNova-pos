@@ -10,6 +10,7 @@ import {
 } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { Button } from "@/components/ui/button"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import useCustomToast from "@/hooks/useCustomToast"
 import { buildProjectPayload, canCreateProject } from "@/lib/project-create"
+import { isValidDateRange } from "@/lib/project-form"
 
 /** "New project" — the register form behind a dialog, off the Projects page header. */
 export function ProjectCreateDialog({
@@ -34,19 +36,31 @@ export function ProjectCreateDialog({
   const codeId = useId()
   const nameId = useId()
   const customerSelectId = useId()
+  const startId = useId()
+  const endId = useId()
+  const budgetId = useId()
 
   const [open, setOpen] = useState(false)
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
   const [customerId, setCustomerId] = useState("")
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
+  const [budget, setBudget] = useState("")
+  // Which of this dialog's own date pickers are open — see onOpenChange below.
+  const [pickerOpen, setPickerOpen] = useState({ start: false, end: false })
 
   const reset = () => {
     setCode("")
     setName("")
     setCustomerId("")
+    setStartDate("")
+    setEndDate("")
+    setBudget("")
   }
 
-  const draft = { code, name, customerId }
+  const draft = { code, name, customerId, startDate, endDate, budget }
+  const datesOutOfOrder = !isValidDateRange(startDate, endDate)
 
   const mutation = useMutation<ProjectPublic, Error, ProjectCreate>({
     mutationFn: (payload) =>
@@ -69,6 +83,11 @@ export function ProjectCreateDialog({
       // Required by the Customer field's EntityCombobox — see EntityCombobox.tsx.
       modal={false}
       onOpenChange={(next) => {
+        // modal={false} keeps this Dialog listening for Escape at the document,
+        // and Radix fires every layer's handler rather than only the topmost —
+        // so dismissing an open date picker would otherwise discard the whole
+        // half-filled form. Mirrors ProjectEditDialog.
+        if (!next && (pickerOpen.start || pickerOpen.end)) return
         setOpen(next)
         if (!next) reset()
       }}
@@ -117,6 +136,53 @@ export function ProjectCreateDialog({
               searchPlaceholder="Search customers…"
               emptyText="No customers available"
               required
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label id={`${startId}-label`} htmlFor={startId}>
+                Start date
+              </Label>
+              <DatePicker
+                id={startId}
+                labelledBy={`${startId}-label`}
+                value={startDate}
+                onChange={setStartDate}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, start: o }))}
+                placeholder="No start date"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label id={`${endId}-label`} htmlFor={endId}>
+                End date
+              </Label>
+              <DatePicker
+                id={endId}
+                labelledBy={`${endId}-label`}
+                value={endDate}
+                onChange={setEndDate}
+                onOpenChange={(o) => setPickerOpen((p) => ({ ...p, end: o }))}
+                invalid={datesOutOfOrder}
+                placeholder="No end date"
+              />
+            </div>
+          </div>
+          {datesOutOfOrder ? (
+            <p role="alert" className="text-destructive text-sm">
+              End date must be on or after the start date.
+            </p>
+          ) : null}
+          <div className="space-y-2">
+            <Label htmlFor={budgetId}>Budget (THB)</Label>
+            <Input
+              id={budgetId}
+              type="number"
+              min={0}
+              inputMode="decimal"
+              className="num"
+              placeholder="0.00"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
             />
           </div>
         </div>

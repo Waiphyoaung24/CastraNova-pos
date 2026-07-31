@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -10,10 +11,43 @@ from app.models import (
     ReceiveQuantityRequest,
     ReceiveSerializedRequest,
     ReceiveSerializedResponse,
+    get_datetime_utc,
 )
 from app.services.barcode import render_label_sheet
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
+
+
+def _resolve_received_at(received_date: date | None) -> datetime | None:
+    """Compose the stored ``received_at`` from an operator-picked calendar date
+    and the server's *current clock time* (design 2026-07-25).
+
+    Returning None when no date was picked lets crud fall through to its own
+    default, so an omitted date behaves exactly as it did before this field
+    existed.
+
+    Composing with the clock time rather than collapsing to midnight keeps every
+    receive distinct: ``received_at`` is the FIFO sort key and its tiebreaker is
+    a random uuid4 primary key, so same-day midnight ties would make the choice
+    of which batch a sale draws its cost from non-deterministic.
+
+    The one-day tolerance on the future check absorbs timezone skew — the client
+    sends its LOCAL date, and the local operating zones (Yangon UTC+6:30,
+    Bangkok UTC+7) run ahead of UTC, so between local midnight and ~06:30 the
+    picked 'today' is one day past the server's UTC today.
+
+    This runs BEFORE crud's idempotency-replay lookup, which looks like it could
+    reject a retry of an already-stored receipt. It cannot: the bound is
+    ``date.today() + 1``, and ``date.today()`` never moves backwards, so the
+    accepted range only ever widens. A payload accepted once stays accepted, and
+    an offline replay resends the payload captured at entry time unchanged."""
+    if received_date is None:
+        return None
+    if received_date > date.today() + timedelta(days=1):
+        raise HTTPException(
+            status_code=422, detail="received_date cannot be in the future"
+        )
+    return datetime.combine(received_date, get_datetime_utc().timetz())
 
 
 @router.post("/serialized", response_model=ReceiveSerializedResponse)
@@ -30,6 +64,7 @@ def receive_serialized(
         pieces=payload.pieces,
         idempotency_key=payload.idempotency_key,
         received_by_user_id=admin.id,
+        received_at=_resolve_received_at(payload.received_date),
     )
     return ReceiveSerializedResponse(units=units)
 
@@ -52,6 +87,7 @@ def receive_quantity(
         supplier_batch_ref=payload.supplier_batch_ref,
         expected_qty=payload.expected_qty,
         note=payload.note,
+        received_at=_resolve_received_at(payload.received_date),
     )
     return PartBatchPublic.model_validate(batch)
 

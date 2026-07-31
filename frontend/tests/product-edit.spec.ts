@@ -20,6 +20,7 @@ const baseProduct: ProductPublic = {
 }
 
 const draft = (over: Partial<ProductEditDraft> = {}): ProductEditDraft => ({
+  sku: "S001",
   modelName: "Compressor",
   brand: "Hitec",
   category: "Machine",
@@ -32,6 +33,7 @@ const draft = (over: Partial<ProductEditDraft> = {}): ProductEditDraft => ({
 
 test("productToDraft maps a product to editable strings", () => {
   expect(productToDraft(baseProduct)).toEqual({
+    sku: "S001",
     modelName: "Compressor",
     brand: "Hitec",
     category: "Machine",
@@ -68,6 +70,7 @@ test("buildProductUpdate trims and sends prices as strings", () => {
   expect(
     buildProductUpdate(draft({ retailPrice: " 1999 ", repairPrice: "350" })),
   ).toEqual({
+    sku: "S001",
     model_name: "Compressor",
     brand: "Hitec",
     category: "Machine",
@@ -82,6 +85,7 @@ test("buildProductUpdate sends null for cleared brand/category/min-stock", () =>
   expect(
     buildProductUpdate(draft({ brand: "  ", category: "", minStock: "" })),
   ).toEqual({
+    sku: "S001",
     model_name: "Compressor",
     brand: null,
     category: null,
@@ -108,7 +112,9 @@ test("productToDraft carries is_active through", () => {
   expect(productToDraft({ ...baseProduct, is_active: false }).isActive).toBe(
     false,
   )
-  expect(productToDraft({ ...baseProduct, is_active: true }).isActive).toBe(true)
+  expect(productToDraft({ ...baseProduct, is_active: true }).isActive).toBe(
+    true,
+  )
 })
 
 test("productToDraft defaults a missing is_active to true", () => {

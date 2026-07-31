@@ -59,6 +59,9 @@ class MovementType(str, enum.Enum):
     MAINTENANCE_OUT = "MAINTENANCE_OUT"
     PROJECT_OUT = "PROJECT_OUT"
     ADJUSTED_OUT = "ADJUSTED_OUT"
+    # Sale return (m035): the only inbound event besides RECEIVED. Restores a
+    # SOLD unit to stock / re-credits the FIFO batches a PART line consumed.
+    RETURNED = "RETURNED"
 
 
 class ProjectPullState(str, enum.Enum):
@@ -129,6 +132,7 @@ class NotificationEvent(str, enum.Enum):
     OVERRIDE_PENDING = "OVERRIDE_PENDING"
     PULL_FULFILLED = "PULL_FULFILLED"
     PULL_SHORT = "PULL_SHORT"
+    SYNC_REVIEW_PENDING = "SYNC_REVIEW_PENDING"
 
 
 class NotificationStatus(str, enum.Enum):
@@ -137,7 +141,7 @@ class NotificationStatus(str, enum.Enum):
 
 
 # Who may receive which event. These must agree with the recipient queries in
-# app.services.notify: the three below are fetched with
+# app.services.notify: the four below are fetched with
 # `User.role == UserRole.BKK_ADMIN`, while notify_low_stock has no role filter.
 # Offering a staff user a checkbox for an admin-only event would persist
 # enabled=True and then silently never deliver.
@@ -146,6 +150,7 @@ ADMIN_ONLY_EVENTS: frozenset["NotificationEvent"] = frozenset(
         NotificationEvent.PULL_SHORT,
         NotificationEvent.PULL_FULFILLED,
         NotificationEvent.OVERRIDE_PENDING,
+        NotificationEvent.SYNC_REVIEW_PENDING,
     }
 )
 ALL_ROLE_EVENTS: frozenset["NotificationEvent"] = frozenset(
@@ -498,6 +503,9 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(SQLModel):
+    # sku is editable only while the product is "fresh" (no stock/transactions);
+    # crud.update_product enforces that. Immutable once received/sold.
+    sku: str | None = Field(default=None, max_length=64)
     model_name: str | None = Field(default=None, max_length=255)
     brand: str | None = Field(default=None, max_length=255)
     category: str | None = Field(default=None, max_length=128)
@@ -511,6 +519,10 @@ class ProductUpdate(SQLModel):
 
 class ProductPublic(ProductBase):
     id: uuid.UUID
+    # Computed at read time (not stored): True when the product has no stock or
+    # transactions, i.e. its SKU can still be edited. Defaults to False (locked)
+    # so any caller that forgets to populate it fails safe.
+    is_fresh: bool = False
 
 
 class ProductsPublic(SQLModel):
@@ -601,6 +613,7 @@ class PriceChangePublic(PriceChangeBase):
     id: uuid.UUID
     changed_by_user_id: uuid.UUID
     changed_at: datetime | None = None
+    changed_by_full_name: str | None = None
 
 
 # --- Unit (SERIALIZED stock; state cache) -------------------------------------
@@ -788,6 +801,9 @@ class ReceiveSerializedRequest(SQLModel):
     supplier_id: uuid.UUID
     pieces: list[ReceivePiece] = Field(min_length=1, max_length=500)
     idempotency_key: uuid.UUID
+    # Operator-picked arrival date; None → today. The server composes the stored
+    # timestamp (routes/receipts.py) so a wrong client clock cannot forge one.
+    received_date: date | None = None
 
 
 class ReceiveSerializedResponse(SQLModel):
@@ -1000,6 +1016,8 @@ class ReceiveQuantityRequest(SQLModel):
     expected_qty: int | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=400)
     idempotency_key: uuid.UUID
+    # Operator-picked arrival date; None → today. Also drives the batch_no prefix.
+    received_date: date | None = None
 
 
 # --- Pricing override (FR-010; M013) ------------------------------------------
@@ -1278,6 +1296,15 @@ class SyncReviewResolve(SQLModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class SyncReviewPendingCounts(SQLModel):
+    # Named fields rather than a bare 3-tuple: three same-typed ints are
+    # trivially transposable at the call site, and the notify template reads
+    # all three.
+    total: int
+    stale: int
+    conflict: int
+
+
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------
 
 
@@ -1407,6 +1434,121 @@ class SaleCreateRequest(SQLModel):
     customer_id: uuid.UUID
     lines: list[SaleLineInput] = Field(min_length=1, max_length=100)
     idempotency_key: uuid.UUID
+
+
+# --- Sale return (m035; design 2026-07-25) ------------------------------------
+
+
+class SaleReturn(SQLModel, table=True):
+    # Insert-only in practice (no update/delete endpoint), but NOT trigger-
+    # protected: the append-only guarantee that matters lives on the movements
+    # this row produces (unit_movement / part_movement / cost_line), which the
+    # M021 reject_ledger_mutation triggers already cover.
+    # returned_at is the report's date key — every margin_report aggregation for
+    # returns closes over [start, end) on it, so it is indexed like sale.sold_at.
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_sale_return_idempotency_key"),
+        Index("ix_salereturn_returned_at", "returned_at"),
+        Index("ix_salereturn_sale_id", "sale_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sale_id: uuid.UUID = Field(foreign_key="sale.id", nullable=False)
+    created_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True
+    )
+    idempotency_key: uuid.UUID
+    reason: str = Field(max_length=512)
+    returned_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    total_refund_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    total_cogs_restored_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+
+
+class SaleReturnLine(SQLModel, table=True):
+    # The over-return invariant (SUM(quantity) per sale_line <= saleline.quantity)
+    # spans rows, so it is enforced in crud under a FOR UPDATE lock on the sale
+    # line, not by a CHECK.
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_salereturnline_quantity_positive"),
+        CheckConstraint(
+            "cogs_restored_thb >= 0", name="ck_salereturnline_cogs_nonneg"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sale_return_id: uuid.UUID = Field(
+        foreign_key="salereturn.id", nullable=False, index=True
+    )
+    sale_line_id: uuid.UUID = Field(
+        foreign_key="saleline.id", nullable=False, index=True
+    )
+    quantity: int
+    # Refund basis, snapshot-copied from the sale line at return time.
+    unit_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    # Exact cost restored, summed from the reversal cost_lines (UNIT lines: the
+    # unit's purchase_cost_thb). Never a re-derived average.
+    cogs_restored_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+
+
+class SaleReturnLineInput(SQLModel):
+    sale_line_id: uuid.UUID
+    # UNIT lines must be exactly 1 (checked in crud against the line kind).
+    quantity: int = Field(default=1, gt=0, le=1_000_000)
+
+
+class SaleReturnCreateRequest(SQLModel):
+    idempotency_key: uuid.UUID
+    reason: str = Field(min_length=1, max_length=512)
+    lines: list[SaleReturnLineInput] = Field(min_length=1, max_length=100)
+
+
+class SaleReturnLinePublic(SQLModel):
+    id: uuid.UUID
+    sale_line_id: uuid.UUID
+    quantity: int
+    unit_price_thb: Decimal
+    cogs_restored_thb: Decimal
+
+
+class SaleReturnPublic(SQLModel):
+    # Admin-only surface (returns are an admin desk action), so cost fields are
+    # exposed here deliberately — unlike SaleStaffPublic there is no staff variant.
+    id: uuid.UUID
+    sale_id: uuid.UUID
+    reason: str
+    returned_at: datetime
+    total_refund_thb: Decimal
+    total_cogs_restored_thb: Decimal
+    created_by_user_id: uuid.UUID
+    lines: list[SaleReturnLinePublic]
+
+
+class ReturnableLinePublic(SQLModel):
+    sale_line_id: uuid.UUID
+    line_kind: SaleLineKind
+    product_id: uuid.UUID | None
+    unit_id: uuid.UUID | None
+    label: str  # "SKU — Model name"
+    quantity_sold: int
+    quantity_returned: int
+    quantity_returnable: int
+    unit_price_thb: Decimal
+
+
+class ReturnableSalePublic(SQLModel):
+    sale_id: uuid.UUID
+    sold_at: datetime
+    customer_id: uuid.UUID
+    customer_name: str
+    lines: list[ReturnableLinePublic]
+
+
+class ReturnableSalesPublic(SQLModel):
+    sales: list[ReturnableSalePublic]
 
 
 # --- Service ticket (Maintenance, FR-008; M011) -------------------------------
@@ -1952,6 +2094,31 @@ class ProjectDashboardStaffPublic(SQLModel):
     # No budget / consumed_cost — staff redaction.
 
 
+class ProjectConsumptionRowPublic(SQLModel):
+    """One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+    ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+    is physically absent from the staff payload.
+
+    Reuses SkuConsumptionDrawAdminPublic for `draws`: a FIFO batch draw is the
+    same concept here as in the SKU consumption history (FR-015)."""
+
+    line_kind: SaleLineKind  # UNIT | PART
+    product_id: uuid.UUID
+    product_sku: str
+    model_name: str
+    # UNIT: the unit's castranova_barcode. NULL for PART (no serial).
+    unit_serial: str | None
+    quantity: int  # 1 for UNIT; part_movement.quantity for PART
+    occurred_at: datetime
+    project_pull_id: uuid.UUID
+    total_cost_thb: Decimal
+    # PART: one entry per batch the movement drew from. Always empty for UNIT —
+    # a serialized unit IS its own cost layer, there is no batch to attribute.
+    # Forward ref: the draw schema is declared further down (same pattern as
+    # SkuSearchResult.consumption).
+    draws: list["SkuConsumptionDrawAdminPublic"]
+
+
 class ProjectDashboardAdminPublic(ProjectDashboardStaffPublic):
     # Admin sees the full project (adds back budget_thb). consumed_cost_thb is
     # REQUIRED so a staff payload cannot upcast to admin; budget_thb is
@@ -1959,6 +2126,9 @@ class ProjectDashboardAdminPublic(ProjectDashboardStaffPublic):
     project: ProjectPublic  # type: ignore[assignment]
     budget_thb: Decimal | None
     consumed_cost_thb: Decimal
+    # Unbounded, newest first — the pulls list above it is unbounded too, and a
+    # truncated audit view would misrepresent itself as complete.
+    consumed_items: list[ProjectConsumptionRowPublic]
 
 
 # --- Override-exceptions report (FR-010; read-only) ---------------------------

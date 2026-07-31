@@ -899,7 +899,7 @@ export const MinStockLevelUpdateSchema = {
 
 export const MovementTypeSchema = {
     type: 'string',
-    enum: ['RECEIVED', 'SOLD', 'MAINTENANCE_OUT', 'PROJECT_OUT', 'ADJUSTED_OUT'],
+    enum: ['RECEIVED', 'SOLD', 'MAINTENANCE_OUT', 'PROJECT_OUT', 'ADJUSTED_OUT', 'RETURNED'],
     title: 'MovementType'
 } as const;
 
@@ -929,7 +929,7 @@ export const NotificationChannelSchema = {
 
 export const NotificationEventSchema = {
     type: 'string',
-    enum: ['LOW_STOCK', 'OVERRIDE_PENDING', 'PULL_FULFILLED', 'PULL_SHORT'],
+    enum: ['LOW_STOCK', 'OVERRIDE_PENDING', 'PULL_FULFILLED', 'PULL_SHORT', 'SYNC_REVIEW_PENDING'],
     title: 'NotificationEvent'
 } as const;
 
@@ -1271,6 +1271,17 @@ export const PriceChangePublicSchema = {
                 }
             ],
             title: 'Changed At'
+        },
+        changed_by_full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Changed By Full Name'
         }
     },
     type: 'object',
@@ -1674,6 +1685,11 @@ export const ProductPublicSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Id'
+        },
+        is_fresh: {
+            type: 'boolean',
+            title: 'Is Fresh',
+            default: false
         }
     },
     type: 'object',
@@ -1701,6 +1717,18 @@ export const ProductPurchaseCostSchema = {
 
 export const ProductUpdateSchema = {
     properties: {
+        sku: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sku'
+        },
         model_name: {
             anyOf: [
                 {
@@ -1835,6 +1863,73 @@ export const ProductsPublicSchema = {
     title: 'ProductsPublic'
 } as const;
 
+export const ProjectConsumptionRowPublicSchema = {
+    properties: {
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
+        unit_serial: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Serial'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        },
+        project_pull_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Pull Id'
+        },
+        total_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cost Thb'
+        },
+        draws: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionDrawAdminPublic'
+            },
+            type: 'array',
+            title: 'Draws'
+        }
+    },
+    type: 'object',
+    required: ['line_kind', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'quantity', 'occurred_at', 'project_pull_id', 'total_cost_thb', 'draws'],
+    title: 'ProjectConsumptionRowPublic',
+    description: `One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+is physically absent from the staff payload.
+
+Reuses SkuConsumptionDrawAdminPublic for \`draws\`: a FIFO batch draw is the
+same concept here as in the SKU consumption history (FR-015).`
+} as const;
+
 export const ProjectCreateSchema = {
     properties: {
         code: {
@@ -1929,10 +2024,17 @@ export const ProjectDashboardAdminPublicSchema = {
             type: 'string',
             pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
             title: 'Consumed Cost Thb'
+        },
+        consumed_items: {
+            items: {
+                '$ref': '#/components/schemas/ProjectConsumptionRowPublic'
+            },
+            type: 'array',
+            title: 'Consumed Items'
         }
     },
     type: 'object',
-    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb'],
+    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb', 'consumed_items'],
     title: 'ProjectDashboardAdminPublic'
 } as const;
 
@@ -2683,6 +2785,18 @@ export const ReceiveQuantityRequestSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Idempotency Key'
+        },
+        received_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received Date'
         }
     },
     type: 'object',
@@ -2715,6 +2829,18 @@ export const ReceiveSerializedRequestSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Idempotency Key'
+        },
+        received_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received Date'
         }
     },
     type: 'object',
@@ -2735,6 +2861,116 @@ export const ReceiveSerializedResponseSchema = {
     type: 'object',
     required: ['units'],
     title: 'ReceiveSerializedResponse'
+} as const;
+
+export const ReturnableLinePublicSchema = {
+    properties: {
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        product_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Id'
+        },
+        unit_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Id'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        quantity_sold: {
+            type: 'integer',
+            title: 'Quantity Sold'
+        },
+        quantity_returned: {
+            type: 'integer',
+            title: 'Quantity Returned'
+        },
+        quantity_returnable: {
+            type: 'integer',
+            title: 'Quantity Returnable'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['sale_line_id', 'line_kind', 'product_id', 'unit_id', 'label', 'quantity_sold', 'quantity_returned', 'quantity_returnable', 'unit_price_thb'],
+    title: 'ReturnableLinePublic'
+} as const;
+
+export const ReturnableSalePublicSchema = {
+    properties: {
+        sale_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Id'
+        },
+        sold_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Sold At'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        customer_name: {
+            type: 'string',
+            title: 'Customer Name'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/ReturnableLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['sale_id', 'sold_at', 'customer_id', 'customer_name', 'lines'],
+    title: 'ReturnableSalePublic'
+} as const;
+
+export const ReturnableSalesPublicSchema = {
+    properties: {
+        sales: {
+            items: {
+                '$ref': '#/components/schemas/ReturnableSalePublic'
+            },
+            type: 'array',
+            title: 'Sales'
+        }
+    },
+    type: 'object',
+    required: ['sales'],
+    title: 'ReturnableSalesPublic'
 } as const;
 
 export const SaleCreateRequestSchema = {
@@ -2963,6 +3199,135 @@ export const SalePublicSchema = {
     type: 'object',
     required: ['id', 'customer_id', 'total_thb', 'total_cogs_thb', 'sold_at', 'lines'],
     title: 'SalePublic'
+} as const;
+
+export const SaleReturnCreateRequestSchema = {
+    properties: {
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        reason: {
+            type: 'string',
+            maxLength: 512,
+            minLength: 1,
+            title: 'Reason'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleReturnLineInput'
+            },
+            type: 'array',
+            maxItems: 100,
+            minItems: 1,
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['idempotency_key', 'reason', 'lines'],
+    title: 'SaleReturnCreateRequest'
+} as const;
+
+export const SaleReturnLineInputSchema = {
+    properties: {
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            maximum: 1000000,
+            exclusiveMinimum: 0,
+            title: 'Quantity',
+            default: 1
+        }
+    },
+    type: 'object',
+    required: ['sale_line_id'],
+    title: 'SaleReturnLineInput'
+} as const;
+
+export const SaleReturnLinePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        },
+        cogs_restored_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Cogs Restored Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_line_id', 'quantity', 'unit_price_thb', 'cogs_restored_thb'],
+    title: 'SaleReturnLinePublic'
+} as const;
+
+export const SaleReturnPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Id'
+        },
+        reason: {
+            type: 'string',
+            title: 'Reason'
+        },
+        returned_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Returned At'
+        },
+        total_refund_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Refund Thb'
+        },
+        total_cogs_restored_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cogs Restored Thb'
+        },
+        created_by_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Created By User Id'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleReturnLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_id', 'reason', 'returned_at', 'total_refund_thb', 'total_cogs_restored_thb', 'created_by_user_id', 'lines'],
+    title: 'SaleReturnPublic'
 } as const;
 
 export const SaleStaffPublicSchema = {

@@ -292,13 +292,9 @@ function Products() {
                         ? formatThb(costByProductId.get(p.id) as string)
                         : "—"}
                     </dd>
-                    <dt>Retail</dt>
+                    <dt>Project</dt>
                     <dd className="num text-foreground">
                       {formatThb(p.retail_price_thb)}
-                    </dd>
-                    <dt>Repair</dt>
-                    <dd className="num text-foreground">
-                      {formatThb(p.repair_price_thb)}
                     </dd>
                   </dl>
                   <div className="mt-3 flex justify-end gap-2 border-t pt-3">
@@ -362,8 +358,7 @@ function Products() {
                         ? formatThb(costByProductId.get(p.id) as string)
                         : "—"}
                     </div>
-                    <div>Retail: {formatThb(p.retail_price_thb)}</div>
-                    <div>Repair: {formatThb(p.repair_price_thb)}</div>
+                    <div>Project: {formatThb(p.retail_price_thb)}</div>
                   </TableCell>
                   <TableCell className="overflow-visible! text-right">
                     <div className="flex justify-end gap-2">
@@ -427,7 +422,7 @@ function PriceHistoryDialog({
             <History className="size-4" />
           </Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Price history — {sku}</DialogTitle>
           </DialogHeader>
@@ -450,6 +445,7 @@ function PriceHistoryDialog({
                   <TableHead>Field</TableHead>
                   <TableHead className="text-right">Old</TableHead>
                   <TableHead className="text-right">New</TableHead>
+                  <TableHead>Changed by</TableHead>
                   <TableHead>When</TableHead>
                 </TableRow>
               </TableHeader>
@@ -464,8 +460,11 @@ function PriceHistoryDialog({
                       {h.new_value}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
+                      {h.changed_by_full_name ?? "Unknown user"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
                       {h.changed_at
-                        ? new Date(h.changed_at).toLocaleDateString()
+                        ? new Date(h.changed_at).toLocaleString()
                         : "—"}
                     </TableCell>
                   </TableRow>

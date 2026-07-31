@@ -51,6 +51,24 @@ test("canSaveProject rejects a negative/non-numeric budget but allows blank", ()
   expect(canSaveProject(draft({ budget: "abc" }))).toBe(false)
 })
 
+test("canSaveProject rejects an end date before the start date", () => {
+  // Same rule as the create form — the two dialogs must agree on what a valid
+  // project is, or a project saved in one is rejected by the other.
+  expect(
+    canSaveProject(draft({ startDate: "2026-03-01", endDate: "2026-02-28" })),
+  ).toBe(false)
+  expect(
+    canSaveProject(draft({ startDate: "2026-03-01", endDate: "2026-03-01" })),
+  ).toBe(true)
+  expect(
+    canSaveProject(draft({ startDate: "2026-03-01", endDate: "2026-03-02" })),
+  ).toBe(true)
+  // Either date alone is fine.
+  expect(canSaveProject(draft({ startDate: "", endDate: "2026-02-28" }))).toBe(
+    true,
+  )
+})
+
 test("buildProjectUpdate sends fields, never code, dates/budget as given", () => {
   expect(buildProjectUpdate(draft({ endDate: "2026-03-01" }))).toEqual({
     name: "Bakery fitout",

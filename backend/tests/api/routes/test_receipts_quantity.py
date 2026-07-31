@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Iterator
+from datetime import date, time, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -237,3 +238,136 @@ def test_staff_cannot_receive_quantity(
 def test_unauthenticated_cannot_receive_quantity(client: TestClient) -> None:
     resp = client.post(f"{PREFIX}/receipts/quantity", json={})
     assert resp.status_code == 401
+
+
+# --- received_date (receive date picker, design 2026-07-25) -------------------
+
+
+def test_receive_quantity_accepts_received_date(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    """A picked date drives received_at and the batch_no prefix."""
+    product_id, supplier_id, sku = seed_quantity_product
+    r = client.post(
+        f"{PREFIX}/receipts/quantity",
+        headers=superuser_token_headers,
+        json=_body(product_id, supplier_id, received_date="2026-07-10"),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["batch_no"] == f"20260710-{sku}-001"
+
+    db.expire_all()
+    batch = db.get(PartBatch, uuid.UUID(body["id"]))
+    assert batch is not None
+    assert batch.received_at.date() == date(2026, 7, 10)
+
+
+def test_receive_quantity_composes_current_clock_time(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    """Two same-day receives get DISTINCT timestamps, so FIFO between them
+    follows entry order rather than the random uuid tiebreaker."""
+    product_id, supplier_id, _ = seed_quantity_product
+    stamps = []
+    for _i in range(2):
+        r = client.post(
+            f"{PREFIX}/receipts/quantity",
+            headers=superuser_token_headers,
+            json=_body(product_id, supplier_id, received_date="2026-07-10"),
+        )
+        assert r.status_code == 200, r.text
+        db.expire_all()
+        batch = db.get(PartBatch, uuid.UUID(r.json()["id"]))
+        assert batch is not None
+        stamps.append(batch.received_at)
+
+    assert stamps[0] != stamps[1]
+    assert stamps[0] < stamps[1]
+    # Neither collapsed to midnight — that is the tie that would hand FIFO
+    # ordering over to the random uuid4 primary key.
+    assert stamps[0].timetz().replace(tzinfo=None) != time(0, 0)
+
+
+def test_receive_quantity_rejects_future_date(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    product_id, supplier_id, _ = seed_quantity_product
+    future = (date.today() + timedelta(days=5)).isoformat()
+    r = client.post(
+        f"{PREFIX}/receipts/quantity",
+        headers=superuser_token_headers,
+        json=_body(product_id, supplier_id, received_date=future),
+    )
+    assert r.status_code == 422
+    assert "future" in r.json()["detail"].lower()
+
+
+def test_receive_quantity_allows_one_day_timezone_skew(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    """Yangon/Bangkok run ahead of UTC, so the client's LOCAL 'today' can be one
+    day past the server's UTC today. That must not be rejected."""
+    product_id, supplier_id, _ = seed_quantity_product
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    r = client.post(
+        f"{PREFIX}/receipts/quantity",
+        headers=superuser_token_headers,
+        json=_body(product_id, supplier_id, received_date=tomorrow),
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_receive_quantity_omitting_received_date_uses_today(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    product_id, supplier_id, _sku = seed_quantity_product
+    r = client.post(
+        f"{PREFIX}/receipts/quantity",
+        headers=superuser_token_headers,
+        json=_body(product_id, supplier_id),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["batch_no"].startswith(date.today().strftime("%Y%m%d"))
+
+
+def test_receive_quantity_replay_of_a_backdated_receive_succeeds(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed_quantity_product: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    """The future-date guard runs BEFORE crud's replay lookup, so a retry must
+    still return the stored batch rather than tripping validation. It cannot
+    trip: the bound is date.today() + 1 and today never moves backwards, so the
+    accepted range only widens — a payload accepted once stays accepted."""
+    product_id, supplier_id, _ = seed_quantity_product
+    body = _body(product_id, supplier_id, received_date="2026-07-10")
+
+    r1 = client.post(
+        f"{PREFIX}/receipts/quantity", headers=superuser_token_headers, json=body
+    )
+    assert r1.status_code == 200, r1.text
+    db.expire_all()
+    batches_before = len(db.exec(select(PartBatch)).all())
+
+    r2 = client.post(
+        f"{PREFIX}/receipts/quantity", headers=superuser_token_headers, json=body
+    )
+    assert r2.status_code == 200, r2.text
+    assert r1.json()["id"] == r2.json()["id"]
+    assert r1.json()["batch_no"] == r2.json()["batch_no"]
+    db.expire_all()
+    assert len(db.exec(select(PartBatch)).all()) == batches_before

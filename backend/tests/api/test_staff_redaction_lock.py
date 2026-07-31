@@ -152,14 +152,16 @@ def test_staff_get_sweep_carries_no_financial_keys(
     body = r.json()
     # Non-vacuous: the seeded row must be on the swept surface (lists are
     # newest-first, so the just-seeded row is within the default page).
+    # /products/ and /project-pulls return the {"data": [...], "count": N}
+    # pagination envelope; /low-stock is a bare list; stock-on-hand is {"rows": ...}.
     if path == "/products/":
-        assert any(p["sku"] == seeded["sku"] for p in body)
+        assert any(p["sku"] == seeded["sku"] for p in body["data"])
     elif path == "/low-stock":
         assert any(row["sku"] == seeded["sku"] for row in body)
     elif path == "/dashboards/stock-on-hand":
         assert any(row["sku"] == seeded["sku"] for row in body["rows"])
     else:  # /project-pulls
-        assert any(p["id"] == seeded["pull_id"] for p in body)
+        assert any(p["id"] == seeded["pull_id"] for p in body["data"])
     _assert_no_forbidden_keys(body)
 
 

@@ -8,11 +8,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { RefreshCw } from "lucide-react"
 import { useState } from "react"
 
-import {
-  type SyncReviewResolve,
-  SyncReviewService,
-  type SyncReviewState,
-} from "@/client"
+import { SyncReviewService, type SyncReviewState } from "@/client"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -34,7 +30,8 @@ import { requireAdmin } from "@/lib/route-guards"
 import { isResolvable } from "@/lib/sync-review"
 
 // Admin-only offline sync-review queue (§6.7). STALE/CONFLICT mutations that
-// could not auto-apply land here for an admin to keep (commit) or discard.
+// could not auto-apply land here for an admin to triage. Triage is status-only:
+// discarding clears the item from the queue, it never replays the payload.
 export const Route = createFileRoute("/_layout/sync-review")({
   component: SyncReview,
   beforeLoad: () => requireAdmin(),
@@ -43,7 +40,7 @@ export const Route = createFileRoute("/_layout/sync-review")({
   }),
 })
 
-const STATES: SyncReviewState[] = ["PENDING", "RESOLVED", "DISCARDED"]
+const STATES: SyncReviewState[] = ["PENDING", "DISCARDED"]
 
 // Column widths in header order (When, Mutation, Reason, Actions); sum to 100%.
 const SYNC_REVIEW_WIDTHS = ["22%", "28%", "24%", "26%"]
@@ -68,25 +65,17 @@ function SyncReview() {
   })
   const listLoading = isPlaceholderData || isFetching
 
-  const resolveMutation = useMutation({
-    mutationFn: ({
-      itemId,
-      decision,
-    }: {
-      itemId: string
-      decision: SyncReviewResolve["state"]
-    }) =>
+  const discardMutation = useMutation({
+    mutationFn: (itemId: string) =>
       SyncReviewService.resolveSyncReviewItem({
         itemId,
-        requestBody: { state: decision },
+        requestBody: { state: "DISCARDED" },
       }),
-    onSuccess: (_data, { decision }) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sync-review"] })
-      showSuccessToast(
-        decision === "RESOLVED" ? "Item kept." : "Item discarded.",
-      )
+      showSuccessToast("Item discarded.")
     },
-    onError: () => showErrorToast("Could not resolve the item. Try again."),
+    onError: () => showErrorToast("Could not discard the item. Try again."),
   })
 
   const rows = data ?? []
@@ -95,16 +84,15 @@ function SyncReview() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Sync review"
-        description="Offline mutations that need a manual keep/discard decision."
+        description="Offline mutations that failed to replay and need admin triage."
       />
 
       <Alert>
         <RefreshCw />
-        <AlertTitle>Resolve offline conflicts</AlertTitle>
+        <AlertTitle>Review offline conflicts</AlertTitle>
         <AlertDescription>
           Actions taken offline that clashed on sync wait here. Review each
-          one's mutation and reason, then Keep it to commit the change or
-          Discard it to drop it.
+          one's mutation and reason, then Discard it to clear it from the queue.
         </AlertDescription>
       </Alert>
 
@@ -157,37 +145,16 @@ function SyncReview() {
                 </div>
                 <div className="mt-3 border-t pt-3">
                   {isResolvable(item.state) ? (
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="flex-1"
-                        disabled={resolveMutation.isPending}
-                        onClick={() =>
-                          resolveMutation.mutate({
-                            itemId: item.id,
-                            decision: "RESOLVED",
-                          })
-                        }
-                      >
-                        Keep
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        disabled={resolveMutation.isPending}
-                        onClick={() =>
-                          resolveMutation.mutate({
-                            itemId: item.id,
-                            decision: "DISCARDED",
-                          })
-                        }
-                      >
-                        Discard
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      disabled={discardMutation.isPending}
+                      onClick={() => discardMutation.mutate(item.id)}
+                    >
+                      Discard
+                    </Button>
                   ) : (
                     <Badge variant="secondary">{item.state}</Badge>
                   )}
@@ -223,35 +190,15 @@ function SyncReview() {
                 </TableCell>
                 <TableCell className="overflow-visible! text-right">
                   {isResolvable(item.state) ? (
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={resolveMutation.isPending}
-                        onClick={() =>
-                          resolveMutation.mutate({
-                            itemId: item.id,
-                            decision: "RESOLVED",
-                          })
-                        }
-                      >
-                        Keep
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={resolveMutation.isPending}
-                        onClick={() =>
-                          resolveMutation.mutate({
-                            itemId: item.id,
-                            decision: "DISCARDED",
-                          })
-                        }
-                      >
-                        Discard
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={discardMutation.isPending}
+                      onClick={() => discardMutation.mutate(item.id)}
+                    >
+                      Discard
+                    </Button>
                   ) : (
                     <Badge variant="secondary">{item.state}</Badge>
                   )}

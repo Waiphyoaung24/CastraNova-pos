@@ -21,6 +21,7 @@ import { ScanField } from "@/components/ScanField"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -46,6 +47,7 @@ import {
   type DraftPiece,
   type QuantityDraft,
   removePiece,
+  todayISO,
 } from "@/lib/receive-form"
 import { requireAdmin } from "@/lib/route-guards"
 import type { Queued } from "@/lib/sync-producer"
@@ -122,6 +124,7 @@ function SerializedTab() {
   const [pieces, setPieces] = useState<DraftPiece[]>([])
   const [serial, setSerial] = useState("")
   const [cost, setCost] = useState("")
+  const [receivedDate, setReceivedDate] = useState(todayISO())
   const [received, setReceived] = useState<UnitPublic[]>([])
   const [announce, setAnnounce] = useState("")
 
@@ -201,11 +204,17 @@ function SerializedTab() {
       productId,
       supplierId,
       crypto.randomUUID(),
+      receivedDate,
     )
     mutation.mutate(queued(request, request.idempotency_key))
   }
 
-  const canSubmit = canSubmitSerialized(pieces, productId, supplierId)
+  const canSubmit = canSubmitSerialized(
+    pieces,
+    productId,
+    supplierId,
+    receivedDate,
+  )
 
   return (
     <div className="flex flex-col gap-6 py-4">
@@ -258,6 +267,26 @@ function SerializedTab() {
             ariaLabel="Supplier"
             id="receive-supplier"
             required
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label id="receive-date-label" htmlFor="receive-date">
+            Receive date
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
+          <DatePicker
+            id="receive-date"
+            labelledBy="receive-date-label"
+            className="h-11"
+            max={todayISO()}
+            required
+            disabled={mutation.isPending}
+            value={receivedDate}
+            onChange={setReceivedDate}
           />
         </div>
       </div>
@@ -427,20 +456,25 @@ function SerializedTab() {
   )
 }
 
-const EMPTY_QUANTITY_DRAFT: QuantityDraft = {
-  productId: "",
-  supplierId: "",
-  receivedQty: "",
-  purchaseCostThb: "",
-  supplierBatchRef: "",
-  expectedQty: "",
-  note: "",
+// A function, not a constant: todayISO() must be re-read on every reset, or a
+// tablet left open overnight would keep defaulting to yesterday.
+function emptyQuantityDraft(): QuantityDraft {
+  return {
+    productId: "",
+    supplierId: "",
+    receivedQty: "",
+    purchaseCostThb: "",
+    supplierBatchRef: "",
+    expectedQty: "",
+    note: "",
+    receivedDate: todayISO(),
+  }
 }
 
 function QuantityTab() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
-  const [draft, setDraft] = useState<QuantityDraft>(EMPTY_QUANTITY_DRAFT)
+  const [draft, setDraft] = useState<QuantityDraft>(emptyQuantityDraft())
   const [receivedBatch, setReceivedBatch] =
     useState<ReceiptsReceiveQuantityResponse | null>(null)
   const [announce, setAnnounce] = useState("")
@@ -477,7 +511,7 @@ function QuantityTab() {
       ReceiptsService.receiveQuantity({ requestBody: body }),
     onSuccess: (batch) => {
       setReceivedBatch(batch)
-      setDraft(EMPTY_QUANTITY_DRAFT)
+      setDraft(emptyQuantityDraft())
       announceMessage(
         `Received ${batch.received_qty} unit(s) into batch ${batch.batch_no}.`,
       )
@@ -560,6 +594,29 @@ function QuantityTab() {
             ariaLabel="Supplier"
             id={`${fieldId}-supplier`}
             required
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label
+            id={`${fieldId}-received-date-label`}
+            htmlFor={`${fieldId}-received-date`}
+          >
+            Receive date
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
+          <DatePicker
+            id={`${fieldId}-received-date`}
+            labelledBy={`${fieldId}-received-date-label`}
+            className="h-11"
+            max={todayISO()}
+            required
+            disabled={mutation.isPending}
+            value={draft.receivedDate}
+            onChange={(iso) => patch("receivedDate", iso)}
           />
         </div>
       </div>

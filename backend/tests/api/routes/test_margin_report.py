@@ -3,15 +3,19 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app import crud
 from app.models import (
     Channel,
     MarginBreakdownReport,
     MarginDimension,
+    SaleLine,
     SaleLineInput,
     SaleLineKind,
+    SaleReturn,
+    SaleReturnCreateRequest,
+    SaleReturnLineInput,
     ServiceTicketPartCreate,
 )
 from tests.api.routes.test_reports import (  # noqa: F401  (seed is a pytest fixture)
@@ -317,3 +321,240 @@ def test_per_channel_amounts_reconcile_against_channel_filtered_products(
         assert by_product_for_channel.total_revenue_thb == row.revenue_thb
         assert by_product_for_channel.total_cogs_thb == row.cogs_thb
         assert by_product_for_channel.total_margin_thb == row.margin_thb
+
+
+# --- Sale returns (design 2026-07-25) ----------------------------------------
+
+# Dedicated months so tests in this session-scoped db cannot collide. Months
+# already claimed elsewhere: 2026-03/04/05/06/09/10/11/12, 2027-01/02/03.
+_RET_CHANNEL = datetime(2027, 4, 15, 12, 0, tzinfo=timezone.utc)
+_RET_SOLD = datetime(2027, 5, 15, 12, 0, tzinfo=timezone.utc)
+_RET_LATER = datetime(2027, 6, 15, 12, 0, tzinfo=timezone.utc)
+_RET_MAINT_FILTER = datetime(2027, 7, 15, 12, 0, tzinfo=timezone.utc)
+_RET_SALE_FILTER = datetime(2027, 8, 15, 12, 0, tzinfo=timezone.utc)
+_RET_PRODUCT = datetime(2027, 9, 15, 12, 0, tzinfo=timezone.utc)
+_RET_CUSTOMER = datetime(2027, 10, 15, 12, 0, tzinfo=timezone.utc)
+_RET_RECONCILE = datetime(2027, 11, 15, 12, 0, tzinfo=timezone.utc)
+_RET_SERIALIZED = datetime(2027, 12, 15, 12, 0, tzinfo=timezone.utc)
+
+
+def _pin_return(db: Session, sale_return_id: uuid.UUID, when: datetime) -> None:
+    """Rewrite returned_at so a test owns a month. salereturn is not a ledger
+    table, so a plain UPDATE is allowed (unlike part_movement)."""
+    row = db.get(SaleReturn, sale_return_id)
+    assert row is not None
+    row.returned_at = when
+    db.add(row)
+    db.commit()
+
+
+def _sell_and_return_part(
+    db: Session,
+    seed: dict[str, Any],  # noqa: F811
+    *,
+    sold_when: datetime,
+    returned_when: datetime,
+    sell_qty: int = 2,
+    return_qty: int = 1,
+) -> Any:
+    """Sell ``sell_qty`` of a fresh part (retail 100, single batch @ cost 10) and
+    return ``return_qty`` of it. Returns the part product so callers can find its
+    row. Hand-checkable: revenue 100/unit, COGS 10/unit."""
+    admin, customer = seed["admin"], seed["customer"]
+    part = seed["make_part"]("100.00", "20.00", [(10, "10.00")])
+    sale = crud.create_sale(
+        session=db,
+        customer_id=customer.id,
+        created_by_user_id=admin.id,
+        idempotency_key=uuid.uuid4(),
+        lines=[
+            SaleLineInput(
+                line_kind=SaleLineKind.PART, sku=part.sku, quantity=sell_qty
+            )
+        ],
+    )
+    _pin_sale(db, sale.id, sold_when)
+    line = db.exec(select(SaleLine).where(SaleLine.sale_id == sale.id)).one()
+    ret = crud.create_sale_return(
+        session=db,
+        sale_id=sale.id,
+        payload=SaleReturnCreateRequest(
+            idempotency_key=uuid.uuid4(),
+            reason="customer returned it",
+            lines=[SaleReturnLineInput(sale_line_id=line.id, quantity=return_qty)],
+        ),
+        created_by_user_id=admin.id,
+    )
+    _pin_return(db, ret.id, returned_when)
+    return part
+
+
+def test_channel_view_shows_a_negative_sale_return_row(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """Sell 2 @ 100 (cost 10 each), return 1: a separate SALE RETURNS row with
+    negative revenue and COGS. The SALE row itself is untouched; totals net."""
+    _sell_and_return_part(
+        db, seed, sold_when=_RET_CHANNEL, returned_when=_RET_CHANNEL
+    )
+
+    report = crud.margin_report(session=db, year=2027, month=4)
+    rows = {r.key: r for r in report.rows}
+
+    assert rows["SALE"].revenue_thb == Decimal("200.00")
+    assert rows["SALE"].cogs_thb == Decimal("20.00")
+    assert rows["SALE_RETURN"].label == "SALE RETURNS"
+    assert rows["SALE_RETURN"].revenue_thb == Decimal("-100.00")
+    assert rows["SALE_RETURN"].cogs_thb == Decimal("-10.00")
+    assert rows["SALE_RETURN"].margin_thb == Decimal("-90.00")
+    assert report.total_revenue_thb == Decimal("100.00")
+    assert report.total_cogs_thb == Decimal("10.00")
+    assert report.total_margin_thb == Decimal("90.00")
+
+
+def test_no_sale_return_row_when_no_returns_that_month(
+    db: Session, seed: dict[str, Any]  # noqa: ARG001, F811
+) -> None:
+    report = crud.margin_report(session=db, year=2099, month=2)
+    assert all(r.key != "SALE_RETURN" for r in report.rows)
+    assert [r.key for r in report.rows] == ["SALE", "MAINTENANCE", "PROJECT"]
+
+
+def test_a_return_only_moves_the_return_month(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """A sale in May returned in June leaves May's report identical forever."""
+    _sell_and_return_part(db, seed, sold_when=_RET_SOLD, returned_when=_RET_LATER)
+
+    may = crud.margin_report(session=db, year=2027, month=5)
+    assert all(r.key != "SALE_RETURN" for r in may.rows)
+    assert may.total_revenue_thb == Decimal("200.00")  # untouched by the return
+
+    june = crud.margin_report(session=db, year=2027, month=6)
+    rows = {r.key: r for r in june.rows}
+    assert rows["SALE_RETURN"].revenue_thb == Decimal("-100.00")
+    assert rows["SALE"].revenue_thb == Decimal("0.00")
+
+
+def test_maintenance_channel_filter_excludes_returns(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    _sell_and_return_part(
+        db, seed, sold_when=_RET_MAINT_FILTER, returned_when=_RET_MAINT_FILTER
+    )
+    report = crud.margin_report(
+        session=db, year=2027, month=7, channel=Channel.MAINTENANCE
+    )
+    assert all(r.key != "SALE_RETURN" for r in report.rows)
+
+
+def test_sale_channel_filter_includes_returns(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """Returns are an event ON the SALE channel, so scoping to SALE keeps them
+    — otherwise the filtered view would not reconcile with the unfiltered one."""
+    _sell_and_return_part(
+        db, seed, sold_when=_RET_SALE_FILTER, returned_when=_RET_SALE_FILTER
+    )
+    report = crud.margin_report(
+        session=db, year=2027, month=8, channel=Channel.SALE
+    )
+    assert [r.key for r in report.rows] == ["SALE", "SALE_RETURN"]
+
+
+def test_returns_net_into_the_product_row(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """Sell 2 @ 100 (cost 10), return 1: the product's row reads 100 revenue /
+    10 COGS. One netted row — no separate returns row at this grain."""
+    part = _sell_and_return_part(
+        db, seed, sold_when=_RET_PRODUCT, returned_when=_RET_PRODUCT
+    )
+
+    report = crud.margin_report(
+        session=db, year=2027, month=9, group_by=MarginDimension.PRODUCT
+    )
+    row = next(r for r in report.rows if r.key == str(part.id))
+    assert row.revenue_thb == Decimal("100.00")
+    assert row.cogs_thb == Decimal("10.00")
+    assert row.margin_thb == Decimal("90.00")
+    assert all(r.key != "SALE_RETURN" for r in report.rows)
+
+
+def test_returns_net_into_the_customer_row(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    _sell_and_return_part(
+        db, seed, sold_when=_RET_CUSTOMER, returned_when=_RET_CUSTOMER
+    )
+
+    report = crud.margin_report(
+        session=db, year=2027, month=10, group_by=MarginDimension.CUSTOMER
+    )
+    row = next(r for r in report.rows if r.key == str(seed["customer"].id))
+    assert row.revenue_thb == Decimal("100.00")
+    assert row.cogs_thb == Decimal("10.00")
+
+
+def test_all_groupings_reconcile_to_the_same_totals_with_returns(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """The report's core promise: for a fixed (month, channel) every grouping
+    sums to the same revenue/COGS. Returns must not break it. The month is
+    seeded with SALE activity only, like the file's other reconciliation tests."""
+    _sell_and_return_part(
+        db, seed, sold_when=_RET_RECONCILE, returned_when=_RET_RECONCILE
+    )
+
+    by_channel = crud.margin_report(session=db, year=2027, month=11)
+    by_product = crud.margin_report(
+        session=db, year=2027, month=11, group_by=MarginDimension.PRODUCT
+    )
+    by_customer = crud.margin_report(
+        session=db, year=2027, month=11, group_by=MarginDimension.CUSTOMER
+    )
+
+    assert by_channel.total_revenue_thb == by_product.total_revenue_thb
+    assert by_channel.total_revenue_thb == by_customer.total_revenue_thb
+    assert by_channel.total_cogs_thb == by_product.total_cogs_thb
+    assert by_channel.total_cogs_thb == by_customer.total_cogs_thb
+
+
+def test_a_serialized_return_nets_into_its_product_row(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    """A UNIT sale line carries unit_id, NOT product_id — the netting query has
+    to recover the product through Unit, exactly like the SALE revenue query
+    above it. Without the outer join this row would be keyed on NULL."""
+    admin, customer = seed["admin"], seed["customer"]
+    barcode = seed["make_unit"]("300.00")  # serialized product, retail 500.00
+    sale = crud.create_sale(
+        session=db,
+        customer_id=customer.id,
+        created_by_user_id=admin.id,
+        idempotency_key=uuid.uuid4(),
+        lines=[
+            SaleLineInput(line_kind=SaleLineKind.UNIT, castranova_barcode=barcode)
+        ],
+    )
+    _pin_sale(db, sale.id, _RET_SERIALIZED)
+    line = db.exec(select(SaleLine).where(SaleLine.sale_id == sale.id)).one()
+    ret = crud.create_sale_return(
+        session=db,
+        sale_id=sale.id,
+        payload=SaleReturnCreateRequest(
+            idempotency_key=uuid.uuid4(),
+            reason="dead on arrival",
+            lines=[SaleReturnLineInput(sale_line_id=line.id, quantity=1)],
+        ),
+        created_by_user_id=admin.id,
+    )
+    _pin_return(db, ret.id, _RET_SERIALIZED)
+
+    report = crud.margin_report(
+        session=db, year=2027, month=12, group_by=MarginDimension.PRODUCT
+    )
+    row = next(r for r in report.rows if r.key == str(seed["serialized"].id))
+    # Sold for 500 (cost 300) then fully returned: both sides cancel.
+    assert row.revenue_thb == Decimal("0.00")
+    assert row.cogs_thb == Decimal("0.00")
