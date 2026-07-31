@@ -19,6 +19,9 @@ REFRESH_RATE_LIMIT = "60/15 minutes"  # cap is shop-global (keyed on the proxy I
 # risking a shop-wide forced logout once refreshes start 429ing.
 LOGOUT_RATE_LIMIT = "20/15 minutes"
 PRICING_OVERRIDE_RATE_LIMIT = "30/hour"  # threshold-probe + queue-flood guard
+# Polling read for FR-010: the sale screen polls each pending override every
+# ~4s, so this is sized well above legitimate cadence, as a flood backstop.
+PRICING_OVERRIDE_POLL_RATE_LIMIT = "120/minute"
 SYNC_INGEST_RATE_LIMIT = "120/hour"  # above any legit 7-day-queue replay burst
 TELEGRAM_TEST_RATE_LIMIT = "10/hour"  # it's a real outbound send to Telegram's API
 
