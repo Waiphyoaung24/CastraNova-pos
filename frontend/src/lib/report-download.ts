@@ -1,3 +1,5 @@
+import { API_BASE } from "./api-base"
+
 // Authed binary download for report exports (PDF/XLSX).
 //
 // The generated SDK types these `.pdf`/`.xlsx` endpoints' responses as
@@ -11,7 +13,7 @@ export async function downloadReport(
 ): Promise<void> {
   const token = localStorage.getItem("access_token")
   if (!token) throw new Error("Session expired. Please log in again.")
-  const res = await fetch(`${import.meta.env.VITE_API_URL}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error("Export failed.")
