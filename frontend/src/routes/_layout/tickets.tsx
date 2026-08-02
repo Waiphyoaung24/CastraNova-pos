@@ -124,8 +124,8 @@ function Tickets() {
     useScanLookup()
 
   // Fold each resolved scan into the cart. PART → add (clears stale notice +
-  // post-close summary); UNIT → show the not-a-part notice; NOT_FOUND → handled
-  // by the `notFound` live region below.
+  // post-close summary); UNIT / SERIALIZED_SKU → show the not-a-part notice;
+  // NOT_FOUND → handled by the `notFound` live region below.
   useEffect(() => {
     if (!result) return
     if (result.kind === "PART") {
@@ -134,6 +134,8 @@ function Tickets() {
       setTicketResult(undefined)
     } else if (result.kind === "UNIT") {
       setScanNotice("Serialized units can't be added as repair parts.")
+    } else if (result.kind === "SERIALIZED_SKU") {
+      setScanNotice("Serialized items can't be added as repair parts.")
     } else {
       setScanNotice("")
     }
