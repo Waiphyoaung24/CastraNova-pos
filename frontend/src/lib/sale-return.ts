@@ -34,6 +34,17 @@ function parseQuantity(raw: string): number | null {
   return n > 0 ? n : null
 }
 
+/**
+ * Constrains what the quantity field will hold as it is typed: digits only,
+ * no leading zeros, never above the cap. An empty result is kept empty so the
+ * field can be cleared and retyped — `canSubmitReturn` rejects it.
+ */
+export function clampReturnQuantity(raw: string, maxQuantity: number): string {
+  const digits = raw.replace(/\D/g, "").replace(/^0+/, "")
+  if (digits === "") return ""
+  return String(Math.min(Number.parseInt(digits, 10), maxQuantity))
+}
+
 export function canSubmitReturn(d: ReturnDraft, maxQuantity: number): boolean {
   if (d.saleLineId.trim() === "") return false
   if (d.reason.trim() === "") return false

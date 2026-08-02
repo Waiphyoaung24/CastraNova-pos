@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildReturnPayload,
   canSubmitReturn,
+  clampReturnQuantity,
   emptyReturnDraft,
   type ReturnDraft,
 } from "./sale-return"
@@ -81,6 +82,28 @@ describe("sale return form logic", () => {
         0,
       ),
     ).toBe(false)
+  })
+
+  it("keeps typed quantities to digits only", () => {
+    expect(clampReturnQuantity("3", 99)).toBe("3")
+    expect(clampReturnQuantity("1.5", 99)).toBe("15")
+    expect(clampReturnQuantity("-2", 99)).toBe("2")
+    expect(clampReturnQuantity("abc", 99)).toBe("")
+  })
+
+  it("clamps a typed quantity to the returnable cap", () => {
+    expect(clampReturnQuantity("5", 5)).toBe("5")
+    expect(clampReturnQuantity("6", 5)).toBe("5")
+    expect(clampReturnQuantity("99", 5)).toBe("5")
+  })
+
+  it("never leaves a zero or a leading zero in the field", () => {
+    expect(clampReturnQuantity("0", 5)).toBe("")
+    expect(clampReturnQuantity("03", 5)).toBe("3")
+  })
+
+  it("allows an empty field so the operator can retype", () => {
+    expect(clampReturnQuantity("", 5)).toBe("")
   })
 
   it("builds a single-line payload with the trimmed reason", () => {

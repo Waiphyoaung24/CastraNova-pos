@@ -24,6 +24,7 @@ import { requireAdmin } from "@/lib/route-guards"
 import {
   buildReturnPayload,
   canSubmitReturn,
+  clampReturnQuantity,
   emptyReturnDraft,
   type ReturnDraft,
 } from "@/lib/sale-return"
@@ -302,18 +303,19 @@ function StockAdjustment() {
 
               {isQuantityReturn ? (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor={salePickerId}>
-                      Sale being returned from
-                    </Label>
-                    {sku.length > 0 &&
-                    skuReturnQuery.data &&
+                  {/* Nothing to pick from until a SKU has been entered, so the
+                      label and the picker stay hidden until then. */}
+                  {sku.length === 0 ? null : skuReturnQuery.data &&
                     skuReturnQuery.data.sales.length === 0 ? (
-                      <p className="text-muted-foreground text-sm">
-                        Nothing from this SKU can be returned — no recent sale
-                        of it still has returnable stock.
-                      </p>
-                    ) : (
+                    <p className="text-muted-foreground text-sm">
+                      Nothing from this SKU can be returned — no recent sale of
+                      it still has returnable stock.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor={salePickerId}>
+                        Sale being returned from
+                      </Label>
                       <Select
                         value={returnDraft.saleLineId}
                         onValueChange={(saleLineId) => {
@@ -345,8 +347,8 @@ function StockAdjustment() {
                           )}
                         </SelectContent>
                       </Select>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {selectedLine ? (
                     <>
@@ -358,7 +360,12 @@ function StockAdjustment() {
                           className="num"
                           value={returnDraft.quantity}
                           onChange={(e) =>
-                            setReturn({ quantity: e.target.value })
+                            setReturn({
+                              quantity: clampReturnQuantity(
+                                e.target.value,
+                                selectedLine.quantity_returnable,
+                              ),
+                            })
                           }
                           placeholder="How many are coming back?"
                         />
