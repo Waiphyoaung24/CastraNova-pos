@@ -8,10 +8,12 @@ import { ReloadPrompt } from "./components/ReloadPrompt"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
 import "./index.css"
+import { API_BASE } from "./lib/api-base"
 import {
   endSession,
   ensureValidSession,
   installAuthInterceptor,
+  isPublicAuthPath,
 } from "./lib/auth-session"
 import {
   divertStaleMutations,
@@ -21,11 +23,11 @@ import {
 import { isSensitiveStockQueryKey } from "./lib/stock-query-cache"
 import { routeTree } from "./routeTree.gen"
 
-OpenAPI.BASE = import.meta.env.VITE_API_URL
-// Send the httponly refresh cookie on cross-origin API calls. The axios client
-// reads WITH_CREDENTIALS (not the fetch-style CREDENTIALS field), and it
-// defaults to false, so without this the /login/refresh-token request carries
-// no cookie and refresh always fails. Backend CORS is allow_credentials=True.
+OpenAPI.BASE = API_BASE
+// Send the httponly refresh cookie on API calls. The axios client reads
+// WITH_CREDENTIALS (not the fetch-style CREDENTIALS field), and it defaults to
+// false, so without this the /login/refresh-token request carries no cookie and
+// refresh always fails. Backend CORS is allow_credentials=True.
 OpenAPI.WITH_CREDENTIALS = true
 OpenAPI.TOKEN = async () => {
   return localStorage.getItem("access_token") || ""
@@ -36,9 +38,11 @@ installAuthInterceptor()
 
 // On load, proactively verify the session. A dead/idle token otherwise stays
 // invisible when the first view is served from the persisted query cache (no
-// request fires to trip the 401 interceptor). Skip on /login and while offline
-// (offline mode must keep working; the online listener re-checks on reconnect).
-if (navigator.onLine && !window.location.pathname.startsWith("/login")) {
+// request fires to trip the 401 interceptor). Skip on the public auth routes
+// (a logged-out visitor there is expected — checking would log them out and
+// redirect, killing the emailed reset link) and while offline (offline mode
+// must keep working; the online listener re-checks on reconnect).
+if (navigator.onLine && !isPublicAuthPath()) {
   void ensureValidSession()
     .then((ok) => {
       if (!ok) endSession()

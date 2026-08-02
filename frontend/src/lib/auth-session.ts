@@ -5,6 +5,22 @@ const TOKEN_KEY = "access_token"
 // Refresh a little before real expiry so an in-flight request never races it.
 const EXPIRY_SKEW_MS = 30_000
 
+/**
+ * Routes a logged-out visitor is *supposed* to reach. Password recovery and
+ * reset are reached with no session by definition — the reset link arrives by
+ * email, so it is always a hard page load — and any session check on them ends
+ * the session and redirects to /login, discarding the token in the URL. Used
+ * both by the boot check and by endSession's redirect guard.
+ */
+const PUBLIC_PATHS = ["/login", "/recover-password", "/reset-password"]
+
+/** True when the current URL is a public auth route (see PUBLIC_PATHS). */
+export function isPublicAuthPath(
+  pathname: string = window.location.pathname,
+): boolean {
+  return PUBLIC_PATHS.some((p) => pathname.startsWith(p))
+}
+
 /** Decode a JWT's `exp` (seconds since epoch); null if unparseable. */
 function decodeExp(token: string): number | null {
   try {
@@ -83,7 +99,9 @@ export function endSession(): void {
   // latch it so those stragglers resolve locally instead of hitting the API.
   sessionDead = true
   localStorage.removeItem(TOKEN_KEY)
-  if (!window.location.pathname.startsWith("/login")) {
+  // Never bounce off a public auth route: on /reset-password that would throw
+  // away the token in the URL mid-reset.
+  if (!isPublicAuthPath()) {
     window.location.href = "/login"
   }
 }
