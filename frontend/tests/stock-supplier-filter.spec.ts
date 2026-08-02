@@ -81,11 +81,14 @@ test.describe("Stock on hand — server filters and pagination", () => {
 
     await expect(page.getByText(productA.sku, { exact: true })).toBeVisible()
     await expect(page.getByText(productB.sku, { exact: true })).toHaveCount(0)
+    // The supplier scope is rendered as its own line above the table, not
+    // folded into the column header's accessible name (see
+    // stock-table-polish.spec.ts) — the header itself stays short.
     await expect(
-      page.getByRole("columnheader", {
-        name: `In stock (${supplierA.name})`,
-        exact: true,
-      }),
+      page.getByText(`Showing stock from: ${supplierA.name}`),
+    ).toBeVisible()
+    await expect(
+      page.getByRole("columnheader", { name: "In stock", exact: true }),
     ).toBeVisible()
   })
 

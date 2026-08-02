@@ -42,29 +42,10 @@ test.describe("Admin user management", () => {
     await expect(userRow).toBeVisible()
   })
 
-  test("Create a superuser", async ({ page }) => {
-    await page.goto("/admin")
-
-    const email = randomEmail()
-    const password = randomPassword()
-
-    await page.getByRole("button", { name: "Add User" }).click()
-
-    await page.getByPlaceholder("user@example.com").fill(email)
-    await page.getByPlaceholder("At least 8 characters").fill(password)
-    await page.getByPlaceholder("Re-enter the password").fill(password)
-    await page.getByLabel("Is superuser?").check()
-    await page.getByLabel("Is active?").check()
-
-    await page.getByRole("button", { name: "Save" }).click()
-
-    await expect(page.getByText("User created successfully")).toBeVisible()
-
-    await expect(page.getByRole("dialog")).not.toBeVisible()
-
-    const userRow = page.getByRole("row").filter({ hasText: email })
-    await expect(userRow.getByText("Superuser")).toBeVisible()
-  })
+  // "Create a superuser" was removed on 2026-08-01: the Add User dialog no
+  // longer has an "Is superuser?" control (roles are set via the Role select,
+  // which offers only Admin and Staff), so a superuser cannot be created
+  // through the UI at all. roles.spec.ts covers the Admin-via-role-select path.
 
   test("Edit a user successfully", async ({ page }) => {
     await page.goto("/admin")

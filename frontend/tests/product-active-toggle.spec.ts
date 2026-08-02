@@ -33,7 +33,7 @@ test("an admin can retire a product and bring it back", async ({ page }) => {
   // option text is the raw enum ("SERIALIZED"), not a prettified label.
   await create.getByLabel("Tracking").click()
   await page.getByRole("option", { name: "SERIALIZED" }).click()
-  await create.getByLabel("Retail price (THB)").fill("1000")
+  await create.getByLabel("Project price (THB)").fill("1000")
   await create.getByLabel("Repair price (THB)").fill("200")
   await create.getByRole("button", { name: "Create product" }).click()
 

@@ -31,7 +31,7 @@ test("opening the Edit product dialog does not autofocus Model name", async ({
   const create = page.getByRole("dialog", { name: "New product" })
   await create.getByLabel("SKU").fill(sku)
   await create.getByLabel("Model name").fill("E2E Focus Target")
-  await create.getByLabel("Retail price (THB)").fill("1000")
+  await create.getByLabel("Project price (THB)").fill("1000")
   await create.getByLabel("Repair price (THB)").fill("200")
   await create.getByRole("button", { name: "Create product" }).click()
 
