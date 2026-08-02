@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 
 import type { CustomerOption } from "@/client"
 import {
@@ -40,6 +40,7 @@ export function ProjectCreateDialog({
   const endId = useId()
   const budgetId = useId()
 
+  const contentRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
@@ -98,7 +99,13 @@ export function ProjectCreateDialog({
           New project
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent
+        ref={contentRef}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          contentRef.current?.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>New project</DialogTitle>
         </DialogHeader>
