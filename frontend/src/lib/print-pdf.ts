@@ -1,3 +1,5 @@
+import { API_BASE } from "./api-base"
+
 /** Fetches an authed binary PDF and opens it in a new browser tab.
  *
  * Label PDFs are authed binary downloads that the generated SDK types as
@@ -28,7 +30,7 @@ export async function openAuthedPdf(path: string): Promise<PrintPdfResult> {
   if (!win) return "popup-blocked"
   let url: string | null = null
   try {
-    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/v1${path}`, {
+    const res = await fetch(`${API_BASE}/api/v1${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     // A present-but-expired token surfaces as 401; treat it as a session

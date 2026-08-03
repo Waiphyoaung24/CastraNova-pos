@@ -75,6 +75,22 @@ test("User can reset password successfully using the link", async ({
   await logInUser(page, email, newPassword)
 })
 
+// Regression (2026-08-01): the boot session check in main.tsx ran on every hard
+// page load except /login. A logged-out visitor landing on a public auth route
+// — which is exactly how the emailed reset link arrives — failed the check, was
+// logged out and redirected to /login, discarding the token in the URL. The
+// in-app "Forgot password?" link masked it, being a soft SPA navigation.
+test("a hard load of a public auth route is not bounced to /login", async ({
+  page,
+}) => {
+  for (const path of ["/recover-password", "/reset-password?token=sometoken"]) {
+    await page.goto(path)
+    // Give the module-level boot check time to fire and redirect if it would.
+    await page.waitForTimeout(1000)
+    expect(new URL(page.url()).pathname).not.toBe("/login")
+  }
+})
+
 test("Expired or invalid reset link", async ({ page }) => {
   const password = randomPassword()
   const invalidUrl = "/reset-password?token=invalidtoken"

@@ -130,7 +130,13 @@ function Pulls() {
     if (!result) return
     if (selectedPull) {
       const next = applyScanToFulfill(fulfillDraft, selectedPull.lines, result)
-      if (next === fulfillDraft && result.kind !== "NOT_FOUND") {
+      if (result.kind === "SERIALIZED_SKU") {
+        // Would otherwise read as "not on this request", which sends the picker
+        // hunting for the wrong thing — the code just isn't a unit.
+        setScanNotice(
+          "That's a serialized item — scan the unit's shop barcode instead.",
+        )
+      } else if (next === fulfillDraft && result.kind !== "NOT_FOUND") {
         setScanNotice("That part isn't on this request — scan a different one.")
       } else {
         setFulfillDraft(next)

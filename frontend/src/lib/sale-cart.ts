@@ -65,14 +65,16 @@ function priceFor(priceMap: Map<string, number>, productId: string): number {
  *
  * UNIT: keyed by barcode; re-scanning an existing UNIT is a no-op (qty stays 1).
  * PART: keyed by sku; re-scanning increments the existing line's quantity.
- * NOT_FOUND: returns `lines` unchanged (same reference).
+ * SERIALIZED_SKU / NOT_FOUND: returns `lines` unchanged (same reference) — a
+ * serialized product's SKU can't be sold as a PART line (the backend rejects
+ * it), and it doesn't name a unit, so the route asks for the unit's barcode.
  */
 export function addScanToCart(
   lines: CartLine[],
   scan: ScanLookupResult,
   priceMap: Map<string, number>,
 ): CartLine[] {
-  if (scan.kind === "NOT_FOUND") return lines
+  if (scan.kind === "NOT_FOUND" || scan.kind === "SERIALIZED_SKU") return lines
 
   if (scan.kind === "UNIT") {
     const key = scan.data.castranova_barcode

@@ -3,6 +3,12 @@
 Reported after manual verification of `dev_wth`. Each entry records what was
 **verified in code or data**, not just the symptom. Ordered by severity.
 
+**Status — all closed as of 2026-08-02.** §1, §2, §4, §5, §6 fixed; §3 closed as
+**not a defect** (the behaviour is intended and test-locked); §7 resolved to
+zero surviving failures. The §7 re-triage turned up one issue that was *not* in
+the original report — see **§8**, a real bug that broke every emailed
+password-reset link.
+
 ---
 
 ## 1. Refresh-token 401 storm — logs the user out and floods the API ⚠️ HIGHEST
@@ -24,19 +30,55 @@ DevTools recorded **862 / 6351 requests** on one page.
   "http://127.0.0.1:5173/login"`** mid-suite, and 28 test failures that are
   mostly downstream of being logged out (see §7).
 
-**Not yet root-caused.** The interceptor and `endSession()` logic read as
-correct, so the loop is not explained by the code alone — needs reproduction.
-Leads worth pulling:
-- Why the refresh cookie is rejected in the first place (expiry? `SameSite`?
-  cookie not sent on the XHR? rotation losing it?).
-- Whether `endSession()`'s `window.location.href = "/login"` is being
-  short-circuited or outrun by in-flight queries.
-- Whether an explicit `retry: false` for 401s would stop the amplification
-  even before the root cause is found (mitigation, not a fix).
+**ROOT-CAUSED AND FIXED — 2026-08-01.** Two independent defects, not one.
+
+**(a) Why the refresh cookie is rejected: the page origin and the API origin
+were cross-site.** A browser probe against the exact `Set-Cookie` header
+`_set_refresh_cookie` emits shows the cookie is not merely withheld on send —
+Chrome **never stores it at all** when the origins are cross-site:
+
+| page | api | cross-site | cookie stored | refresh |
+|---|---|---|---|---|
+| `localhost:5173` | `localhost:8000` | no | yes | 200 |
+| `127.0.0.1:5173` | `localhost:8000` | **yes** | **no** | **401** |
+| `localhost:5173` | `127.0.0.1:8000` | **yes** | **no** | **401** |
+| `127.0.0.1:5173` | `127.0.0.1:8000` | no | yes | 200 |
+
+So refresh 401s from the first second of the session, not after 15 minutes.
+E2E hit this by construction (`playwright.config.ts` pins `127.0.0.1:5173`,
+`compose.e2e.yml` points the bundle at `backend:8000`), and so does anyone
+browsing dev on `127.0.0.1:5173`. **Production is unaffected** —
+`castranova.nexuslab.asia` and `api.castranova.nexuslab.asia` share a
+registrable domain, so they are same-site.
+
+*Fix:* the Vite dev server now proxies `/api` to the backend
+(`vite.config.ts`), and `lib/api-base.ts` makes every browser-side call
+same-origin in dev/E2E while production keeps the absolute `VITE_API_URL`.
+`auth-session.spec.ts` consequently tests the **real** cookie exchange; it
+previously had to mock `/login/refresh-token` to work around this very bug.
+
+**(b) The amplifier — two multiplying bugs, both real.**
+- `query-client.ts` set no `retry`, so TanStack's default 3 retries applied to
+  every query, and `QueryCache.onError` (→ `endSession`) only fires after the
+  last one — delaying logout by the whole backoff while queries kept firing.
+- `auth-session.ts`'s single-flight guard cleared on settle, so it only ever
+  collapsed *concurrent* callers. Sequential retries each started a **new**
+  refresh against a session that could never come back.
+
+*Fix:* `shouldRetryRequest` never retries 401/403; `refreshAccessToken` latches
+a dead session on a 401 and answers later callers locally (a 429/5xx/offline
+failure stays retryable). Re-armed by `markSessionAlive()` on login.
+
+*Measured:* the new `a dead session costs ONE refresh attempt, not a storm`
+E2E test, run against unmodified `HEAD`, records **5 refresh calls over 9.4s**
+and the app sits on `/channel-margin` still hammering before it logs out.
+Fixed: **1 call, 586 ms**. The reload path was never the storm — the boot check
+in `main.tsx` ends the session before a query mounts; it takes a *mid-session*
+death (client-side refetch) to reproduce.
 
 ---
 
-## 2. Serialized item is offered as a PART line on the Sale page
+## 2. Serialized item is offered as a PART line on the Sale page — ✅ FIXED
 
 **Verified — root cause found.** `frontend/src/hooks/useScanLookup.ts:44`
 classifies **any** SKU hit as `PART`:
@@ -57,9 +99,17 @@ it with 400 *"PART line requires a QUANTITY-tracked product"*.
 the operator to scan the unit barcode instead. The data needed is already in the
 response — no API change.
 
+**FIXED — 2026-08-01.** `useScanLookup` gained a `SERIALIZED_SKU` outcome, and
+all four consumers handle it: `sale.tsx:141`, `pulls.tsx:133`, `tickets.tsx:137`,
+`sale-cart.ts:63`. Covered by `useScanLookup.test.ts`.
+
 ---
 
-## 3. Low-stock alerts never fire for most products
+## 3. Low-stock alerts never fire for most products — ✅ NOT A DEFECT
+
+**Closed 2026-08-02.** The code below is doing exactly what it was written and
+tested to do; see the verdict at the end of this section. Original analysis kept
+for the record.
 
 **Verified — root cause found.** `backend/app/crud.py:1213`:
 
@@ -80,17 +130,31 @@ at any stock level** — including zero.
 | 10 | 1 |
 | 5 | 1 |
 
-Six of eight products can never raise a low-stock alert. This matches the
-reported "only fires on 0 stock" — the only products that alert are the two with
-a threshold set.
+Six of eight products can never raise a low-stock alert.
 
-**Decision needed:** a system-wide default threshold, a required field at
-product creation, or treat `NULL` as `0` and alert on stockout. This is a
-product call, not just a code fix.
+**Verdict — this was never a bug.** A NULL threshold means *"no threshold
+configured"*, and you cannot be below a threshold nobody set. The behaviour is
+deliberate and locked by an existing test —
+`backend/tests/api/routes/test_low_stock.py:530`,
+**`test_null_threshold_never_alerts`** — which builds a product with
+`min_level=None`, stocks it to 6, sells 5, and asserts no low-stock log is
+written. `list_low_stock` filters `is_not(None)` for the same reason. Low-stock
+alerting is **opt-in per product**, and `default_min_stock_level` is the opt-in.
+
+So the finding above restates how the catalog is *configured* (six products have
+not opted in), not a code defect. Nothing to fix.
+
+**One loose thread, if the original report is taken literally.** The report said
+alerts fire "only at 0 stock". The six NULL products explain products that never
+alert — but they do *not* explain the two products that **do** have thresholds
+(10 and 5) allegedly alerting at zero rather than at their threshold. If that
+part of the report was precise, it is a separate question worth a targeted
+check; if it was shorthand for "most products never alert", it is fully
+explained above.
 
 ---
 
-## 4. Returns: sale dropdown renders before a SKU is entered
+## 4. Returns: sale dropdown renders before a SKU is entered — ✅ FIXED
 
 **Verified** in `frontend/src/routes/_layout/stock-adjustment.tsx` (my code —
 introduced with the returns feature). The label and `Select` render whenever the
@@ -104,9 +168,12 @@ typed *and* the query has resolved empty.
 - SKU entered, no results → render a clear "no sales to return for this SKU"
   message instead of an empty dropdown.
 
+**FIXED — 2026-08-01.** The label moved inside the branch that renders the
+`Select`, so an empty SKU renders neither.
+
 ---
 
-## 5. Returns: quantity input accepts invalid values
+## 5. Returns: quantity input accepts invalid values — ✅ FIXED
 
 **Verified** in the same file. The quantity `Input` is free text
 (`inputMode="numeric"` is a keyboard hint only, not a constraint). Zero,
@@ -117,9 +184,13 @@ accept them in the first place.
 **Wanted behaviour.** Constrain input to positive integers, upper-bounded by the
 `N` already shown in *"Up to N can still be returned from this sale line."*
 
+**FIXED — 2026-08-01.** A `clampReturnQuantity(value, quantity_returnable)`
+helper in `sale-return.ts` filters the value on every keystroke; unit-tested in
+`sale-return.test.ts`.
+
 ---
 
-## 6. Project dialogs autofocus the Name field
+## 6. Project dialogs autofocus the Name field — ✅ FIXED
 
 **Verified.** Radix `DialogContent` focuses the first focusable element on open,
 so the Project create/edit dialogs land on **Project name**.
@@ -129,9 +200,13 @@ so the Project create/edit dialogs land on **Project name**.
 project dialogs (`ProjectCreateDialog.tsx`, `ProjectEditDialog.tsx`) simply never
 got the same treatment. Mirror it.
 
+**FIXED — 2026-08-01.** Both dialogs now `preventDefault()` in
+`onOpenAutoFocus` and focus the dialog content instead. Covered by
+`project-dialog-focus.spec.ts`.
+
 ---
 
-## 7. E2E suite: 33 failures, largely downstream of §1
+## 7. E2E suite: 33 failures, largely downstream of §1 — ✅ RESOLVED
 
 **Run:** full suite on an isolated stack (own DB, `E2E_SKIP_DB_RESET=1`).
 Final tally: **33 failed, 1 flaky, 272 passed** in 40.8 min.
@@ -161,6 +236,83 @@ Two known-independent items in that list:
 - `sale-return.spec.ts` (2 failures) had never been executed before today; its
   selectors were desk-checked against the committed UI but are unproven until
   a run gets past the auth problem.
+
+**RESOLVED — 2026-08-01/02.** Confirming full run on the isolated stack:
+**308 passed, 1 flaky, 0 failed in 4.1 min** (the flaky —
+`user-settings › Update password successfully` — passed on retry). Note the
+wall-clock: 40.8 min → **4.1 min**. The suite was not slow, it was spending its
+time in 401 retry storms and post-logout locator timeouts.
+
+The prediction held: 23 of 33 were pure fallout from §1 and went away with that
+fix alone. Full accounting of the original 33:
+
+| Cause | Count | Nature |
+|---|---|---|
+| §1 refresh-token storm | 23 | app bug (fixed) |
+| `Retail price` → `Project price` label rename (`de8857d`, 2026-07-24) | 4 | stale selector |
+| Customer form moved behind a dialog | 1 | stale selector |
+| Supplier scope moved out of the column header | 1 | stale selector |
+| Superuser control removed from Add User | 1 | obsolete test — deleted |
+| Public auth routes bounced to `/login` | 3 | **app bug — see §8** |
+
+Only **two** of the 33 were real application defects (§1 and §8). The other
+eight were test debt: assertions still describing a UI that had moved on.
+
+Fixes applied to the suite itself:
+- `product-dialog-focus`, `product-active-toggle`, `product-filters`,
+  `product-edit-flow` (×2) — `"Retail price (THB)"` → `"Project price (THB)"`.
+- `project-edit-flow` — create the customer through the `New customer` dialog;
+  scope the project combobox to the dialog.
+- `stock-supplier-filter` — assert on the `Showing stock from: <supplier>`
+  banner plus a plain `In stock` column header, not a supplier-named header.
+- `admin.spec.ts` — the "Create a superuser" test was deleted, not repaired:
+  the Add User form no longer exposes a superuser control, so the test asserted
+  behaviour the product had deliberately removed.
+- `compose.e2e.yml` — `SMTP_TLS: "false"`. `compose.override.yml` is **not**
+  auto-loaded when files are passed with explicit `-f`, so the E2E backend was
+  inheriting `SMTP_TLS=True` from `.env` and every send to plain-SMTP
+  mailcatcher failed. Independently necessary, but *not* the cause of the
+  reset-password failures — those never reached the API at all (§8).
+
+---
+
+## 8. Every emailed password-reset link was dead ⚠️ (found during §7 re-triage)
+
+**Not in the original report** — surfaced by the three `reset-password.spec.ts`
+failures that survived the §1 fix.
+
+**Symptom.** A logged-out user who opened the reset link from their email landed
+on `/login`. The token in the URL was discarded, so password reset was
+unusable for exactly the people who need it.
+
+**Root cause.** `main.tsx` runs a boot session check on load and calls
+`endSession()` when it fails. It was guarded only against `/login`:
+
+```ts
+if (navigator.onLine && !window.location.pathname.startsWith("/login")) { … }
+```
+
+`/recover-password` and `/reset-password` are reached with **no session by
+definition**, so the check failed, `endSession()` fired, and the browser was
+sent to `/login` — throwing away `?token=…` on the way.
+
+**Why it was invisible in manual testing.** Module-level boot code runs only on
+a **hard page load**, never on an SPA soft navigation. Clicking *"Forgot
+password?"* from the login screen is a soft navigation, so the flow worked
+perfectly by hand. Only the emailed link — always a hard load — hit the bug.
+That is also why a live refresh cookie masked it: with a valid session the check
+passes and nothing redirects.
+
+**Fix.** `PUBLIC_PATHS` + `isPublicAuthPath()` in `lib/auth-session.ts`, used in
+two places: `main.tsx` skips the boot check on any public auth route, and
+`endSession()` refuses to redirect away from one (so a mid-reset 401 cannot
+discard the token either).
+
+**Regression test.** `reset-password.spec.ts` — *"a hard load of a public auth
+route is not bounced to /login"* hard-loads `/recover-password` and
+`/reset-password?token=…` and asserts neither ends up on `/login`. The
+end-to-end email-link test passes alongside it, which also proves the
+`SMTP_TLS` fix.
 
 ---
 

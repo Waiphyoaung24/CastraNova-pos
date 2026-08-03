@@ -94,10 +94,31 @@ const handleMutationError = (
   }
 }
 
+const DEFAULT_RETRIES = 3
+
+/**
+ * TanStack's default is 3 retries for every query. An auth failure is not
+ * transient: by the time a 401 reaches here the request-boundary interceptor
+ * has already tried a refresh and failed, and a 403 means the role is simply
+ * wrong — so retrying either only multiplies traffic against a session that
+ * cannot recover. Everything else keeps the default backoff.
+ */
+export function shouldRetryRequest(
+  failureCount: number,
+  error: Error,
+): boolean {
+  if (
+    error instanceof ApiError &&
+    (error.status === 401 || error.status === 403)
+  )
+    return false
+  return failureCount < DEFAULT_RETRIES
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     // 24h cache so persisted queries survive an offline reload.
-    queries: { gcTime: 1000 * 60 * 60 * 24 },
+    queries: { gcTime: 1000 * 60 * 60 * 24, retry: shouldRetryRequest },
   },
   queryCache: new QueryCache({ onError: handleQueryError }),
   mutationCache: new MutationCache({ onError: handleMutationError }),

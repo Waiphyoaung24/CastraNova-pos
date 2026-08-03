@@ -24,7 +24,7 @@ test("editing a product's retail price records it in price history", async ({
   const create = page.getByRole("dialog", { name: "New product" })
   await create.getByLabel("SKU").fill(sku)
   await create.getByLabel("Model name").fill("E2E Edit Target")
-  await create.getByLabel("Retail price (THB)").fill("1000")
+  await create.getByLabel("Project price (THB)").fill("1000")
   await create.getByLabel("Repair price (THB)").fill("200")
   await create.getByRole("button", { name: "Create product" }).click()
 
@@ -41,7 +41,7 @@ test("editing a product's retail price records it in price history", async ({
   await row.click()
   const dialog = page.getByRole("dialog", { name: /Edit product/ })
   await expect(dialog).toBeVisible()
-  await dialog.getByLabel("Retail price (THB)").fill("1500")
+  await dialog.getByLabel("Project price (THB)").fill("1500")
   await dialog.getByRole("button", { name: "Save" }).click()
   await expect(page.getByText("Product updated")).toBeVisible()
 

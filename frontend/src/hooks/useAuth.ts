@@ -7,7 +7,7 @@ import {
   type UserPublic,
   UsersService,
 } from "@/client"
-import { endSession } from "@/lib/auth-session"
+import { endSession, markSessionAlive } from "@/lib/auth-session"
 import { queryClient } from "@/lib/query-client"
 import { handleError } from "@/utils"
 import useCustomToast from "./useCustomToast"
@@ -31,6 +31,9 @@ const useAuth = () => {
       formData: data,
     })
     localStorage.setItem("access_token", response.access_token)
+    // A fresh refresh cookie came with that token, so clear the dead-session
+    // latch that the previous logout set.
+    markSessionAlive()
     // Flush any mutation that was paused (offline) through a prior forced
     // logout — now that we hold a fresh token, it replays with idempotency.
     await queryClient.resumePausedMutations()

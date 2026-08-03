@@ -112,9 +112,15 @@ services:
         - VITE_ENABLE_PWA=false
     command: ["bun", "run", "dev", "--host", "--port", "5173"]
     # The build args above only exist during `bun run build`; the Vite dev
-    # server reads env at runtime, so the API base must be set here too.
+    # server reads env at runtime, so this must be set here too.
+    #
+    # The value is `backend:8000`, NOT the host-visible `localhost:8000`: in dev
+    # the browser no longer calls the API directly (API_BASE is "" and the dev
+    # server proxies /api — see vite.config.ts), so this is now resolved by the
+    # dev-server process INSIDE this container, where only the compose service
+    # name reaches the backend.
     environment:
-      VITE_API_URL: http://localhost:8000
+      VITE_API_URL: http://backend:8000
     ports:
       - "5173:5173"
     # `docker compose watch` pushes source edits into the container; Vite's

@@ -131,6 +131,7 @@ function Sale() {
   const [lines, setLines] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState<string>("")
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
+  const [scanNotice, setScanNotice] = useState("")
   const scanRef = useRef<ScanFieldHandle>(null)
   const [overrideKey, setOverrideKey] = useState<string | null>(null)
   const overrideLine = lines.find((l) => l.key === overrideKey) ?? null
@@ -148,12 +149,21 @@ function Sale() {
     useScanLookup()
 
   // Fold each resolved scan into the cart, then reset so the next scan registers.
-  // A fresh scan also clears any stale post-sale totals.
+  // A fresh scan also clears any stale post-sale totals. A serialized product's
+  // SKU is refused outright: it names the product, not the piece, so there is no
+  // unit to sell (the backend rejects such a line at checkout anyway).
   useEffect(() => {
     if (!result) return
-    if (result.kind !== "NOT_FOUND") {
+    if (result.kind === "SERIALIZED_SKU") {
+      setScanNotice(
+        `${result.data.sku} is a serialized item — scan the unit's shop barcode instead.`,
+      )
+    } else if (result.kind !== "NOT_FOUND") {
       setLines((prev) => addScanToCart(prev, result, priceMap))
+      setScanNotice("")
       setSaleResult(undefined)
+    } else {
+      setScanNotice("")
     }
     reset()
   }, [result, priceMap, reset])
@@ -275,7 +285,7 @@ function Sale() {
                     ? "Scan lookup failed. Try again."
                     : notFound
                       ? "No item found for that code."
-                      : ""}
+                      : scanNotice}
                 </p>
                 <p
                   aria-live="polite"

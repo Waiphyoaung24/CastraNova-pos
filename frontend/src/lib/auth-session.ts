@@ -5,6 +5,22 @@ const TOKEN_KEY = "access_token"
 // Refresh a little before real expiry so an in-flight request never races it.
 const EXPIRY_SKEW_MS = 30_000
 
+/**
+ * Routes a logged-out visitor is *supposed* to reach. Password recovery and
+ * reset are reached with no session by definition — the reset link arrives by
+ * email, so it is always a hard page load — and any session check on them ends
+ * the session and redirects to /login, discarding the token in the URL. Used
+ * both by the boot check and by endSession's redirect guard.
+ */
+const PUBLIC_PATHS = ["/login", "/recover-password", "/reset-password"]
+
+/** True when the current URL is a public auth route (see PUBLIC_PATHS). */
+export function isPublicAuthPath(
+  pathname: string = window.location.pathname,
+): boolean {
+  return PUBLIC_PATHS.some((p) => pathname.startsWith(p))
+}
+
 /** Decode a JWT's `exp` (seconds since epoch); null if unparseable. */
 function decodeExp(token: string): number | null {
   try {
@@ -31,12 +47,26 @@ export function isAccessTokenValid(): boolean {
 // once) share ONE in-flight refresh instead of stampeding the endpoint.
 let inFlight: Promise<boolean> | null = null
 
+// Single-flight only collapses CONCURRENT callers; it clears on settle, so a
+// page whose queries fail in sequence used to re-ask forever against a session
+// that can never come back. A 401 here is final — the refresh cookie is absent
+// or rejected, and only a fresh login can change that — so latch it and answer
+// later callers locally. Anything else (429, 5xx, offline) stays retryable.
+let sessionDead = false
+
+/** Re-arm refresh after a successful login (see the `sessionDead` latch). */
+export function markSessionAlive(): void {
+  sessionDead = false
+}
+
 /**
  * Exchange the httponly refresh cookie for a new access token. Writes the new
  * token to localStorage on success. Returns false on any failure (dead/absent
- * refresh cookie = the 12h idle window has elapsed). Single-flight.
+ * refresh cookie = the 12h idle window has elapsed). Single-flight, and a no-op
+ * once a 401 has proved the session dead.
  */
 export function refreshAccessToken(): Promise<boolean> {
+  if (sessionDead) return Promise.resolve(false)
   if (inFlight) return inFlight
   inFlight = (async () => {
     try {
@@ -44,7 +74,10 @@ export function refreshAccessToken(): Promise<boolean> {
       localStorage.setItem(TOKEN_KEY, access_token)
       return true
     } catch (err) {
-      if (err instanceof ApiError) return false
+      if (err instanceof ApiError) {
+        if (err.status === 401) sessionDead = true
+        return false
+      }
       throw err
     } finally {
       inFlight = null
@@ -61,8 +94,14 @@ export async function ensureValidSession(): Promise<boolean> {
 
 /** End the session: drop the token and send the user to /login (loop-guarded). */
 export function endSession(): void {
+  // The navigation below is not instant, and every in-flight query that 401s
+  // meanwhile would otherwise start its own refresh. The session is over —
+  // latch it so those stragglers resolve locally instead of hitting the API.
+  sessionDead = true
   localStorage.removeItem(TOKEN_KEY)
-  if (!window.location.pathname.startsWith("/login")) {
+  // Never bounce off a public auth route: on /reset-password that would throw
+  // away the token in the URL mid-reset.
+  if (!isPublicAuthPath()) {
     window.location.href = "/login"
   }
 }

@@ -28,7 +28,7 @@ async function createProduct(
   await dialog.getByLabel("Brand").fill(brand)
   await dialog.getByLabel("Tracking").click()
   await page.getByRole("option", { name: trackingMode }).click()
-  await dialog.getByLabel("Retail price (THB)").fill("1000")
+  await dialog.getByLabel("Project price (THB)").fill("1000")
   await dialog.getByLabel("Repair price (THB)").fill("200")
   await dialog.getByRole("button", { name: "Create product" }).click()
   await expect(page.getByText("Product created.")).toBeVisible()
