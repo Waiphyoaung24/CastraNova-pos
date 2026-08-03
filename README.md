@@ -1,241 +1,155 @@
-# Full Stack FastAPI Template
+# CastraNova POS
 
-<a href="https://github.com/fastapi/full-stack-fastapi-template/actions?query=workflow%3A%22Test+Docker+Compose%22" target="_blank"><img src="https://github.com/fastapi/full-stack-fastapi-template/workflows/Test%20Docker%20Compose/badge.svg" alt="Test Docker Compose"></a>
-<a href="https://github.com/fastapi/full-stack-fastapi-template/actions?query=workflow%3A%22Test+Backend%22" target="_blank"><img src="https://github.com/fastapi/full-stack-fastapi-template/workflows/Test%20Backend/badge.svg" alt="Test Backend"></a>
-<a href="https://coverage-badge.samuelcolvin.workers.dev/redirect/fastapi/full-stack-fastapi-template" target="_blank"><img src="https://coverage-badge.samuelcolvin.workers.dev/fastapi/full-stack-fastapi-template.svg" alt="Coverage"></a>
+Inventory tracking and point-of-sale for a business that sells both serial-numbered equipment and batch-tracked parts — with FIFO costing, an append-only audit ledger, and an offline-tolerant shop floor.
 
-## Technology Stack and Features
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.114%2B-009688.svg)](https://fastapi.tiangolo.com)
+[![React 19](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
+[![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-336791.svg)](https://www.postgresql.org)
 
-- ⚡ [**FastAPI**](https://fastapi.tiangolo.com) for the Python backend API.
-  - 🧰 [SQLModel](https://sqlmodel.tiangolo.com) for the Python SQL database interactions (ORM).
-  - 🔍 [Pydantic](https://docs.pydantic.dev), used by FastAPI, for the data validation and settings management.
-  - 💾 [PostgreSQL](https://www.postgresql.org) as the SQL database.
-- 🚀 [React](https://react.dev) for the frontend.
-  - 💃 Using TypeScript, hooks, [Vite](https://vitejs.dev), and other parts of a modern frontend stack.
-  - 🎨 [Tailwind CSS](https://tailwindcss.com) and [shadcn/ui](https://ui.shadcn.com) for the frontend components.
-  - 🤖 An automatically generated frontend client.
-  - 🧪 [Playwright](https://playwright.dev) for End-to-End testing.
-  - 🦇 Dark mode support.
-- 🐋 [Docker Compose](https://www.docker.com) for development and production.
-- 🔒 Secure password hashing by default.
-- 🔑 JWT (JSON Web Token) authentication.
-- 📫 Email based password recovery.
-- 📬 [Mailcatcher](https://mailcatcher.me) for local email testing during development.
-- ✅ Tests with [Pytest](https://pytest.org).
-- 📞 [Traefik](https://traefik.io) as a reverse proxy / load balancer.
-- 🚢 Deployment instructions using Docker Compose, including how to set up a frontend Traefik proxy to handle automatic HTTPS certificates.
-- 🏭 CI (continuous integration) and CD (continuous deployment) based on GitHub Actions.
+---
 
-### Dashboard Login
+## What it does
 
-[![API docs](img/login.png)](https://github.com/fastapi/full-stack-fastapi-template)
+Every product is tracked one of two ways, and that choice drives the whole system:
 
-### Dashboard - Admin
+| | **SERIALIZED** | **QUANTITY** |
+|---|---|---|
+| Identified by | a per-unit barcode | the SKU |
+| Cost basis | that unit's own purchase cost | FIFO across batches |
+| Moves | one piece at a time | any quantity, drawn oldest-first |
 
-[![API docs](img/dashboard.png)](https://github.com/fastapi/full-stack-fastapi-template)
+**Stock in and out**
+Receive serialized pieces or costed batches · barcode-scan lookup resolving serial → unit and SKU → part · sale checkout with per-line pricing overrides · customer returns that restore FIFO stock *and* reverse revenue at the batch cost actually drawn · admin stock adjustments for loss and found stock.
 
-### Dashboard - Items
+**Work that consumes stock**
+Service tickets drawing repair parts · project pulls with per-line fulfilment and FIFO batch attribution back to the project.
 
-[![API docs](img/dashboard-items.png)](https://github.com/fastapi/full-stack-fastapi-template)
+**Money and reporting**
+Channel margin grouped by channel, product, customer or project · inventory holding period · pricing-override exceptions · price-change history showing who changed what and when · PDF and Excel export.
 
-### Dashboard - Dark Mode
+**Operations**
+Low-stock alerts with per-product thresholds · Telegram notifications with self-enrolment by one-time code · an offline mutation queue, with a sync-review queue for write conflicts · role-tiered access · append-only audit trail.
 
-[![API docs](img/dashboard-dark.png)](https://github.com/fastapi/full-stack-fastapi-template)
+---
 
-### Interactive API Documentation
+## Quickstart
 
-[![API docs](img/docs.png)](https://github.com/fastapi/full-stack-fastapi-template)
-
-## How To Use It
-
-You can **just fork or clone** this repository and use it as is.
-
-✨ It just works. ✨
-
-### How to Use a Private Repository
-
-If you want to have a private repository, GitHub won't allow you to simply fork it as it doesn't allow changing the visibility of forks.
-
-But you can do the following:
-
-- Create a new GitHub repo, for example `my-full-stack`.
-- Clone this repository manually, set the name with the name of the project you want to use, for example `my-full-stack`:
+**Prerequisites** — Docker with Compose. [Bun](https://bun.sh) as well, if you want to run frontend tooling outside the container.
 
 ```bash
-git clone git@github.com:fastapi/full-stack-fastapi-template.git my-full-stack
-```
-
-- Enter into the new directory:
-
-```bash
-cd my-full-stack
-```
-
-- Set the new origin to your new repository, copy it from the GitHub interface, for example:
-
-```bash
-git remote set-url origin git@github.com:octocat/my-full-stack.git
-```
-
-- Add this repo as another "remote" to allow you to get updates later:
-
-```bash
-git remote add upstream git@github.com:fastapi/full-stack-fastapi-template.git
-```
-
-- Push the code to your new repository:
-
-```bash
-git push -u origin master
-```
-
-### Update From the Original Template
-
-After cloning the repository, and after doing changes, you might want to get the latest changes from this original template.
-
-- Make sure you added the original repository as a remote, you can check it with:
-
-```bash
-git remote -v
-
-origin    git@github.com:octocat/my-full-stack.git (fetch)
-origin    git@github.com:octocat/my-full-stack.git (push)
-upstream    git@github.com:fastapi/full-stack-fastapi-template.git (fetch)
-upstream    git@github.com:fastapi/full-stack-fastapi-template.git (push)
-```
-
-- Pull the latest changes without merging:
-
-```bash
-git pull --no-commit upstream master
-```
-
-This will download the latest changes from this template without committing them, that way you can check everything is right before committing.
-
-- If there are conflicts, solve them in your editor.
-
-- Once you are done, commit the changes:
-
-```bash
-git merge --continue
-```
-
-### Configure
-
-The `.env` files hold secrets and are gitignored, so a fresh clone has to create
-them from the tracked templates:
-
-```bash
+git clone https://github.com/Waiphyoaung24/CastraNova-pos.git
+cd CastraNova-pos
 cp .env.example .env
-cp frontend/.env.example frontend/.env
 ```
 
-You can then update configs in the `.env` files to customize your configurations.
-
-Before deploying it, make sure you change at least the values for:
-
-- `SECRET_KEY`
-- `FIRST_SUPERUSER_PASSWORD`
-- `POSTGRES_PASSWORD`
-
-You can (and should) pass these as environment variables from secrets.
-
-Read the [deployment.md](./deployment.md) docs for more details.
-
-### Generate Secret Keys
-
-Some environment variables in the `.env` file have a default value of `changethis`.
-
-You have to change them with a secret key, to generate secret keys you can run the following command:
+Set three secrets in `.env` before starting — generate each one separately:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
+# -> SECRET_KEY, POSTGRES_PASSWORD, FIRST_SUPERUSER_PASSWORD
 ```
-
-Copy the content and use that as password / secret key. And run that again to generate another secure key.
-
-## How To Use It - Alternative With Copier
-
-This repository also supports generating a new project using [Copier](https://copier.readthedocs.io).
-
-It will copy all the files, ask you configuration questions, and update the `.env` files with your answers.
-
-### Install Copier
-
-You can install Copier with:
 
 ```bash
-pip install copier
+docker compose watch
 ```
 
-Or better, if you have [`pipx`](https://pipx.pypa.io/), you can run it with:
+| Service | URL |
+|---|---|
+| Frontend | http://localhost:5173 |
+| API + docs | http://localhost:8000/docs |
+| Mailcatcher | http://localhost:1080 |
+| Adminer | http://localhost:8080 |
+| Traefik dashboard | http://localhost:8090 |
 
-```bash
-pipx install copier
+Sign in as `FIRST_SUPERUSER`. The `prestart` service runs `alembic upgrade head` and seeds the superuser, locations and system settings before the API accepts traffic.
+
+> Use `docker compose watch`, not `up`. `up` serves the code baked into the image, so your edits — and your tests — can silently run against stale source.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    B["React 19 + TypeScript<br/>Vite · TanStack · shadcn/ui"]
+    T["Traefik"]
+    A["FastAPI<br/>routes → crud → SQLModel"]
+    D[("PostgreSQL 18<br/>append-only ledger<br/>enforced by triggers")]
+    N["Telegram"]
+
+    B -->|"same-origin /api proxy"| T
+    T --> A
+    A --> D
+    A -.->|alerts| N
 ```
 
-**Note**: If you have `pipx`, installing copier is optional, you could run it directly.
+The frontend never writes SQL, and routes never call `session.exec`. All database access goes through `crud.py` — the single place FIFO consumption and ledger writes happen.
 
-### Generate a Project With Copier
-
-Decide a name for your new project's directory, you will use it below. For example, `my-awesome-project`.
-
-Go to the directory that will be the parent of your project, and run the command with your project's name:
-
-```bash
-copier copy https://github.com/fastapi/full-stack-fastapi-template my-awesome-project --trust
+```
+backend/app/
+  api/routes/      one file per resource
+  api/deps.py      SessionDep, CurrentUser, admin guards
+  crud.py          ALL database reads and writes
+  models.py        SQLModel tables + Create/Update/Public schemas
+  alembic/         41 migrations, head m036
+  core/            config, security, db engine
+frontend/src/
+  routes/_layout/  TanStack file-based routes
+  components/      shadcn/ui primitives + app components
+  client/          AUTO-GENERATED SDK — never hand-edit
+  lib/             pure, unit-testable logic (cart, returns, reports, auth)
 ```
 
-If you have `pipx` and you didn't install `copier`, you can run it directly:
+---
 
-```bash
-pipx run copier copy https://github.com/fastapi/full-stack-fastapi-template my-awesome-project --trust
+## Rules a contributor must not break
+
+**Stock movements are append-only.** `unitmovement`, `partmovement`, `costline`, `pricechange` and `notificationlog` carry triggers that reject `UPDATE` and `DELETE` outright (migration m021). Never mutate a stock total — insert a movement row and derive it. This is enforced in Postgres, not Python, so routing around it in application code simply fails.
+
+**Money is `Numeric(12,2)` end to end.** Costs and prices stay strings across the frontend boundary and are parsed only at the validation edge, so no monetary value passes through a float.
+
+**Every schema change needs a migration.** Run `alembic revision --autogenerate -m "..."`, then read what it generated before committing it.
+
+**Regenerate the SDK after any backend schema change** — `bun run generate-client`. `frontend/src/client/` and `routeTree.gen.ts` are generated; hand-edits get overwritten.
+
+**Mutations carry idempotency keys.** The shop floor goes offline and replays queued writes. A retry must never produce a second sale.
+
+---
+
+## Testing
+
+| Suite | Command | Requires |
+|---|---|---|
+| Backend | `bash scripts/test.sh` | Docker stack |
+| Frontend unit | `bun run test:unit` *(in `frontend/`)* | nothing — pure logic |
+| End-to-end | `bun run test` *(in `frontend/`)* | full stack + browser |
+
+> **These suites destroy data.** The backend tests truncate every domain table in the database they run against, and E2E's `global.setup.ts` truncates and reseeds by default. Set `E2E_SKIP_DB_RESET=1` unless you actually want your development data gone. There is no demo-seed script to restore it.
+
+Pre-commit runs `prek`, `biome`, `ruff` and `mypy --strict`. All must pass.
+
+---
+
+## Branch model
+
+```
+feature ──PR──> dev ──merge──> production
+                                   │
+master ─ upstream template base ───┘   never target · never push
 ```
 
-**Note** the `--trust` option is necessary to be able to execute a [post-creation script](https://github.com/fastapi/full-stack-fastapi-template/blob/master/.copier/update_dotenv.py) that updates your `.env` files.
+`dev` is the trunk — open pull requests against it. Release by merging `dev` into `production`. `master` tracks the upstream template and must never receive project work.
 
-### Input Variables
+Workflow files exist under `.github/`, but **no workflow has ever run on this repository**. A clean merge state means nothing was checked — not that checks passed. Review and test locally before merging.
 
-Copier will ask you for some data, you might want to have at hand before generating the project.
+Further reading: [CONTRIBUTING.md](CONTRIBUTING.md) · [development.md](development.md) · [deployment.md](deployment.md) · [CLAUDE.md](CLAUDE.md)
 
-But don't worry, you can just update any of that in the `.env` files afterwards.
-
-The input variables, with their default values (some auto generated) are:
-
-- `project_name`: (default: `"FastAPI Project"`) The name of the project, shown to API users (in .env).
-- `stack_name`: (default: `"fastapi-project"`) The name of the stack used for Docker Compose labels and project name (no spaces, no periods) (in .env).
-- `secret_key`: (default: `"changethis"`) The secret key for the project, used for security, stored in .env, you can generate one with the method above.
-- `first_superuser`: (default: `"admin@example.com"`) The email of the first superuser (in .env).
-- `first_superuser_password`: (default: `"changethis"`) The password of the first superuser (in .env).
-- `smtp_host`: (default: "") The SMTP server host to send emails, you can set it later in .env.
-- `smtp_user`: (default: "") The SMTP server user to send emails, you can set it later in .env.
-- `smtp_password`: (default: "") The SMTP server password to send emails, you can set it later in .env.
-- `emails_from_email`: (default: `"info@example.com"`) The email account to send emails from, you can set it later in .env.
-- `postgres_password`: (default: `"changethis"`) The password for the PostgreSQL database, stored in .env, you can generate one with the method above.
-- `sentry_dsn`: (default: "") The DSN for Sentry, if you are using it, you can set it later in .env.
-
-## Backend Development
-
-Backend docs: [backend/README.md](./backend/README.md).
-
-## Frontend Development
-
-Frontend docs: [frontend/README.md](./frontend/README.md).
-
-## Deployment
-
-Deployment docs: [deployment.md](./deployment.md).
-
-## Development
-
-General development docs: [development.md](./development.md).
-
-This includes using Docker Compose, custom local domains, `.env` configurations, etc.
-
-## Release Notes
-
-Check the file [release-notes.md](./release-notes.md).
+---
 
 ## License
 
-The Full Stack FastAPI Template is licensed under the terms of the MIT license.
+MIT — see [LICENSE](LICENSE).
+
+Built on [full-stack-fastapi-template](https://github.com/fastapi/full-stack-fastapi-template). The `LICENSE` file still carries that project's original copyright notice; update it if you intend to assert your own.
