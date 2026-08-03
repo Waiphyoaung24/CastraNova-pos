@@ -136,11 +136,13 @@ Pre-commit runs `prek`, `biome`, `ruff` and `mypy --strict`. All must pass.
 
 ```
 feature ──PR──> dev ──merge──> production
-                                   │
-master ─ upstream template base ───┘   never target · never push
+                 │
+                 └──fast-forward──> master   (default branch, mirror only)
 ```
 
-`dev` is the trunk — open pull requests against it. Release by merging `dev` into `production`. `master` tracks the upstream template and must never receive project work.
+`dev` is the trunk — open pull requests against it. Release by merging `dev` into `production`. `master` is the GitHub default branch, kept fast-forwarded from `dev` so the repository landing page shows the real project; never commit to it directly.
+
+> `master` tracked the upstream `full-stack-fastapi-template` untouched until 2026-08-03, which is what allowed `copier update` to pull template fixes. It was fast-forwarded from `dev` on that date, so `copier.yml` and `.copier/` remain in the tree but no longer function.
 
 Workflow files exist under `.github/`, but **no workflow has ever run on this repository**. A clean merge state means nothing was checked — not that checks passed. Review and test locally before merging.
 
