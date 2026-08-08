@@ -88,7 +88,9 @@ Footer becomes:
 5. YGN_STAFF → 403.
 6. Unknown product id → 404.
 
-**Frontend:** one browserless Playwright spec asserting the Delete button is absent for a non-fresh product and present for a fresh one when the session is a superuser. Run with `E2E_SKIP_DB_RESET=1` unless a dev-DB reset is explicitly wanted.
+**Frontend:** the visibility rule is extracted into a pure `canDeleteProduct(product, isSuperuser)` in `lib/product-edit.ts` — beside the existing `canSaveProduct` — and covered by vitest (`bun run test:unit`). Four cases: superuser + fresh → true; non-superuser + fresh → false; superuser + non-fresh → false; `is_fresh` absent → false (fails closed, matching the reasoning in `hooks/useRole.ts`).
+
+No component-render test: the repo has no jsdom and no React Testing Library, and vitest is scoped to `src/**/*.test.ts`. No Playwright spec either — the E2E suite needs the full stack and carries known pre-existing failures, and a button-visibility assertion adds nothing over the predicate tests plus the backend's four permission tests.
 
 ## Out of scope
 
