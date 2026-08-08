@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { ProductPublic } from "@/client/types.gen"
 import {
   buildProductUpdate,
+  canDeleteProduct,
   canSaveProduct,
   productToDraft,
 } from "./product-edit"
@@ -32,6 +33,28 @@ describe("canSaveProduct", () => {
     const draft = productToDraft(baseProduct)
     expect(canSaveProduct(draft)).toBe(true)
     expect(canSaveProduct({ ...draft, sku: "   " })).toBe(false)
+  })
+})
+
+describe("canDeleteProduct", () => {
+  it("allows a superuser to delete a fresh product", () => {
+    expect(canDeleteProduct(baseProduct, true)).toBe(true)
+  })
+
+  it("refuses a non-superuser even on a fresh product", () => {
+    expect(canDeleteProduct(baseProduct, false)).toBe(false)
+  })
+
+  it("refuses a superuser once the product has stock history", () => {
+    expect(canDeleteProduct({ ...baseProduct, is_fresh: false }, true)).toBe(
+      false,
+    )
+  })
+
+  it("refuses when is_fresh is absent, rather than assuming fresh", () => {
+    const { is_fresh, ...withoutFlag } = baseProduct
+    void is_fresh
+    expect(canDeleteProduct(withoutFlag, true)).toBe(false)
   })
 })
 
