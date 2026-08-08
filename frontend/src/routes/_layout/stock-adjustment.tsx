@@ -3,7 +3,12 @@ import { createFileRoute } from "@tanstack/react-router"
 import { SlidersHorizontal } from "lucide-react"
 import { useId, useState } from "react"
 
-import { ApiError, SalesService, StockAdjustmentsService } from "@/client"
+import {
+  ApiError,
+  SalesService,
+  SearchService,
+  StockAdjustmentsService,
+} from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
 import { ScanField } from "@/components/ScanField"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -33,6 +38,7 @@ import {
   buildAdjustmentPayload,
   canSubmitAdjustment,
   emptyAdjustmentDraft,
+  latestCostBatch,
 } from "@/lib/stock-adjustment"
 
 export const Route = createFileRoute("/_layout/stock-adjustment")({
@@ -93,10 +99,39 @@ function StockAdjustment() {
     .flatMap((s) => s.lines)
     .find((l) => l.sale_line_id === returnDraft.saleLineId)
 
+  const deltaNum = Number.parseInt(draft.qtyDelta, 10)
+  const isQuantityReturn =
+    draft.targetKind === "QUANTITY" && qtyAction === "RETURN"
+  const showCost =
+    draft.targetKind === "QUANTITY" &&
+    !isQuantityReturn &&
+    Number.isFinite(deltaNum) &&
+    deltaNum > 0
+
+  // The cost basis for a found-stock batch defaults to what this SKU last cost.
+  // Same query key as the Search screen, so the two share a cache entry and the
+  // invalidation below refreshes the suggestion after a recorded adjustment.
+  // ponytail: no debounce — editing the SKU while a positive delta is already
+  // typed fires one 404 per keystroke. Debounce, or commit the SKU on blur like
+  // search.tsx does, if this admin-only screen ever gets chatty.
+  const costQuery = useQuery({
+    queryKey: ["search-sku", sku],
+    queryFn: () => SearchService.searchSku({ sku }),
+    enabled: showCost && sku.length > 0,
+    retry: false,
+  })
+  const suggestedBatch = latestCostBatch(costQuery.data)
+  // Derived, not synced into state: an untouched cost field shows the
+  // suggestion, and typing over it (or clearing it) wins.
+  const effectiveDraft: AdjustmentDraft =
+    draft.purchaseCost === "" && suggestedBatch
+      ? { ...draft, purchaseCost: suggestedBatch.purchase_cost_thb }
+      : draft
+
   const mutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (d: AdjustmentDraft) =>
       StockAdjustmentsService.createStockAdjustment({
-        requestBody: buildAdjustmentPayload(draft, crypto.randomUUID()),
+        requestBody: buildAdjustmentPayload(d, crypto.randomUUID()),
       }),
     onSuccess: () => {
       // On-hand totals and any open search results are now stale.
@@ -142,15 +177,6 @@ function StockAdjustment() {
       showErrorToast(detail ?? "Could not record the return.")
     },
   })
-
-  const deltaNum = Number.parseInt(draft.qtyDelta, 10)
-  const isQuantityReturn =
-    draft.targetKind === "QUANTITY" && qtyAction === "RETURN"
-  const showCost =
-    draft.targetKind === "QUANTITY" &&
-    !isQuantityReturn &&
-    Number.isFinite(deltaNum) &&
-    deltaNum > 0
 
   // The unit tab has nothing to choose: only the reason is real state.
   const unitPending: ReturnDraft = {
@@ -442,10 +468,23 @@ function StockAdjustment() {
                         id={costId}
                         inputMode="decimal"
                         className="num"
-                        value={draft.purchaseCost}
+                        value={effectiveDraft.purchaseCost}
                         onChange={(e) => set({ purchaseCost: e.target.value })}
                         placeholder="Cost basis for the new batch"
                       />
+                      {suggestedBatch ? (
+                        <p className="text-muted-foreground text-sm">
+                          Last received at ฿
+                          <span className="num">
+                            {suggestedBatch.purchase_cost_thb}
+                          </span>{" "}
+                          on{" "}
+                          {new Date(
+                            suggestedBatch.received_at,
+                          ).toLocaleDateString()}
+                          .
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </>
@@ -470,8 +509,10 @@ function StockAdjustment() {
 
               <Button
                 type="button"
-                disabled={!canSubmitAdjustment(draft) || mutation.isPending}
-                onClick={() => mutation.mutate()}
+                disabled={
+                  !canSubmitAdjustment(effectiveDraft) || mutation.isPending
+                }
+                onClick={() => mutation.mutate(effectiveDraft)}
               >
                 {mutation.isPending ? "Recording…" : "Record adjustment"}
               </Button>
