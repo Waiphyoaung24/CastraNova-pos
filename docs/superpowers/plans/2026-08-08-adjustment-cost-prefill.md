@@ -206,6 +206,15 @@ import type {
 Append at the end of the file:
 
 ```ts
+/** A bare `in` check leaves the staff shape in the union (TS widens it to
+ *  `SkuBatchPublic & Record<"purchase_cost_thb", unknown>`), so the narrowing
+ *  is spelled out as a predicate. */
+function hasCost(
+  batch: SkuBatchAdminPublic | SkuBatchPublic,
+): batch is SkuBatchAdminPublic {
+  return "purchase_cost_thb" in batch
+}
+
 /** Newest batch for a SKU — the search endpoint returns batches oldest-first,
  *  so that is the last one. This is the default cost basis for a positive
  *  adjustment. Null for staff-scoped results (no cost in the payload),
@@ -216,9 +225,11 @@ export function latestCostBatch(
   const batches = res?.batches ?? []
   // Not .at(-1): tsconfig targets ES2020 and Array.prototype.at is ES2022.
   const newest = batches[batches.length - 1]
-  return newest && "purchase_cost_thb" in newest ? newest : null
+  return newest && hasCost(newest) ? newest : null
 }
 ```
+
+`SkuBatchPublic` joins the type-only import for the predicate's parameter.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
