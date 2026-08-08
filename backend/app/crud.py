@@ -632,7 +632,9 @@ def delete_product(*, session: Session, db_product: Product) -> None:
     ``product_has_price_history`` first — this does not re-check. Any other
     table still referencing it surfaces as an IntegrityError, reported as 409
     rather than a 500 — most plausibly a ``PricingOverrideRequest``, whose
-    product_id neither check covers."""
+    product_id neither check covers, or a row that appeared between the checks
+    and this commit. The message stays generic precisely because this path is
+    reached by references that are *not* stock."""
     session.delete(db_product)
     try:
         session.commit()
@@ -640,7 +642,10 @@ def delete_product(*, session: Session, db_product: Product) -> None:
         session.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Product has stock history and cannot be deleted",
+            detail=(
+                "Product is still referenced by other records and cannot be "
+                "deleted. Set it to inactive instead."
+            ),
         )
 
 

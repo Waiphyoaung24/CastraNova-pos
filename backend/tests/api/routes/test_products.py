@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from app import crud
 from app.core.config import settings
-from app.models import SupplierCreate
+from app.models import OverrideTargetKind, PricingOverrideCreate, SupplierCreate
 
 PREFIX = settings.API_V1_STR
 
@@ -580,6 +580,34 @@ def test_staff_cannot_delete_product(
         f"{PREFIX}/products/{product['id']}", headers=staff_token_headers
     )
     assert r.status_code == 403, r.text
+
+
+def test_cannot_delete_product_referenced_by_override_request(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    """A PricingOverrideRequest can exist without any stock or re-price, so it
+    passes both explicit gates and is caught only by the IntegrityError
+    backstop in crud.delete_product. That path must 409, never 500."""
+    product = _create_product(client, superuser_token_headers)
+    product_id = uuid.UUID(str(product["id"]))
+    admin = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert admin is not None
+    crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=product_id,
+            requested_price_thb=Decimal("900.00"),
+            reason="probe",
+        ),
+        created_by_user_id=admin.id,
+    )
+
+    r = client.delete(
+        f"{PREFIX}/products/{product_id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 409, r.text
+    assert "referenced" in r.json()["detail"].lower()
 
 
 def test_delete_unknown_product_404(

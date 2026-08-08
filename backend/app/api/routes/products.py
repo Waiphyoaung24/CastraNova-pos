@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated
 
@@ -21,10 +22,13 @@ from app.models import (
     ProductsPublic,
     ProductUpdate,
     TrackingMode,
+    User,
 )
 from app.services.barcode import render_label_sheet
 
 router = APIRouter(prefix="/products", tags=["products"])
+
+logger = logging.getLogger(__name__)
 
 
 def _public(product: object, *, is_fresh: bool) -> ProductPublic:
@@ -199,12 +203,13 @@ def set_min_stock_level(
     )
 
 
-@router.delete(
-    "/{product_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(get_current_active_superuser)],
-)
-def delete_product(*, session: SessionDep, product_id: uuid.UUID) -> Response:
+@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(
+    *,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_superuser)],
+    product_id: uuid.UUID,
+) -> Response:
     """Superuser-only hard delete, allowed only while the product has never
     entered the stock system (the same condition that keeps its SKU editable).
     Anything with stock or sales stays, and is retired via is_active instead.
@@ -226,6 +231,16 @@ def delete_product(*, session: SessionDep, product_id: uuid.UUID) -> Response:
                 "Set it to inactive instead."
             ),
         )
+    # The only durable trace this action leaves. The ledger-derived audit trail
+    # cannot cover it: a deletable product has no movements by definition, and
+    # the row that would carry created_by/updated_at is what is being removed.
+    logger.info(
+        "product_deleted product_id=%s sku=%s model_name=%s by_user_id=%s",
+        db_product.id,
+        db_product.sku,
+        db_product.model_name,
+        current_user.id,
+    )
     crud.delete_product(session=session, db_product=db_product)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
