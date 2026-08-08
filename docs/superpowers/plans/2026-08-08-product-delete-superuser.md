@@ -15,7 +15,7 @@
 - Branch is `feat/product-delete-superuser`, cut from `dev`. Never commit to `master`.
 - All DB access goes through `backend/app/crud.py`. Routes never call `session.exec` or `session.delete` directly.
 - mypy runs in strict mode. Annotate every parameter and return type.
-- No change to `backend/app/models.py`, therefore no Alembic migration in this plan. If you find yourself writing one, stop — the design is being violated.
+- No change to `backend/app/models.py`, therefore **no schema migration**. One grant-only migration (m037, `GRANT DELETE ON product` to the least-privilege app role) is required and expected — see the correction note at the end of this plan. Any migration that alters a table, column, constraint, or trigger means the design is being violated; stop.
 - The append-only ledgers (`UnitMovement`, `PartMovement`) and every table holding stock or money are never deleted from, under any circumstance.
 - `frontend/src/client/` and `frontend/src/routeTree.gen.ts` are generated. Never hand-edit them.
 - `crud.py` signals HTTP failures by raising `HTTPException` directly (see `create_product`, `update_product`). Follow that existing pattern rather than inventing a new error type.
@@ -519,6 +519,15 @@ Use `superpowers:requesting-code-review`. This change touches deletion of catalo
 Use `superpowers:finishing-a-development-branch`, then the `create-pr` skill. Target branch is `dev` — never `master`.
 
 ---
+
+## Correction note (2026-08-08, during execution)
+
+Two things the plan got wrong, both caught by running the tests rather than by reading:
+
+1. **A grant migration is required.** The least-privilege `castranova_app` role holds no DELETE privilege, so the endpoint died at commit with `InsufficientPrivilege`. Migration `m037` (`a1b2c3d4e5f7`) adds `GRANT DELETE ON product`, following m034's precedent. Grants only — no schema change.
+2. **Products with price history cannot be deleted at all.** `pricechange` is one of m026's `LEDGERS` and carries m021's `reject_ledger_mutation` trigger, so the planned "delete the `PriceChange` children first" is refused by the database by design. The endpoint now returns 409 for a re-priced product, `crud.delete_product` deletes only the product row, and `crud.product_has_price_history()` is the new gate. User-approved on 2026-08-08 over weakening the trigger.
+
+Also: `scripts/test.sh` cannot run these tests. The backend Dockerfile copies `app/`, `scripts/`, and `pyproject.toml` but **not** `tests/`, and `compose watch` performs no initial sync — so the container never receives the test files and pytest exits with "file or directory not found: tests/". Use `docker compose cp ./backend/tests backend:/app/backend/tests` (and the same for `./backend/app` after each edit), then `docker compose exec -T backend python -m pytest tests/...`. Run docker commands through PowerShell; Git Bash mangles `/app/...` into a Windows path.
 
 ## Notes on what this plan deliberately does not do
 

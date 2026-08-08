@@ -16,7 +16,8 @@ Deactivating is the right answer for a product that was real and is now disconti
 |---|---|
 | Who may delete | **Superuser only** (`is_superuser`). BKK_ADMIN may still create and edit products but sees no delete affordance. |
 | Products with history | **Blocked.** Delete is allowed only when the product has never entered the stock system. The append-only ledgers are never touched. Cascade-delete was rejected outright — it would corrupt past sale totals and margin reports. |
-| Definition of "no history" | The existing `crud.is_product_fresh()` — no `Unit` row and no `PartBatch` row references the product. This is already the exact condition under which the SKU is editable. |
+| Definition of "no history" | `crud.is_product_fresh()` — no `Unit` and no `PartBatch` — **and** no `PriceChange` row (see below). |
+| Products with price history | **Blocked** (decided 2026-08-08 during implementation). `pricechange` is one of the five append-only ledgers guarded by m021's `reject_ledger_mutation` trigger, so its rows can never be deleted, and the FK therefore can never be satisfied. A re-priced product is retired via `is_active` instead. The alternative — punching a hole in the trigger — was rejected. |
 | Soft vs hard delete | **Hard.** `is_active=false` already covers the soft case; a second soft-delete state would be redundant. |
 | Placement | Footer of the existing `EditProductDialog`, not a new table column. |
 | Confirmation | **Two-step button** ("Delete" → "Click again to delete"), not a modal. A fresh product has no stock, no sales and no ledger rows, so the blast radius is a name and a price. |
@@ -40,19 +41,24 @@ Behaviour:
 | Caller is unauthenticated | 401 (from the existing dependency chain) |
 | Product id does not exist | 404 `"Product not found"` |
 | `not crud.is_product_fresh(...)` | 409 `"Product has stock history and cannot be deleted"` |
+| `crud.product_has_price_history(...)` | 409 `"Product has price history and cannot be deleted. Set it to inactive instead."` |
 | Otherwise | 204, product row gone |
 
-The deletion itself lives in `crud.delete_product(*, session, db_product)` per the "all DB access goes through `crud.py`" convention:
+The deletion itself lives in `crud.delete_product(*, session, db_product)` per the "all DB access goes through `crud.py`" convention: `session.delete(db_product)`, then a commit wrapped in `try/except IntegrityError` → HTTP 409. That backstop covers an unexpected referencing row — most plausibly a `PricingOverrideRequest`, whose `product_id` neither gate checks. A 409 is the honest answer there; a 500 is not.
 
-1. Delete the product's `PriceChange` rows. They are the only child rows a fresh product is expected to have (`update_product` writes one per changed price field), and they are meaningless once the product is gone.
-2. `session.delete(db_product)`, then commit.
-3. Wrap the commit in `try/except IntegrityError` → re-raise as HTTP 409 with the same "has history" message. This is the backstop for an unexpected referencing row — most plausibly a `PricingOverrideRequest`, whose `product_id` is not covered by the `is_fresh` check. A 409 is the honest answer there; a 500 is not.
+`crud.product_has_price_history()` is deliberately a separate helper rather than a tightening of `is_product_fresh()`: `is_fresh` governs SKU editability, and a re-price must not lock the SKU.
 
-The `is_fresh` re-check inside the endpoint is authoritative. The flag returned to the client on the list response is a rendering hint only and is never trusted.
+Both re-checks inside the endpoint are authoritative. The `is_fresh` flag returned to clients is a rendering hint and is never trusted.
 
-### Why not a DB-level `ON DELETE CASCADE` on `price_change.product_id`
+### Migration m037 — `GRANT DELETE ON product`
 
-It would be the more idiomatic database answer, but it costs a migration and an FK rewrite for two lines of application code that only ever run on this one path. If more child tables need the same treatment later, revisit it then.
+The least-privilege `castranova_app` role (m026) holds only SELECT/INSERT/UPDATE by default, so the endpoint fails at commit with `InsufficientPrivilege` without a grant. m037 adds `GRANT DELETE ON product`, following m034's `GRANT DELETE ON telegramconnectcode` precedent exactly. Grants only — no schema change.
+
+The grant deliberately does **not** include `pricechange`: that table is one of m026's `LEDGERS` and carries m021's `reject_ledger_mutation` trigger, so a DELETE is refused at the database regardless of privileges. Granting it would imply a capability that does not exist.
+
+### Known limitation
+
+A product whose price was edited after creation can never be deleted, only deactivated. The frontend cannot predict this — `ProductPublic` carries `is_fresh` but no price-history flag — so the button stays visible and the attempt surfaces the 409 message as a toast. Adding a `has_price_history` field to `ProductPublic` (plus a batched lookup in the list endpoint, mirroring `products_fresh_ids`) would hide the button up front; deferred until it proves annoying in practice.
 
 ## Frontend
 
@@ -81,8 +87,8 @@ Footer becomes:
 
 **Backend** (`backend/tests/api/routes/test_products.py`, matching the existing file's fixtures):
 
-1. Superuser deletes a fresh product → 204, and a follow-up `GET` returns 404.
-2. Superuser deletes a fresh product that has price-history rows → 204 (the `PriceChange` children are removed, not left dangling).
+1. Superuser deletes a fresh product → 204, and it disappears from the list.
+2. Superuser deletes a product that has price-history rows → 409, and the product still exists.
 3. Superuser deletes a product that has a received unit or part batch → 409, and the product still exists afterwards.
 4. BKK_ADMIN (admin but not superuser) → 403.
 5. YGN_STAFF → 403.

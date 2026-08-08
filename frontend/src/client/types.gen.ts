@@ -1291,6 +1291,12 @@ export type ProductsUpdateProductData = {
 
 export type ProductsUpdateProductResponse = (ProductPublic);
 
+export type ProductsDeleteProductData = {
+    productId: string;
+};
+
+export type ProductsDeleteProductResponse = (void);
+
 export type ProductsSetMinStockLevelData = {
     productId: string;
     requestBody: MinStockLevelUpdate;
