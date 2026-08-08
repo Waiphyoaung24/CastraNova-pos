@@ -178,6 +178,9 @@ export function EditProductDialog({
 
   const { isSuperuser } = useRole()
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // When the confirm was armed, so a double-click can't sail through both
+  // states and delete without the user ever seeing the confirmation.
+  const armedAt = useRef(0)
 
   // A stray first click must not leave a live confirm sitting in the footer.
   useEffect(() => {
@@ -185,6 +188,18 @@ export function EditProductDialog({
     const t = setTimeout(() => setConfirmingDelete(false), 4000)
     return () => clearTimeout(t)
   }, [confirmingDelete])
+
+  function onDeleteClick() {
+    if (!confirmingDelete) {
+      armedAt.current = Date.now()
+      setConfirmingDelete(true)
+      return
+    }
+    // Too fast to be a deliberate second click — this is a double-click on the
+    // still-unread "Delete" label. Swallow it and leave the confirm armed.
+    if (Date.now() - armedAt.current < 500) return
+    deleteMutation.mutate()
+  }
 
   const deleteMutation = useMutation({
     mutationFn: () => ProductsService.deleteProduct({ productId: product.id }),
@@ -294,10 +309,7 @@ export function EditProductDialog({
               variant={confirmingDelete ? "destructive" : "outline"}
               loading={deleteMutation.isPending}
               disabled={mutation.isPending}
-              onClick={() => {
-                if (confirmingDelete) deleteMutation.mutate()
-                else setConfirmingDelete(true)
-              }}
+              onClick={onDeleteClick}
             >
               {confirmingDelete ? "Click again to delete" : "Delete"}
             </LoadingButton>
