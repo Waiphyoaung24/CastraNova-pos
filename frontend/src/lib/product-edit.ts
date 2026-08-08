@@ -51,6 +51,18 @@ export function canSaveProduct(d: ProductEditDraft): boolean {
   )
 }
 
+/**
+ * Delete is superuser-only and limited to products that never entered the
+ * stock system — the backend enforces both and is authoritative. `is_fresh`
+ * absent means "unknown", which fails closed (same rule as roleFlags).
+ */
+export function canDeleteProduct(
+  product: ProductPublic,
+  isSuperuser: boolean,
+): boolean {
+  return isSuperuser && product.is_fresh === true
+}
+
 export function buildProductUpdate(d: ProductEditDraft): ProductUpdate {
   const minStock = d.minStock.trim()
   const minStockNum = Number(minStock)

@@ -611,6 +611,44 @@ def is_product_fresh(*, session: Session, product_id: uuid.UUID) -> bool:
     return has_batch is None
 
 
+def product_has_price_history(*, session: Session, product_id: uuid.UUID) -> bool:
+    """True when at least one ``PriceChange`` row references the product.
+
+    ``pricechange`` is one of the append-only ledgers guarded by m021's
+    reject_ledger_mutation trigger, so its rows can never be deleted. A product
+    that has been re-priced therefore cannot be deleted either — it is retired
+    via ``is_active`` instead. Deliberately separate from ``is_product_fresh``,
+    which governs SKU editability and must not tighten because of a re-price."""
+    row = session.exec(
+        select(PriceChange.id).where(PriceChange.product_id == product_id).limit(1)
+    ).first()
+    return row is not None
+
+
+def delete_product(*, session: Session, db_product: Product) -> None:
+    """Hard-delete a product that has never entered the stock system.
+
+    Callers MUST have checked ``is_product_fresh`` and
+    ``product_has_price_history`` first — this does not re-check. Any other
+    table still referencing it surfaces as an IntegrityError, reported as 409
+    rather than a 500 — most plausibly a ``PricingOverrideRequest``, whose
+    product_id neither check covers, or a row that appeared between the checks
+    and this commit. The message stays generic precisely because this path is
+    reached by references that are *not* stock."""
+    session.delete(db_product)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Product is still referenced by other records and cannot be "
+                "deleted. Set it to inactive instead."
+            ),
+        )
+
+
 def products_fresh_ids(
     *, session: Session, product_ids: list[uuid.UUID]
 ) -> set[uuid.UUID]:

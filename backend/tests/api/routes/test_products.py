@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from app import crud
 from app.core.config import settings
-from app.models import SupplierCreate
+from app.models import OverrideTargetKind, PricingOverrideCreate, SupplierCreate
 
 PREFIX = settings.API_V1_STR
 
@@ -465,3 +465,155 @@ def test_read_options_includes_inactive_product(
 def test_read_options_requires_auth(client: TestClient) -> None:
     r = client.get(f"{PREFIX}/products/options")
     assert r.status_code == 401
+
+
+def _create_product(
+    client: TestClient, headers: dict[str, str], **over: object
+) -> dict[str, object]:
+    """Create one product via the API and return its JSON body."""
+    sku = f"DEL-{uuid.uuid4().hex[:8]}"
+    r = client.post(
+        f"{PREFIX}/products/", headers=headers, json=_product_body(sku, **over)
+    )
+    assert r.status_code == 200, r.text
+    return dict(r.json())
+
+
+def test_superuser_deletes_fresh_product(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    product = _create_product(client, superuser_token_headers)
+    product_id = product["id"]
+
+    r = client.delete(
+        f"{PREFIX}/products/{product_id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 204, r.text
+
+    listed = client.get(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        params={"q": product["sku"]},
+    )
+    assert listed.status_code == 200
+    assert listed.json()["data"] == []
+
+
+def test_cannot_delete_product_with_price_history(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    """pricechange is an append-only ledger (m021's reject_ledger_mutation), so
+    a re-priced product can never be deleted — only deactivated."""
+    product = _create_product(client, superuser_token_headers)
+    product_id = product["id"]
+    patched = client.patch(
+        f"{PREFIX}/products/{product_id}",
+        headers=superuser_token_headers,
+        json={"retail_price_thb": "1500.00"},
+    )
+    assert patched.status_code == 200, patched.text
+    history = client.get(
+        f"{PREFIX}/products/{product_id}/price-history",
+        headers=superuser_token_headers,
+    )
+    assert len(history.json()) >= 1
+
+    r = client.delete(
+        f"{PREFIX}/products/{product_id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 409, r.text
+    assert "price history" in r.json()["detail"].lower()
+
+    still_there = client.get(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        params={"q": product["sku"]},
+    )
+    assert still_there.json()["count"] == 1
+
+
+def test_cannot_delete_product_with_stock(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    # _receive_quantity needs a QUANTITY product; the default body is SERIALIZED.
+    product = _create_product(
+        client, superuser_token_headers, tracking_mode="QUANTITY"
+    )
+    product_id = str(product["id"])
+    _receive_quantity(db, product_id)
+
+    r = client.delete(
+        f"{PREFIX}/products/{product_id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 409, r.text
+    assert "history" in r.json()["detail"].lower()
+
+    listed = client.get(
+        f"{PREFIX}/products/",
+        headers=superuser_token_headers,
+        params={"q": product["sku"]},
+    )
+    assert listed.json()["count"] == 1
+
+
+def test_bkk_admin_cannot_delete_product(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    bkk_admin_token_headers: dict[str, str],
+) -> None:
+    product = _create_product(client, superuser_token_headers)
+
+    r = client.delete(
+        f"{PREFIX}/products/{product['id']}", headers=bkk_admin_token_headers
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_staff_cannot_delete_product(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+) -> None:
+    product = _create_product(client, superuser_token_headers)
+
+    r = client.delete(
+        f"{PREFIX}/products/{product['id']}", headers=staff_token_headers
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_cannot_delete_product_referenced_by_override_request(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    """A PricingOverrideRequest can exist without any stock or re-price, so it
+    passes both explicit gates and is caught only by the IntegrityError
+    backstop in crud.delete_product. That path must 409, never 500."""
+    product = _create_product(client, superuser_token_headers)
+    product_id = uuid.UUID(str(product["id"]))
+    admin = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert admin is not None
+    crud.create_pricing_override(
+        session=db,
+        override_in=PricingOverrideCreate(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=product_id,
+            requested_price_thb=Decimal("900.00"),
+            reason="probe",
+        ),
+        created_by_user_id=admin.id,
+    )
+
+    r = client.delete(
+        f"{PREFIX}/products/{product_id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 409, r.text
+    assert "referenced" in r.json()["detail"].lower()
+
+
+def test_delete_unknown_product_404(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    r = client.delete(
+        f"{PREFIX}/products/{uuid.uuid4()}", headers=superuser_token_headers
+    )
+    assert r.status_code == 404, r.text

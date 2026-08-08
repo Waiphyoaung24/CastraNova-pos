@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useId, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 
 import { type ProductPublic, ProductsService } from "@/client"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useRole } from "@/hooks/useRole"
 import {
   buildAutoSku,
   generateSkuBase,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/product-create"
 import {
   buildProductUpdate,
+  canDeleteProduct,
   canSaveProduct,
   type ProductEditDraft,
   productToDraft,
@@ -174,6 +176,46 @@ export function EditProductDialog({
     },
   })
 
+  const { isSuperuser } = useRole()
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // When the confirm was armed, so a double-click can't sail through both
+  // states and delete without the user ever seeing the confirmation.
+  const armedAt = useRef(0)
+
+  // A stray first click must not leave a live confirm sitting in the footer.
+  useEffect(() => {
+    if (!confirmingDelete) return
+    const t = setTimeout(() => setConfirmingDelete(false), 4000)
+    return () => clearTimeout(t)
+  }, [confirmingDelete])
+
+  function onDeleteClick() {
+    if (!confirmingDelete) {
+      armedAt.current = Date.now()
+      setConfirmingDelete(true)
+      return
+    }
+    // Too fast to be a deliberate second click — this is a double-click on the
+    // still-unread "Delete" label. Swallow it and leave the confirm armed.
+    if (Date.now() - armedAt.current < 500) return
+    deleteMutation.mutate()
+  }
+
+  const deleteMutation = useMutation({
+    mutationFn: () => ProductsService.deleteProduct({ productId: product.id }),
+    onSuccess: () => {
+      showSuccessToast("Product deleted")
+      onClose()
+    },
+    // 409 here means the product gained stock in another tab since this dialog
+    // rendered, or it has price history (append-only, so never deletable —
+    // ProductPublic carries no flag for it, hence no way to hide the button).
+    onError: handleError.bind(showErrorToast),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] })
+    },
+  })
+
   // Don't fire a no-op PATCH (which would still bump updated_at) when nothing
   // changed; both sides compare the same SKU/tracking-free editable draft.
   const isUnchanged =
@@ -260,20 +302,42 @@ export function EditProductDialog({
             onChange={(v) => setDraft((prev) => ({ ...prev, isActive: v }))}
           />
         </div>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline" disabled={mutation.isPending}>
-              Cancel
-            </Button>
-          </DialogClose>
-          <LoadingButton
-            type="button"
-            loading={mutation.isPending}
-            disabled={!canSaveProduct(draft) || isUnchanged}
-            onClick={() => mutation.mutate()}
-          >
-            Save
-          </LoadingButton>
+        <DialogFooter className="sm:justify-between">
+          {canDeleteProduct(product, isSuperuser) ? (
+            <LoadingButton
+              type="button"
+              variant={confirmingDelete ? "destructive" : "outline"}
+              loading={deleteMutation.isPending}
+              disabled={mutation.isPending}
+              onClick={onDeleteClick}
+            >
+              {confirmingDelete ? "Click again to delete" : "Delete"}
+            </LoadingButton>
+          ) : (
+            <span />
+          )}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <DialogClose asChild>
+              <Button
+                variant="outline"
+                disabled={mutation.isPending || deleteMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </DialogClose>
+            <LoadingButton
+              type="button"
+              loading={mutation.isPending}
+              disabled={
+                !canSaveProduct(draft) ||
+                isUnchanged ||
+                deleteMutation.isPending
+              }
+              onClick={() => mutation.mutate()}
+            >
+              Save
+            </LoadingButton>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
