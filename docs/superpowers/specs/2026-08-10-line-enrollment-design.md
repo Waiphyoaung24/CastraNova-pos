@@ -88,7 +88,7 @@ historical-only with no sender, so existing log rows still deserialize.
 |---|---|
 | `services/notify.py` | Delete `VIBER_SEND_URL:53`, `send_viber:114-134`, the `_CHANNELS` VIBER entry `:299`. Update the module docstring (drops Viber's `status != 0` rule). |
 | `core/config.py` | Delete `VIBER_AUTH_TOKEN:116`; update the comment at `:112-113`. |
-| `models.py` | Delete `User.viber_user_id:208` and the `CHANNEL_ADDRESS_ATTR` VIBER entry `:224`. Keep the enum member with a historical-only comment. |
+| `models.py` | Delete `User.viber_user_id:208` and the `CHANNEL_ADDRESS_ATTR` VIBER entry `:224`. Keep the enum member with a historical-only comment. Make `channel_connected` total — see below. |
 | `crud.py:3808` | `for channel in NotificationChannel` → `for channel in CHANNEL_ADDRESS_ATTR`. |
 | `seed_demo.py:554` | Delete the VIBER preference seed. |
 | `alembic` `m038` | `op.drop_column("user", "viber_user_id")`. Safe: zero non-null values. Downgrade re-adds it nullable. |
@@ -97,6 +97,21 @@ The `crud.py:3808` one-liner is the fix for review finding **M2**: it makes
 `CHANNEL_ADDRESS_ATTR` the single source of truth for "channels we can actually
 address", so Viber disappears from the API and UI automatically — as would any
 future dead channel.
+
+**`channel_connected` must become total.** `VIBER` stays a legal
+`NotificationChannel` member (§0.2) but leaves `CHANNEL_ADDRESS_ATTR`, so
+`models.py:233`'s `CHANNEL_ADDRESS_ATTR[channel]` would raise `KeyError` for a
+value the type system still permits. Change it to:
+
+```python
+attr = CHANNEL_ADDRESS_ATTR.get(channel)
+return bool(attr and getattr(user, attr))
+```
+
+A channel with no address attribute is one we cannot address, so `False` is the
+correct answer, not a crash. This is a real behaviour change, not a test fix:
+without it, any future caller passing `VIBER` — including a deserialized
+historical log row — crashes.
 
 **Frontend**
 
@@ -116,10 +131,23 @@ enrollment path".
 
 ### 0.4 Verification
 
-- New test: the preference grid returns no VIBER rows for any user.
-- Existing notification tests pass with Viber cases removed.
-- `alembic upgrade head` then `downgrade -1` round-trips cleanly.
-- Manual: a pre-existing VIBER `notificationlog` row still reads without error.
+**Existing tests this PR breaks — must be updated, not just deleted:**
+
+| Test | Why it breaks | Change |
+|---|---|---|
+| `test_notification_policy.py:95` `test_channel_disconnected_by_default` | Asserts `channel_connected(user, VIBER) is False`; without the `.get()` change it raises `KeyError` | Keep the VIBER assertion — it is now the regression test for `channel_connected` being total |
+| `test_notifications.py:198` `test_grid_offers_every_channel_event_pair_to_a_fresh_user` | Builds `expected` from `for c in NotificationChannel`, which still includes VIBER | Build it from `CHANNEL_ADDRESS_ATTR` so it tracks the new source of truth |
+| `test_notify.py` (17 Viber refs) | `send_viber` no longer exists | Delete `test_send_viber_status_zero_success:496`, `test_send_viber_nonzero_status_permanent_no_retry:512`, `test_send_viber_unset_token_raises_permanent_no_call:743`, and VIBER arms of shared fan-out tests |
+| `frontend/tests/labels.spec.ts`, `notifications.spec.ts` | Assert on the Viber label / column | Remove those assertions |
+
+**New tests:**
+
+| Case | Guards |
+|---|---|
+| Preference grid returns no VIBER rows for any user or role | M2 fix, §0.3 |
+| `channel_connected(user, VIBER)` returns `False`, never raises | The partial-function gap |
+| A pre-existing VIBER `notificationlog` row still deserializes and reads | §0.2 — the reason the enum member stays |
+| `alembic upgrade head` → `downgrade -1` round-trips | `m038` drop-column safety |
 
 ---
 
@@ -298,11 +326,73 @@ the LINE card has no confirm-poll, no username display, and no
 
 ### 1.10 Verification
 
-**pytest** — valid signature; invalid signature; missing header; body-modified-
-before-verify regression; happy-path bind; expired code; already-consumed code;
-`userId` already bound to another user; non-message events ignored; 200 returned
-for ignored events; unset secret ⇒ 503; `unfollow` clears the binding; connect
-mints and reaps prior codes; the UNIQUE constraint rejects a duplicate bind.
+**pytest.** The Telegram suite (`test_telegram_connect.py`, 31 tests;
+`test_telegram_enrollment.py`, 5) is the coverage bar. LINE needs the same
+categories minus confirm/status/test-message, plus the webhook-specific cases
+Telegram never had.
+
+*Connect route* — mirrors `test_telegram_connect.py:58-193`
+
+| Case | Guards |
+|---|---|
+| Mints a code and a deep link of the documented shape, with the basic ID percent-encoded | The deep link is the whole enrollment entry point |
+| Code is 32 chars / 128 bits | §1.3 — the code is a bearer credential |
+| Code charset is safe both in a URL query string **and** as literal typed chat text | It travels through both |
+| Reaps this user's prior codes | Table stays bounded, no scheduler |
+| Does **not** reap another user's codes | Cross-user regression |
+| Rate limited per user; one user's limit does not block another | Confirms per-user, not per-IP keying (avoids review finding M1) |
+
+*Webhook — signature*
+
+| Case | Guards |
+|---|---|
+| Valid signature is accepted | |
+| Invalid signature ⇒ 400, no bind | The trust boundary |
+| Missing `x-line-signature` ⇒ 400 | |
+| Signature computed over the raw body, not a re-serialized dict | §1.5.1 — the documented common failure |
+| Unset `LINE_CHANNEL_SECRET` ⇒ 503, no parse | Fail closed |
+| The request body never reaches a log record | §1.5.7; mirrors `test_notify.py:360` |
+
+*Webhook — binding*
+
+| Case | Guards |
+|---|---|
+| Happy path binds `line_user_id` | |
+| A forged / random code binds nobody | §1.3 — the LINE analogue of Telegram's `test_confirm_cannot_be_completed_by_a_different_user`, which cannot exist here because there is no session |
+| Expired code does not bind | |
+| Already-consumed code does not bind (single use) | |
+| `userId` already bound to another POS user ⇒ no bind | Cross-feed prevention |
+| …and the code is **not** consumed in that case | User can unlink and retry within the TTL |
+| Two events in one POST are both processed | LINE batches `events[]` |
+| `isRedelivery` duplicate is harmless | §1.9 |
+| `source.type == "group"` is ignored — never binds a group id | §1.5.4 |
+| Non-message events (sticker, image, join) ignored, still 200 | §1.5.3 — non-200 disables the webhook |
+
+*Webhook — unfollow and reply*
+
+| Case | Guards |
+|---|---|
+| `unfollow` clears `line_user_id` for that user | §1.6, review finding H1 |
+| `unfollow` for an unknown `userId` is a no-op, still 200 | |
+| Reply is sent with the event's `replyToken` on success | §1.5.8 |
+| A failed reply does not roll back the bind | Reply is best-effort, like `notify()` |
+
+*Disconnect* — mirrors `test_telegram_connect.py:661-760`
+
+| Case | Guards |
+|---|---|
+| Clears `line_user_id` only; preferences and log rows survive | Audit retention |
+| Idempotent | |
+| Requires authentication | |
+| Does not affect another user | |
+
+*Model and integration* — mirrors `test_telegram_enrollment.py`
+
+| Case | Guards |
+|---|---|
+| `line_user_id` is unique across users | `uq_user_line_user_id` |
+| Multiple users may have a NULL `line_user_id` | The UNIQUE constraint must not block un-enrolled users |
+| After a bind, the preferences grid reports `channel_connected: true` for LINE rows | **Load-bearing** — with no `/line/status` endpoint (§1.4), this is the connect card's only status source |
 
 **Review stage** — this adds a public unauthenticated auth boundary, so per
 CLAUDE.md it is high-risk: run `ecc:security-reviewer` and `ecc:database-reviewer`
