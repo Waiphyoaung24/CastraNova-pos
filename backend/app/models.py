@@ -209,7 +209,6 @@ class User(UserBase, table=True):
     # Messaging platform recipient IDs (populated at deployment enrollment,
     # Task 5.4). Table-only — never exposed via the user API (UserBase/Public).
     line_user_id: str | None = Field(default=None, max_length=128)
-    viber_user_id: str | None = Field(default=None, max_length=128)
     telegram_chat_id: str | None = Field(default=None, max_length=64)
     # Display-only, captured alongside telegram_chat_id at connect time so a
     # stale binding is visible ("Connected as @username") rather than a bare,

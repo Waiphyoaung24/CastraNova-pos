@@ -73,7 +73,7 @@ class RetryableNotifyError(Exception):
 
 
 class PermanentNotifyError(Exception):
-    """A non-retryable send failure (HTTP 4xx or Viber status != 0)."""
+    """A non-retryable send failure (HTTP 4xx)."""
 
 
 def _post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:

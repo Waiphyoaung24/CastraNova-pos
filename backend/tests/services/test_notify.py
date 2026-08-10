@@ -81,7 +81,6 @@ def _make_user(
     *,
     role: UserRole = UserRole.BKK_ADMIN,
     line_user_id: str | None = "L-recipient",
-    viber_user_id: str | None = "V-recipient",
     telegram_chat_id: str | None | _Auto = _AUTO_CHAT_ID,
 ) -> User:
     from app import crud
@@ -96,7 +95,6 @@ def _make_user(
     if isinstance(telegram_chat_id, _Auto):
         telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
     user.line_user_id = line_user_id
-    user.viber_user_id = viber_user_id
     user.telegram_chat_id = telegram_chat_id
     db.add(user)
     db.commit()
@@ -1273,7 +1271,6 @@ def test_notify_sync_review_failed_send_starts_cooldown(
         role=UserRole.BKK_ADMIN,
         line_user_id=None,
         telegram_chat_id=None,
-        viber_user_id=None,
     )
     _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
 

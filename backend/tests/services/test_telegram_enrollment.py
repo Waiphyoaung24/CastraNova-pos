@@ -7,10 +7,20 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app import crud
-from app.models import TelegramConnectCode, User, UserCreate, get_datetime_utc
+from app.models import (
+    NotificationChannel,
+    NotificationEvent,
+    NotificationLog,
+    NotificationStatus,
+    TelegramConnectCode,
+    User,
+    UserCreate,
+    channel_connected,
+    get_datetime_utc,
+)
 from tests.utils.utils import random_email, random_lower_string
 
 
@@ -19,6 +29,31 @@ def _create_user(db: Session) -> User:
         session=db,
         user_create=UserCreate(email=random_email(), password=random_lower_string()),
     )
+
+
+def test_historical_viber_notification_log_still_reads(db: Session) -> None:
+    """VIBER stays in the enum precisely so pre-existing audit rows survive the
+    channel's removal. notificationlog is append-only (m021, BEFORE UPDATE OR
+    DELETE trigger), so these rows cannot be deleted and must stay readable."""
+    user = _create_user(db)
+    log = NotificationLog(
+        channel=NotificationChannel.VIBER,
+        event_type=NotificationEvent.PULL_FULFILLED,
+        target_user_id=user.id,
+        payload={"pull": "PRJ-2026-01"},
+        status=NotificationStatus.SENT,
+        attempts=1,
+    )
+    db.add(log)
+    db.commit()
+
+    fetched = db.exec(
+        select(NotificationLog).where(NotificationLog.id == log.id)
+    ).one()
+    assert fetched.channel is NotificationChannel.VIBER
+    # The channel has no address attribute any more; it must read as
+    # disconnected rather than raising.
+    assert channel_connected(user, fetched.channel) is False
 
 
 def test_telegram_chat_id_unique_across_users(db: Session) -> None:
