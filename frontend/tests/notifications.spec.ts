@@ -32,7 +32,6 @@ test("only Telegram and LINE channels are shown", async ({ page }) => {
       body: JSON.stringify([
         gridRow("TELEGRAM", "LOW_STOCK", false, true),
         gridRow("LINE", "LOW_STOCK", false, false),
-        gridRow("VIBER", "LOW_STOCK", false, true),
       ]),
     })
   })

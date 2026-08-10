@@ -70,7 +70,7 @@ const baseItems: Entry[] = [
       { icon: ClipboardList, title: "Pulls", path: "/pulls" },
     ],
   },
-  // Notification opt-in (LINE/Viber), per-user, both roles (FR-018).
+  // Notification opt-in (LINE/Telegram), per-user, both roles (FR-018).
   { icon: Bell, title: "Notifications", path: "/notifications" },
 ]
 
