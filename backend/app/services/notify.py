@@ -1,14 +1,13 @@
-"""Outbound LINE + Viber + Telegram push notifications (FR-018).
+"""Outbound LINE + Telegram push notifications (FR-018).
 
 Outbound only. Each channel send runs 4 attempts / 3 retries with exponential
 backoff (waits 1s, 5s, 25s) on transient failures (5xx / transport errors); 4xx
-and Viber ``status != 0`` are permanent and never retried. Telegram's 429
-(rate-limited) is the one 4xx treated as transient. ``notify`` is best-effort:
-it never raises to its caller — every send outcome (including failures and
-un-enrolled recipients) lands as one append-only ``notification_log`` row for
-weekly admin review.
+is permanent and never retried. Telegram's 429 (rate-limited) is the one 4xx
+treated as transient. ``notify`` is best-effort: it never raises to its caller
+— every send outcome (including failures and un-enrolled recipients) lands as
+one append-only ``notification_log`` row for weekly admin review.
 
-Tokens are read from settings and never logged. LINE and Viber send theirs in a
+Tokens are read from settings and never logged. LINE sends its token in a
 header; Telegram's bot token rides in the URL path instead, so the Telegram URL
 must never reach a log or an exception message.
 """
@@ -50,7 +49,6 @@ from app.models import (
 )
 
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
-VIBER_SEND_URL = "https://chatapi.viber.com/pa/send_message"
 # Telegram takes the bot token in the path, so the URL itself is a secret.
 TELEGRAM_SEND_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_GET_UPDATES_URL_TEMPLATE = "https://api.telegram.org/bot{token}/getUpdates"
@@ -109,29 +107,6 @@ def send_line(*, to: str, text: str) -> None:
     except httpx.TransportError as exc:
         raise RetryableNotifyError("transport error") from exc
     _classify(response)
-
-
-def send_viber(*, to: str, text: str) -> None:
-    """Push a text message via the Viber REST API (single raw attempt)."""
-    if not settings.VIBER_AUTH_TOKEN:
-        raise PermanentNotifyError("VIBER_TOKEN not configured")
-    try:
-        response = _post(
-            VIBER_SEND_URL,
-            headers={
-                "X-Viber-Auth-Token": settings.VIBER_AUTH_TOKEN,
-                "Content-Type": "application/json",
-            },
-            json={"receiver": to, "type": "text", "text": text},
-        )
-    except httpx.TransportError as exc:
-        raise RetryableNotifyError("transport error") from exc
-    _classify(response)
-    # Viber returns 200 with a body status code; an explicit non-zero status is a
-    # permanent failure. An absent key on a 200 is treated as success (status 0).
-    status = response.json().get("status", 0)
-    if status != 0:
-        raise PermanentNotifyError(f"viber status {status}")
 
 
 def send_telegram(*, to: str, text: str) -> None:
@@ -296,7 +271,6 @@ def parse_start_code(update: dict[str, Any]) -> tuple[str, str | None, str] | No
 # Map a channel to (send fn, address attribute on User).
 _CHANNELS: dict[NotificationChannel, tuple[Any, str]] = {
     NotificationChannel.LINE: (send_line, "line_user_id"),
-    NotificationChannel.VIBER: (send_viber, "viber_user_id"),
     NotificationChannel.TELEGRAM: (send_telegram, "telegram_chat_id"),
 }
 
