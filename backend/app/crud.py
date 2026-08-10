@@ -20,6 +20,7 @@ from app.core.state_machine import (
     assert_unit_transition,
 )
 from app.models import (
+    CHANNEL_ADDRESS_ATTR,
     AdjustmentTarget,
     AuditEntryPublic,
     BatchDrillRow,
@@ -3804,8 +3805,11 @@ def list_notification_preferences(
     }
     allowed = eligible_events(user)
     grid: list[NotificationPreferencePublic] = []
-    # Stable ordering so the UI grid doesn't reshuffle between fetches.
-    for channel in NotificationChannel:
+    # Stable ordering so the UI grid doesn't reshuffle between fetches. Keyed
+    # off CHANNEL_ADDRESS_ATTR, not the enum: a channel with no address
+    # attribute cannot be delivered to, so offering its checkbox would promise
+    # a send that never happens.
+    for channel in CHANNEL_ADDRESS_ATTR:
         connected = channel_connected(user, channel)
         for event in NotificationEvent:
             if event not in allowed:

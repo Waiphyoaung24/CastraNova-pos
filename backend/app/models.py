@@ -123,6 +123,10 @@ class SyncReviewState(str, enum.Enum):
 
 class NotificationChannel(str, enum.Enum):
     LINE = "LINE"
+    # Historical only -- no sender, no address attribute, never offered in the
+    # preference grid. Retained because Postgres cannot remove a value from a
+    # native enum type and existing notificationlog rows still carry it; that
+    # table is append-only (m021), so those rows cannot be deleted either.
     VIBER = "VIBER"
     TELEGRAM = "TELEGRAM"
 
@@ -218,10 +222,12 @@ class User(UserBase, table=True):
 
 
 # Mirrors the address-attribute mapping baked into services/notify.py's
-# _CHANNELS -- keep both in sync if a channel is ever added.
+# _CHANNELS -- keep both in sync if a channel is ever added. This dict is the
+# single source of truth for "channels we can actually address": the preference
+# grid is built from its keys, so a channel absent here is invisible to the API
+# and the UI.
 CHANNEL_ADDRESS_ATTR: dict[NotificationChannel, str] = {
     NotificationChannel.LINE: "line_user_id",
-    NotificationChannel.VIBER: "viber_user_id",
     NotificationChannel.TELEGRAM: "telegram_chat_id",
 }
 
@@ -229,8 +235,14 @@ CHANNEL_ADDRESS_ATTR: dict[NotificationChannel, str] = {
 def channel_connected(user: User, channel: NotificationChannel) -> bool:
     """Whether `user` has an address configured for `channel`, independent of
     any event opt-in -- a preference row is meaningless to enable if notify()
-    has no address to send to."""
-    return bool(getattr(user, CHANNEL_ADDRESS_ATTR[channel]))
+    has no address to send to.
+
+    Total over NotificationChannel on purpose: VIBER is still a legal member
+    (historical notificationlog rows carry it) but has no address attribute,
+    and a channel we cannot address is by definition not connected.
+    """
+    attr = CHANNEL_ADDRESS_ATTR.get(channel)
+    return bool(attr and getattr(user, attr))
 
 
 def eligible_events(user: User) -> set[NotificationEvent]:

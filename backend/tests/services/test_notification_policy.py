@@ -105,6 +105,16 @@ def test_channel_connected_when_address_set() -> None:
     assert channel_connected(user, NotificationChannel.LINE) is False
 
 
+def test_channel_connected_is_total_over_the_enum() -> None:
+    """VIBER remains a legal enum member (historical notificationlog rows carry
+    it) but has no address attribute. channel_connected must answer False for
+    every member, never raise -- a channel we cannot address is by definition
+    not connected."""
+    user = _user(UserRole.YGN_STAFF)
+    for channel in NotificationChannel:
+        assert channel_connected(user, channel) is False
+
+
 def test_channel_connected_treats_blank_string_as_disconnected() -> None:
     user = _user(UserRole.YGN_STAFF)
     user.line_user_id = ""
