@@ -1,4 +1,4 @@
-"""Service tests for LINE + Viber + Telegram push notifications (FR-018, Task 2.7).
+"""Service tests for LINE + Telegram push notifications (FR-018, Task 2.7).
 
 The single network seam ``app.services.notify._post`` is monkeypatched so no
 real HTTP happens; tenacity's sleep is stubbed so retry tests run instantly.
@@ -17,6 +17,7 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.models import (
+    CHANNEL_ADDRESS_ATTR,
     NotificationChannel,
     NotificationEvent,
     NotificationLog,
@@ -30,7 +31,6 @@ from app.services import notify
 from tests.utils.utils import assert_no_financial_keys
 
 LINE_TOKEN = "line-secret-token-xyz"
-VIBER_TOKEN = "viber-secret-token-xyz"
 TELEGRAM_TOKEN = "telegram-secret-token-xyz"
 
 
@@ -42,7 +42,6 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "LINE_CHANNEL_ACCESS_TOKEN", LINE_TOKEN)
-    monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", VIBER_TOKEN)
     monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", TELEGRAM_TOKEN)
 
 
@@ -75,14 +74,16 @@ class _Auto:
 
 
 _AUTO_CHAT_ID = _Auto()
+# line_user_id became UNIQUE in m039, exactly like telegram_chat_id in m031,
+# so a shared default literal now collides across users.
+_AUTO_LINE_ID = _Auto()
 
 
 def _make_user(
     db: Session,
     *,
     role: UserRole = UserRole.BKK_ADMIN,
-    line_user_id: str | None = "L-recipient",
-    viber_user_id: str | None = "V-recipient",
+    line_user_id: str | None | _Auto = _AUTO_LINE_ID,
     telegram_chat_id: str | None | _Auto = _AUTO_CHAT_ID,
 ) -> User:
     from app import crud
@@ -96,8 +97,9 @@ def _make_user(
     )
     if isinstance(telegram_chat_id, _Auto):
         telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    if isinstance(line_user_id, _Auto):
+        line_user_id = f"L-{uuid.uuid4().hex[:10]}"
     user.line_user_id = line_user_id
-    user.viber_user_id = viber_user_id
     user.telegram_chat_id = telegram_chat_id
     db.add(user)
     db.commit()
@@ -493,38 +495,12 @@ def test_parse_start_code_ignores_unrelated_messages(update: dict[str, Any]) -> 
     assert notify.parse_start_code(update) is None
 
 
-def test_send_viber_status_zero_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-
-    def fake_post(
-        url: str, *, headers: dict[str, str], json: dict[str, Any]
-    ) -> httpx.Response:
-        calls.append({"url": url, "headers": headers, "json": json})
-        return _resp(200, {"status": 0})
-
-    monkeypatch.setattr(notify, "_post", fake_post)
-    notify.send_viber(to="V-abc", text="hello")
-    assert len(calls) == 1
-    assert calls[0]["headers"]["X-Viber-Auth-Token"] == VIBER_TOKEN
-    assert calls[0]["json"] == {"receiver": "V-abc", "type": "text", "text": "hello"}
-
-
-def test_send_viber_nonzero_status_permanent_no_retry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attempts = {"n": 0}
-
-    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
-        attempts["n"] += 1
-        return _resp(200, {"status": 3, "status_message": "bad"})
-
-    monkeypatch.setattr(notify, "_post", fake_post)
-    with pytest.raises(notify.PermanentNotifyError):
-        notify.send_viber(to="V-abc", text="hello")
-    assert attempts["n"] == 1
-
-
-# --- orchestrator: notify() ---------------------------------------------------
+def test_notify_fans_out_only_to_addressable_channels() -> None:
+    """_CHANNELS must match CHANNEL_ADDRESS_ATTR: a channel in one but not the
+    other either sends to an address the grid never offered, or is offered a
+    checkbox that can never deliver."""
+    assert set(notify._CHANNELS) == set(CHANNEL_ADDRESS_ATTR)
+    assert NotificationChannel.VIBER not in notify._CHANNELS
 
 
 def test_notify_line_success_one_sent_log(
@@ -587,7 +563,7 @@ def test_notify_opt_out_no_send_no_log(
     sent: list[Any] = []
     monkeypatch.setattr(notify, "_post", _recording_post(sent))
     user = _make_user(db)
-    # explicit disabled LINE pref + no VIBER pref at all
+    # explicit disabled LINE pref + no TELEGRAM pref at all
     _opt_in(
         db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT, enabled=False
     )
@@ -631,7 +607,7 @@ def test_notify_one_log_per_attempted_recipient_channel(
     monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200, {"status": 0}))
     user = _make_user(db)
     _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
-    _opt_in(db, user, NotificationChannel.VIBER, NotificationEvent.PULL_SHORT)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
 
     logs = notify.notify(
         session=db,
@@ -640,7 +616,7 @@ def test_notify_one_log_per_attempted_recipient_channel(
         payload={},
     )
     channels = sorted(log.channel.value for log in logs)
-    assert channels == ["LINE", "VIBER"]
+    assert channels == ["LINE", "TELEGRAM"]
     assert all(log.status == NotificationStatus.SENT for log in logs)
 
 
@@ -738,17 +714,6 @@ def test_send_line_unset_token_raises_permanent_no_call(
     with pytest.raises(notify.PermanentNotifyError):
         notify.send_line(to="L-abc", text="hi")
     assert sent == []  # fail-fast: no outbound call
-
-
-def test_send_viber_unset_token_raises_permanent_no_call(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sent: list[Any] = []
-    monkeypatch.setattr(notify, "_post", _recording_post(sent))
-    monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", None)
-    with pytest.raises(notify.PermanentNotifyError):
-        notify.send_viber(to="V-abc", text="hi")
-    assert sent == []
 
 
 def test_send_telegram_unset_token_raises_permanent_no_call(
@@ -1311,7 +1276,6 @@ def test_notify_sync_review_failed_send_starts_cooldown(
         role=UserRole.BKK_ADMIN,
         line_user_id=None,
         telegram_chat_id=None,
-        viber_user_id=None,
     )
     _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
 

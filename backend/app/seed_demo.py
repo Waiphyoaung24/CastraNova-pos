@@ -550,14 +550,6 @@ def seed(s: Session) -> None:
             attempts=3,
             last_error="LINE API timeout",
         ),
-        NotificationLog(
-            channel=NotificationChannel.VIBER,
-            event_type=NotificationEvent.PULL_FULFILLED,
-            target_user_id=users[0].id,
-            payload={"pull": "PRJ-2026-01"},
-            status=NotificationStatus.SENT,
-            attempts=1,
-        ),
     ]
     for lg in logs:
         s.add(lg)

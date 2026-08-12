@@ -32,7 +32,6 @@ test("only Telegram and LINE channels are shown", async ({ page }) => {
       body: JSON.stringify([
         gridRow("TELEGRAM", "LOW_STOCK", false, true),
         gridRow("LINE", "LOW_STOCK", false, false),
-        gridRow("VIBER", "LOW_STOCK", false, true),
       ]),
     })
   })
@@ -282,7 +281,11 @@ test("connected state can disconnect and refreshes the card", async ({
   await page.getByRole("button", { name: "Disconnect" }).click()
 
   await expect(page.getByText("Telegram disconnected.")).toBeVisible()
-  await expect(page.getByText("Not connected.")).toBeVisible()
+  // Scoped to the Telegram card: the LINE card on the same page renders the
+  // same "Not connected." copy, so a page-wide locator is ambiguous.
+  await expect(
+    page.getByTestId("telegram-connect-card").getByText("Not connected."),
+  ).toBeVisible()
   expect(disconnectCalls).toBe(1)
 })
 

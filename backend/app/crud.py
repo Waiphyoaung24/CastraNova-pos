@@ -9,7 +9,7 @@ from typing import Any, Literal, TypeVar, cast
 from fastapi import HTTPException
 from sqlalchemy import ColumnElement, Select, case, func, or_
 from sqlalchemy import select as sa_select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, SQLModel, col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -20,6 +20,7 @@ from app.core.state_machine import (
     assert_unit_transition,
 )
 from app.models import (
+    CHANNEL_ADDRESS_ATTR,
     AdjustmentTarget,
     AuditEntryPublic,
     BatchDrillRow,
@@ -32,6 +33,8 @@ from app.models import (
     CustomerUpdate,
     HoldingPeriodReport,
     HoldingPeriodRow,
+    LineConfirmOutcome,
+    LineConnectCode,
     LineState,
     Location,
     LowStockItemPublic,
@@ -3804,8 +3807,11 @@ def list_notification_preferences(
     }
     allowed = eligible_events(user)
     grid: list[NotificationPreferencePublic] = []
-    # Stable ordering so the UI grid doesn't reshuffle between fetches.
-    for channel in NotificationChannel:
+    # Stable ordering so the UI grid doesn't reshuffle between fetches. Keyed
+    # off CHANNEL_ADDRESS_ATTR, not the enum: a channel with no address
+    # attribute cannot be delivered to, so offering its checkbox would promise
+    # a send that never happens.
+    for channel in CHANNEL_ADDRESS_ATTR:
         connected = channel_connected(user, channel)
         for event in NotificationEvent:
             if event not in allowed:
@@ -3980,6 +3986,149 @@ def confirm_telegram_connect_code(
 def disconnect_telegram(*, session: Session, user: User) -> None:
     user.telegram_chat_id = None
     user.telegram_username = None
+    session.add(user)
+    session.commit()
+
+
+def create_line_connect_code(
+    *, session: Session, user_id: uuid.UUID
+) -> LineConnectCode:
+    """Mint a one-time, ~10-minute code for the LINE connect deep link.
+
+    See LineConnectCode's docstring: the LINE webhook has no session, so this
+    code alone is the identity. token_hex gives 32 lowercase hex characters --
+    128 bits of entropy and exactly the code column's max_length=32.
+
+    Hex is the right charset here for a reason the Telegram version doesn't
+    face: this code travels through a URL query string AND is typed into a
+    chat message as literal text. [0-9a-f] is unambiguous in both. Do NOT
+    switch to token_urlsafe or base64 -- '-', '_', '+', '/' and '=' invite
+    either URL-encoding surprises or chat-client autoformatting.
+
+    Mirrors create_telegram_connect_code, including the FOR UPDATE lock and
+    the same-transaction reap.
+    """
+    # Serialize concurrent mints for the same user on their User row: without
+    # this, two overlapping connects can each miss the other's not-yet-visible
+    # code and leave two live rows. Locking the parent (not the code rows)
+    # covers the no-prior-rows case, where there is nothing else to lock.
+    session.exec(select(User).where(User.id == user_id).with_for_update()).one()
+    # Reap this user's prior codes in the same transaction, so the table stays
+    # bounded at ~1 row per user who has ever connected without introducing a
+    # scheduler (the stack has none). A superseded code was already unusable
+    # the moment this call minted a fresh one.
+    for stale in session.exec(
+        select(LineConnectCode).where(LineConnectCode.user_id == user_id)
+    ).all():
+        session.delete(stale)
+
+    record = LineConnectCode(
+        user_id=user_id,
+        code=secrets.token_hex(16),
+        expires_at=get_datetime_utc() + timedelta(minutes=10),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def confirm_line_connect_code(
+    *, session: Session, code: str, line_user_id: str
+) -> LineConfirmOutcome:
+    """Validate and atomically consume a pending connect code, binding
+    `line_user_id` to the user who minted it.
+
+    Takes NO `user` argument, unlike confirm_telegram_connect_code. That is
+    not an oversight -- it is the whole security model. The LINE webhook is
+    unauthenticated, so there is no current_user to filter on; the code is
+    looked up by value alone and whoever presents it gets bound to its owner.
+    Everything protecting this reduces to the code's 128 bits, its single use,
+    and its 10-minute TTL.
+
+    FOR UPDATE makes the consumed_at check-then-set atomic against a racing
+    second delivery of the same code -- LINE retries webhooks, so this race is
+    routine, not theoretical.
+
+    Returns PENDING for anything the caller should silently ignore (no such
+    code, expired, already consumed, orphaned owner) and USER_ALREADY_LINKED
+    for the one case worth an in-chat explanation.
+    """
+    record = session.exec(
+        select(LineConnectCode)
+        .where(LineConnectCode.code == code)
+        .with_for_update()
+    ).first()
+    if record is None or record.consumed_at is not None:
+        return LineConfirmOutcome.PENDING
+    if record.expires_at < get_datetime_utc():
+        return LineConfirmOutcome.PENDING
+
+    user = session.exec(select(User).where(User.id == record.user_id)).first()
+    if user is None:
+        return LineConfirmOutcome.PENDING
+
+    # Checked up front for a clear answer in the common case; the
+    # IntegrityError below still backstops a racing bind between here and
+    # commit. Deliberately does NOT consume the code -- the user can unlink
+    # the other account and retry within the TTL.
+    incumbent = session.exec(
+        select(User).where(
+            User.line_user_id == line_user_id, User.id != user.id
+        )
+    ).first()
+    if incumbent is not None:
+        return LineConfirmOutcome.USER_ALREADY_LINKED
+
+    record.consumed_at = get_datetime_utc()
+    session.add(record)
+    user.line_user_id = line_user_id
+    session.add(user)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Lost the race: someone bound this LINE account between the check
+        # above and the commit. The rollback also discards consumed_at, so the
+        # code stays usable if the winner later unlinks.
+        session.rollback()
+        return LineConfirmOutcome.USER_ALREADY_LINKED
+    except OperationalError:
+        # Deadlock victim. This function locks the code row and then updates
+        # the User row; create_line_connect_code locks the User row and then
+        # deletes that user's code rows. Opposite order, so a user re-tapping
+        # Connect while a delayed webhook confirms the superseded code is a
+        # genuine circular wait, and Postgres kills one side.
+        #
+        # PENDING, not an exception: the caller is the unauthenticated webhook,
+        # which must return 200 or LINE eventually disables it. A deadlock is
+        # exactly the transient case LINE's own redelivery resolves, and the
+        # rollback leaves the code unconsumed so the retry can succeed.
+        session.rollback()
+        return LineConfirmOutcome.PENDING
+    return LineConfirmOutcome.CONNECTED
+
+
+def disconnect_line(*, session: Session, user: User) -> None:
+    """Clear the binding only. Preferences and notificationlog rows survive --
+    the log is append-only and the preferences are the user's settings, not a
+    property of the binding."""
+    user.line_user_id = None
+    session.add(user)
+    session.commit()
+
+
+def clear_line_user(*, session: Session, line_user_id: str) -> None:
+    """Unbind by LINE user id rather than by POS user -- the caller is the
+    `unfollow` webhook branch, which knows only the LINE side.
+
+    A no-op for an unknown id: unfollow fires for people who never connected.
+    """
+    user = session.exec(
+        select(User).where(User.line_user_id == line_user_id)
+    ).first()
+    if user is None:
+        return
+    user.line_user_id = None
     session.add(user)
     session.commit()
 

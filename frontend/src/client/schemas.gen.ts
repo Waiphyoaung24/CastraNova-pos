@@ -743,6 +743,31 @@ export const HoldingPeriodRowSchema = {
     title: 'HoldingPeriodRow'
 } as const;
 
+export const LineConnectResponseSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        deep_link: {
+            type: 'string',
+            title: 'Deep Link'
+        },
+        qr_code_data_uri: {
+            type: 'string',
+            title: 'Qr Code Data Uri'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        }
+    },
+    type: 'object',
+    required: ['code', 'deep_link', 'qr_code_data_uri', 'expires_at'],
+    title: 'LineConnectResponse'
+} as const;
+
 export const LineStateSchema = {
     type: 'string',
     enum: ['PENDING', 'FULFILLED', 'SHORT', 'CANCELLED'],

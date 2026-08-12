@@ -1,18 +1,20 @@
-"""Outbound LINE + Viber + Telegram push notifications (FR-018).
+"""Outbound LINE + Telegram push notifications (FR-018).
 
 Outbound only. Each channel send runs 4 attempts / 3 retries with exponential
 backoff (waits 1s, 5s, 25s) on transient failures (5xx / transport errors); 4xx
-and Viber ``status != 0`` are permanent and never retried. Telegram's 429
-(rate-limited) is the one 4xx treated as transient. ``notify`` is best-effort:
-it never raises to its caller — every send outcome (including failures and
-un-enrolled recipients) lands as one append-only ``notification_log`` row for
-weekly admin review.
+is permanent and never retried. Telegram's 429 (rate-limited) is the one 4xx
+treated as transient. ``notify`` is best-effort: it never raises to its caller
+— every send outcome (including failures and un-enrolled recipients) lands as
+one append-only ``notification_log`` row for weekly admin review.
 
-Tokens are read from settings and never logged. LINE and Viber send theirs in a
+Tokens are read from settings and never logged. LINE sends its token in a
 header; Telegram's bot token rides in the URL path instead, so the Telegram URL
 must never reach a log or an exception message.
 """
 
+import base64
+import hashlib
+import hmac
 import logging
 import threading
 import time
@@ -50,7 +52,7 @@ from app.models import (
 )
 
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
-VIBER_SEND_URL = "https://chatapi.viber.com/pa/send_message"
+LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 # Telegram takes the bot token in the path, so the URL itself is a secret.
 TELEGRAM_SEND_URL_TEMPLATE = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_GET_UPDATES_URL_TEMPLATE = "https://api.telegram.org/bot{token}/getUpdates"
@@ -75,7 +77,7 @@ class RetryableNotifyError(Exception):
 
 
 class PermanentNotifyError(Exception):
-    """A non-retryable send failure (HTTP 4xx or Viber status != 0)."""
+    """A non-retryable send failure (HTTP 4xx)."""
 
 
 def _post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
@@ -111,27 +113,59 @@ def send_line(*, to: str, text: str) -> None:
     _classify(response)
 
 
-def send_viber(*, to: str, text: str) -> None:
-    """Push a text message via the Viber REST API (single raw attempt)."""
-    if not settings.VIBER_AUTH_TOKEN:
-        raise PermanentNotifyError("VIBER_TOKEN not configured")
+def verify_line_signature(*, body: bytes, signature: str | None) -> bool:
+    """Whether `signature` is LINE's HMAC over exactly these body bytes.
+
+    This is the LINE webhook's only trust boundary -- the endpoint is public
+    and unauthenticated, so everything downstream trusts this returning True.
+
+    `body` MUST be the raw request bytes, read before any JSON parsing.
+    Parsing and re-serializing changes the byte string (escape characters, key
+    order, whitespace) and the HMAC will not match. LINE's own docs call this
+    out as the most common implementation error, specifically for Python.
+
+    Fails closed on an unset secret or a missing header. compare_digest so a
+    wrong signature costs the same time as a right one.
+    """
+    if not settings.LINE_CHANNEL_SECRET or not signature:
+        return False
+    expected = base64.b64encode(
+        hmac.new(
+            settings.LINE_CHANNEL_SECRET.encode("utf-8"), body, hashlib.sha256
+        ).digest()
+    ).decode("ascii")
+    return hmac.compare_digest(expected, signature)
+
+
+def send_line_reply(*, reply_token: str, text: str) -> None:
+    """Reply in-chat to a LINE webhook event (single raw attempt).
+
+    Replies are excluded from the subscription plan's message quota -- only
+    push, multicast, broadcast and narrowcast are billed -- so confirming a
+    connect in-chat is free. It matters because at that moment the user is
+    looking at their phone, not necessarily at the browser that started the
+    flow.
+
+    A reply token is single-use and short-lived, so there is no point retrying
+    a failed reply later; the caller treats this as best-effort.
+    """
+    if not settings.LINE_CHANNEL_ACCESS_TOKEN:
+        raise PermanentNotifyError("LINE_TOKEN not configured")
     try:
         response = _post(
-            VIBER_SEND_URL,
+            LINE_REPLY_URL,
             headers={
-                "X-Viber-Auth-Token": settings.VIBER_AUTH_TOKEN,
+                "Authorization": f"Bearer {settings.LINE_CHANNEL_ACCESS_TOKEN}",
                 "Content-Type": "application/json",
             },
-            json={"receiver": to, "type": "text", "text": text},
+            json={
+                "replyToken": reply_token,
+                "messages": [{"type": "text", "text": text}],
+            },
         )
     except httpx.TransportError as exc:
         raise RetryableNotifyError("transport error") from exc
     _classify(response)
-    # Viber returns 200 with a body status code; an explicit non-zero status is a
-    # permanent failure. An absent key on a 200 is treated as success (status 0).
-    status = response.json().get("status", 0)
-    if status != 0:
-        raise PermanentNotifyError(f"viber status {status}")
 
 
 def send_telegram(*, to: str, text: str) -> None:
@@ -296,7 +330,6 @@ def parse_start_code(update: dict[str, Any]) -> tuple[str, str | None, str] | No
 # Map a channel to (send fn, address attribute on User).
 _CHANNELS: dict[NotificationChannel, tuple[Any, str]] = {
     NotificationChannel.LINE: (send_line, "line_user_id"),
-    NotificationChannel.VIBER: (send_viber, "viber_user_id"),
     NotificationChannel.TELEGRAM: (send_telegram, "telegram_chat_id"),
 }
 

@@ -133,7 +133,6 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "LINE_CHANNEL_ACCESS_TOKEN", "line-token")
-    monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", "viber-token")
 
 
 def _opt_in_admin(db: Session) -> User:
@@ -146,7 +145,7 @@ def _opt_in_admin(db: Session) -> User:
             role=UserRole.BKK_ADMIN,
         ),
     )
-    admin.line_user_id = "L-admin"
+    admin.line_user_id = f"L-admin-{uuid.uuid4().hex[:10]}"
     db.add(admin)
     db.add(
         NotificationPreference(

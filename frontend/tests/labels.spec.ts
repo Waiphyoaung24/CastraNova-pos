@@ -31,9 +31,12 @@ test("unitStatusLabel humanizes an unknown state instead of showing raw enum", (
   expect(unitStatusLabel("SOME_NEW_STATE")).toBe("Some new state")
 })
 
-test("channelLabel keeps LINE, names Viber and Telegram, and passes through unknowns", () => {
+test("channelLabel keeps LINE, names Telegram, and passes through unknowns", () => {
   expect(channelLabel("LINE")).toBe("LINE")
-  expect(channelLabel("VIBER")).toBe("Viber")
   expect(channelLabel("TELEGRAM")).toBe("Telegram")
+  // VIBER survives in the enum for historical notification log rows but has
+  // no sender and never renders in the grid, so it has no friendly name --
+  // it must fall through like any unknown channel rather than throw.
+  expect(channelLabel("VIBER")).toBe("VIBER")
   expect(channelLabel("SMS")).toBe("SMS")
 })

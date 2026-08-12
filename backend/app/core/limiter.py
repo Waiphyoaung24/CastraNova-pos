@@ -45,3 +45,9 @@ def user_or_remote_address(request: Request) -> str:
 # Telegram traffic is the TTL cache in services/notify.py.
 TELEGRAM_CONNECT_RATE_LIMIT = "20/hour"  # a deliberate tap that renders a QR PNG
 TELEGRAM_CONFIRM_RATE_LIMIT = "60/minute"  # 3x the client's 20/min poll rate
+
+# Same shape as TELEGRAM_CONNECT_RATE_LIMIT: a deliberate tap that renders a QR
+# PNG. LINE has no confirm endpoint -- the card polls the preference grid it was
+# going to refetch anyway -- so there is no confirm limit to match. The LINE
+# webhook itself is deliberately unlimited; see its docstring.
+LINE_CONNECT_RATE_LIMIT = "20/hour"
