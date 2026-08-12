@@ -34,7 +34,7 @@ def user_and_headers(client: TestClient, db: Session) -> tuple[User, dict[str, s
     return user, headers
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def line_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "LINE_BOT_BASIC_ID", BASIC_ID)
     monkeypatch.setattr(settings, "LINE_CHANNEL_SECRET", "secret")
@@ -46,7 +46,6 @@ def line_configured(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_connect_mints_a_code_and_deep_link(
     client: TestClient,
-    line_configured: None,
     user_and_headers: tuple[User, dict[str, str]],
 ) -> None:
     _user, headers = user_and_headers
@@ -62,7 +61,6 @@ def test_connect_mints_a_code_and_deep_link(
 
 def test_deep_link_percent_encodes_the_basic_id(
     client: TestClient,
-    line_configured: None,
     user_and_headers: tuple[User, dict[str, str]],
 ) -> None:
     # An unencoded '@' still works but LINE deprecates it. The deep link is
@@ -91,7 +89,7 @@ def test_connect_without_configuration_is_a_400(
 
 
 def test_connect_requires_authentication(
-    client: TestClient, line_configured: None
+    client: TestClient
 ) -> None:
     r = client.post(f"{PREFIX}/notifications/line/connect")
     assert r.status_code == 401
@@ -100,7 +98,6 @@ def test_connect_requires_authentication(
 def test_connect_reaps_only_this_users_codes(
     client: TestClient,
     db: Session,
-    line_configured: None,
     user_and_headers: tuple[User, dict[str, str]],
 ) -> None:
     user, headers = user_and_headers
@@ -125,7 +122,6 @@ def test_connect_reaps_only_this_users_codes(
 
 def test_connect_is_rate_limited_per_user(
     client: TestClient,
-    line_configured: None,
     user_and_headers: tuple[User, dict[str, str]],
 ) -> None:
     _user, headers = user_and_headers
@@ -149,7 +145,6 @@ def test_connect_is_rate_limited_per_user(
 def test_one_users_limit_does_not_block_another_user(
     client: TestClient,
     db: Session,
-    line_configured: None,
     user_and_headers: tuple[User, dict[str, str]],
 ) -> None:
     """The half that actually proves per-user keying. Both users share a

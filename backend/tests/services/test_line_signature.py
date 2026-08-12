@@ -26,7 +26,7 @@ def _sign(body: bytes, secret: str = SECRET) -> str:
     ).decode("ascii")
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def line_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "LINE_CHANNEL_SECRET", SECRET)
 
@@ -39,22 +39,22 @@ def test_line_settings_exist_and_default_to_none() -> None:
     assert hasattr(settings, "LINE_CHANNEL_ACCESS_TOKEN")
 
 
-def test_valid_signature_is_accepted(line_secret: None) -> None:
+def test_valid_signature_is_accepted() -> None:
     body = b'{"destination":"U123","events":[]}'
     assert notify.verify_line_signature(body=body, signature=_sign(body)) is True
 
 
-def test_signature_from_a_different_secret_is_rejected(line_secret: None) -> None:
+def test_signature_from_a_different_secret_is_rejected() -> None:
     body = b'{"destination":"U123","events":[]}'
     forged = _sign(body, secret="not-the-secret")
     assert notify.verify_line_signature(body=body, signature=forged) is False
 
 
-def test_missing_signature_is_rejected(line_secret: None) -> None:
+def test_missing_signature_is_rejected() -> None:
     assert notify.verify_line_signature(body=b"{}", signature=None) is False
 
 
-def test_tampered_body_is_rejected(line_secret: None) -> None:
+def test_tampered_body_is_rejected() -> None:
     signature = _sign(b'{"events":[]}')
     assert (
         notify.verify_line_signature(body=b'{"events":[1]}', signature=signature)
@@ -70,7 +70,6 @@ def test_unset_secret_rejects_everything(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_signature_covers_raw_bytes_including_escape_characters(
-    line_secret: None,
 ) -> None:
     # LINE's docs flag this specifically for Python: a body containing \n
     # survives verbatim only if hashed as raw bytes. Parsing and re-serializing

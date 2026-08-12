@@ -22,8 +22,6 @@ from app.core.state_machine import (
 from app.models import (
     CHANNEL_ADDRESS_ATTR,
     AdjustmentTarget,
-    LineConfirmOutcome,
-    LineConnectCode,
     AuditEntryPublic,
     BatchDrillRow,
     Channel,
@@ -35,6 +33,8 @@ from app.models import (
     CustomerUpdate,
     HoldingPeriodReport,
     HoldingPeriodRow,
+    LineConfirmOutcome,
+    LineConnectCode,
     LineState,
     Location,
     LowStockItemPublic,

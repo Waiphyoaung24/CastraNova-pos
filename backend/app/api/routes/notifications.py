@@ -229,3 +229,104 @@ def connect_line(
 def disconnect_line(*, session: SessionDep, current_user: CurrentUser) -> Message:
     crud.disconnect_line(session=session, user=current_user)
     return Message(message="LINE disconnected")
+
+
+def _handle_line_event(*, session: Session, event: dict[str, Any]) -> None:
+    """Process one LINE webhook event. Never raises: the caller must return
+    200 even for events it ignores.
+
+    Binds only on a text message from an individual user. A group or room
+    source is ignored outright -- binding a group id would deliver a user's
+    stock and pricing alerts into a group chat.
+    """
+    source = event.get("source") or {}
+    line_user_id = source.get("userId")
+    if source.get("type") != "user" or not line_user_id:
+        return
+
+    if event.get("type") == "unfollow":
+        # The user blocked or removed the Official Account, so send_line can
+        # no longer reach them -- but LINE returns 200 for pushes to a blocked
+        # recipient, so nothing else would ever notice.
+        crud.clear_line_user(session=session, line_user_id=line_user_id)
+        return
+
+    if event.get("type") != "message":
+        return
+    message = event.get("message") or {}
+    if message.get("type") != "text":
+        return
+
+    code = (message.get("text") or "").strip()
+    outcome = crud.confirm_line_connect_code(
+        session=session, code=code, line_user_id=line_user_id
+    )
+
+    reply_token = event.get("replyToken")
+    if not reply_token:
+        return
+    if outcome is LineConfirmOutcome.CONNECTED:
+        text = "✅ CastraNova POS\nYour LINE account is now connected."
+    elif outcome is LineConfirmOutcome.USER_ALREADY_LINKED:
+        text = (
+            "This LINE account is already connected to another CastraNova "
+            "user. Disconnect it there first, then try again."
+        )
+    else:
+        # PENDING: someone messaged the Official Account without a live code.
+        # Staying silent is deliberate -- replying "invalid code" to arbitrary
+        # text would confirm to a guesser that codes exist to be guessed.
+        return
+
+    try:
+        notify.send_line_reply(reply_token=reply_token, text=text)
+    except (notify.RetryableNotifyError, notify.PermanentNotifyError):
+        # Best-effort, exactly like notify(): the bind already committed and
+        # must not be rolled back because a courtesy message failed. Reply
+        # tokens are single-use and short-lived, so there is nothing to retry.
+        pass
+
+
+@router.post("/line/webhook", response_model=Message)
+async def line_webhook(*, request: Request, session: SessionDep) -> Message:
+    """Receive LINE Messaging API events. Public and unauthenticated.
+
+    The signature is the only gate, and deliberately the only gate: there is
+    no rate limiter here because LINE posts from shared, rotating IPs, so an
+    IP-keyed cap would drop legitimate events.
+
+    Async purely to read the raw body -- the handler itself is sync DB work.
+    """
+    if not settings.LINE_CHANNEL_SECRET:
+        raise HTTPException(status_code=503, detail="LINE is not configured")
+
+    # Raw bytes, before any parsing. Verifying a re-serialized dict breaks the
+    # HMAC -- this ordering is the whole point.
+    body = await request.body()
+    if not notify.verify_line_signature(
+        body=body, signature=request.headers.get("x-line-signature")
+    ):
+        raise HTTPException(status_code=400, detail="invalid signature")
+
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid body") from None
+
+    events = payload.get("events") if isinstance(payload, dict) else None
+    if isinstance(events, list):
+        for event in events:
+            if isinstance(event, dict):
+                # This route must be async to await the raw body, but the
+                # handler is blocking DB work. Calling it directly would stall
+                # the event loop for every other request in flight; every
+                # other route in this file is sync and gets a worker thread
+                # from FastAPI automatically. Sequential, not concurrent: two
+                # events in one POST share a Session, which is not thread-safe.
+                await run_in_threadpool(
+                    _handle_line_event, session=session, event=event
+                )
+
+    # Always 200 past the signature gate, including for ignored events: a
+    # non-200 makes LINE retry and eventually disable the webhook.
+    return Message(message="ok")
