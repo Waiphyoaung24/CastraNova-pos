@@ -134,7 +134,10 @@ export function TelegramConnectCard() {
   const connectData = connectMutation.data
 
   return (
-    <div className="bg-card flex flex-col gap-4 rounded-lg border p-4">
+    <div
+      data-testid="telegram-connect-card"
+      className="bg-card flex flex-col gap-4 rounded-lg border p-4"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">Telegram</p>
