@@ -1,8 +1,11 @@
 # LINE enrollment (self-connect) + Viber removal — design
 
 **Date:** 2026-08-10
+**Updated:** 2026-08-12 — see §6 Addendum (deployment facts resolved, one-PR decision)
 **Status:** Approved for planning
-**Ships as:** two PRs into `dev` — Part 0 (Viber removal) first, then Part 1 (LINE enrollment)
+**Ships as:** ~~two PRs~~ **one PR** into `dev` — Part 0 (Viber removal) and Part 1 (LINE
+enrollment) together, on `chore/viber-removal`. Part 0 is already committed and
+unpushed, so there is no published boundary to respect. See §6.3.
 **Related:** `.claude/reviews/2026-08-10-notification-subsystem-review.md`,
 `docs/superpowers/specs/2026-07-20-telegram-connect-hardening-design.md`
 
@@ -165,6 +168,14 @@ LINE_BOT_BASIC_ID: str | None = None     # "@123abcde" — public, builds the de
 Unset secret ⇒ the webhook returns 503 and `/line/connect` returns
 `400 "LINE is not configured"`, mirroring how `send_telegram` handles a missing
 token.
+
+**All three LINE settings must also be threaded through `compose.dokploy.yml`**
+(`backend.environment`) and set in the Dokploy environment panel. This is not
+cosmetic: `LINE_CHANNEL_ACCESS_TOKEN` has existed in `config.py` since Task 5.4
+but was **never** added to `compose.dokploy.yml`, which passes only
+`TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME`. Production has therefore never
+had a LINE token, so `send_line` would fail on a missing token even with a
+perfect enrollment flow. See §6.2.
 
 ### 1.2 Data model — migration `m039`
 
@@ -398,11 +409,9 @@ Telegram never had.
 CLAUDE.md it is high-risk: run `ecc:security-reviewer` and `ecc:database-reviewer`
 in addition to `requesting-code-review`.
 
-**Manual** — the LINE Developers Console "Verify" button (which also settles
-whether the API host is reachable from LINE's servers over IPv4; fallback is
-routing the webhook via the Cloudflare-fronted frontend host), then a real phone:
+**Manual** — the LINE Developers Console "Verify" button, then a real phone:
 scan → send → card flips → disconnect → block the OA → card returns to Not
-connected.
+connected. Reachability is no longer an open question — see §6.1.
 
 ### 1.11 Operator setup (prerequisite, manual)
 
@@ -440,3 +449,95 @@ connected.
 ## 5. Open questions
 
 None.
+
+---
+
+## 6. Addendum — 2026-08-12
+
+Written before the LINE Official Account existed and before prod routing was
+checked. Everything below is verified fact, not plan.
+
+### 6.1 Webhook host — resolved
+
+The webhook registers directly on the API host. No proxy, no path route, no
+nginx change, nothing in the HMAC path but Cloudflare:
+
+```
+https://castranova-api.nexuslab.asia/api/v1/notifications/line/webhook
+```
+
+The design previously flagged IPv4 reachability as open, with "route via the
+Cloudflare-fronted frontend host" as a fallback. **Both the concern and the
+fallback were based on a wrong hostname.** Measured 2026-08-12:
+
+| Host | A records | Status |
+|---|---|---|
+| `castranova.nexuslab.asia` | `104.21.35.134`, `172.67.222.246` | Cloudflare, dual-stack |
+| `castranova-api.nexuslab.asia` | **same Cloudflare IPs** | Cloudflare, dual-stack |
+| `api.castranova.nexuslab.asia` | none | **does not exist** |
+
+The real API host comes from `VITE_API_URL` in the Dokploy environment and is
+`castranova-api.nexuslab.asia`. Forcing IPv4, `GET /api/v1/utils/health-check/`
+returns **200** and `POST` to the not-yet-existing webhook path returns a clean
+**404 from FastAPI** — so requests traverse Cloudflare to the backend
+unimpeded, with no WAF interference on POST.
+
+The fallback is also dead on arrival and must not be revived: `frontend/nginx.conf`
+serves only the SPA and proxies nothing. `VITE_API_URL` is baked in at build time
+and the browser calls the API host directly. There is no frontend proxy to reuse.
+
+`api.castranova.nexuslab.asia` survives as a stale string in `BACKEND_CORS_ORIGINS`
+and in `compose.yml`'s Traefik labels. Pre-existing, harmless, **out of scope** —
+`compose.yml` is not the file Dokploy deploys.
+
+### 6.2 Production is deployed from `compose.dokploy.yml`, which has no Traefik labels
+
+Dokploy deploys `composePath: ./compose.dokploy.yml` from branch `dev` with
+`autoDeploy: true`. That file carries no Traefik labels and Dokploy holds no
+domain records for the compose; `backend` and `frontend` publish host ports
+`8099` and `87`, fronted by Cloudflare.
+
+The operative consequence for this feature: **`backend.environment` in
+`compose.dokploy.yml` is an explicit allowlist.** A setting absent there never
+reaches the container regardless of what `config.py` declares or what the Dokploy
+env panel holds. Three vars must be added there *and* in the Dokploy panel:
+
+```yaml
+- LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
+- LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
+- LINE_BOT_BASIC_ID=${LINE_BOT_BASIC_ID}
+```
+
+### 6.3 One PR, not two
+
+Part 0 is committed on `chore/viber-removal` and unpushed. Splitting a branch
+that was never published buys nothing, so both parts ship as one PR into `dev`.
+No technical impact: Part 1 adds only new files, new routes, and new columns.
+
+### 6.4 Both load-bearing LINE mechanisms re-verified against current docs
+
+- **Deep link** — `https://line.me/R/oaMessage/{percent-encoded ID}/?{percent-encoded text}`
+  is current. Only the `line://` scheme is deprecated. Percent-encode **both**
+  segments; an unencoded ID works but is deprecated. For this account:
+  `https://line.me/R/oaMessage/%40097shucy/?<code>`.
+- **Signature** — `base64(HMAC-SHA256(channel_secret, raw_body))` compared to
+  `x-line-signature`. LINE's docs carry a Python-specific warning that escape
+  characters (`\n`) in the body must survive verbatim, which is exactly why
+  §1.5.1 requires hashing raw bytes *before* parsing. stdlib `hmac` / `hashlib` /
+  `base64`; `line-bot-sdk` stays out.
+
+### 6.5 Official Account — provisioned
+
+Channel ID `2011081609`, basic ID `@097shucy` (public — it is in the deep link),
+Messaging API **Enabled**, webhook URL saved. Operator-side items in §1.11 are
+done except the post-deploy Verify.
+
+Two operator notes carried forward:
+
+- The channel secret was exposed in a screenshot during setup. **Reissue it after
+  the first successful Verify** and update the Dokploy panel. The code reads it
+  from settings, so rotation is config-only.
+- The Dokploy API returns the full production environment in plaintext —
+  `SECRET_KEY`, `POSTGRES_PASSWORD`, `TELEGRAM_BOT_TOKEN` and the GitHub App
+  private key all came back on a routine read call. `LINE_CHANNEL_SECRET` joins
+  that set. Pre-existing exposure, out of scope here, worth a separate pass.
