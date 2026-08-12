@@ -35,6 +35,17 @@ done
 email=$(grep -E '^FIRST_SUPERUSER=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
 password=$(grep -E '^FIRST_SUPERUSER_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
 secret=$(grep -E '^LINE_CHANNEL_SECRET=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r')
+# Your real LINE userId, if you have one.
+#
+# This script binds a SYNTHETIC userId to the superuser in order to stand in
+# for LINE. That silently clobbers a real binding: the card still reads
+# "Connected", but it is connected to an account that does not exist, so live
+# alerts go nowhere. The full run is worse -- it ends on `unfollow`, which
+# clears the binding entirely.
+#
+# Set LINE_TEST_USER_ID in .env and the script puts the real one back when it
+# finishes, through the app's own connect+webhook path.
+real_user_id=$(grep -E '^LINE_TEST_USER_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '\r' || true)
 
 if [ -z "$secret" ]; then
   echo "LINE_CHANNEL_SECRET is not set in $ENV_FILE" >&2
@@ -88,6 +99,21 @@ message_event() {  # $1 = text
     "$LINE_USER_ID" "$1"
 }
 
+restore_real_binding() {
+  # Rebind through the app's own connect+webhook path rather than SQL, so the
+  # restore exercises the same code the real flow uses.
+  [ -n "${real_user_id:-}" ] || return 0
+  local tok code body
+  tok=$(login) || return 0
+  [ -n "$tok" ] || return 0
+  curl -s -o /dev/null -X DELETE "$API/api/v1/notifications/line/disconnect"     -H "Authorization: Bearer $tok"
+  code=$(curl -s -X POST "$API/api/v1/notifications/line/connect"     -H "Authorization: Bearer $tok" | json_str code)
+  [ -n "$code" ] || return 0
+  body=$(printf '{"destination":"Uoa","events":[{"type":"message","replyToken":"restore","source":{"type":"user","userId":"%s"},"message":{"type":"text","text":"%s"}}]}' "$real_user_id" "$code")
+  post_webhook "$body" >/dev/null
+  ok "restored the real LINE binding ($real_user_id)"
+}
+
 # --- single-code mode -------------------------------------------------------
 
 if [ $# -ge 1 ]; then
@@ -110,6 +136,7 @@ if [ $# -ge 1 ]; then
   [ "$(is_connected "$token")" = "True" ] \
     || fail "webhook accepted the request but nothing bound -- the code was unknown, expired (10 min TTL) or already used. Click Connect LINE again for a fresh one."
   ok "bound -- the open browser tab should flip to Connected within ~3s"
+  restore_real_binding
   exit 0
 fi
 
@@ -169,6 +196,10 @@ status=$(post_webhook "$unfollow")
 [ "$status" = "200" ] || fail "unfollow returned $status, expected 200"
 [ "$(is_connected "$token")" = "False" ] || fail "still connected after unfollow"
 ok "back to Not connected"
+
+# Step 7 deliberately ends unbound, which would leave a real account
+# disconnected and live alerts going nowhere. Put it back.
+restore_real_binding
 
 printf '\n\033[32mAll local checks passed.\033[0m\n'
 printf 'Not covered: LINE reaching your webhook, and the phone deep link.\n'
