@@ -208,7 +208,7 @@ class User(UserBase, table=True):
     hashed_password: str
     # Messaging platform recipient IDs (populated at deployment enrollment,
     # Task 5.4). Table-only — never exposed via the user API (UserBase/Public).
-    line_user_id: str | None = Field(default=None, max_length=128)
+    line_user_id: str | None = Field(default=None, max_length=128, unique=True)
     telegram_chat_id: str | None = Field(default=None, max_length=64)
     # Display-only, captured alongside telegram_chat_id at connect time so a
     # stale binding is visible ("Connected as @username") rather than a bare,
@@ -1888,6 +1888,35 @@ class TelegramConnectCode(SQLModel, table=True):
     )
 
 
+class LineConnectCode(SQLModel, table=True):
+    """A short-lived, single-use code binding a LINE chat message back to the
+    user who requested it.
+
+    Deliberately a separate table from TelegramConnectCode rather than a
+    `channel` column on it: altering the working Telegram table is the only
+    migration that could regress the working Telegram path. ~12 duplicated
+    lines buys that isolation.
+
+    This code carries MORE weight than its Telegram counterpart. Telegram's
+    confirm is authenticated -- it filters on `user_id == current_user.id`, so
+    a leaked code alone cannot bind an account. The LINE webhook has no
+    session at all: whoever echoes the code back gets bound to `user_id`. The
+    code alone IS the identity. Unguessable (secrets.token_hex(16), 128 bits),
+    single-use (consumed_at set atomically under FOR UPDATE) and short-lived
+    (10 minutes) are therefore load-bearing security properties, not defaults
+    to be relaxed for convenience.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, index=True)
+    code: str = Field(unique=True, index=True, max_length=32)
+    expires_at: datetime = Field(sa_type=DateTime(timezone=True))  # type: ignore
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
 class NotificationPreferencePublic(SQLModel):
     # Nullable: the grid returns synthetic rows for pairs the user has never
     # opted into, which have no database row yet. Clients key on
@@ -1931,6 +1960,28 @@ class TelegramConnectResponse(SQLModel):
     deep_link: str
     qr_code_data_uri: str
     expires_at: datetime
+
+
+class LineConnectResponse(SQLModel):
+    code: str
+    deep_link: str
+    qr_code_data_uri: str
+    expires_at: datetime
+
+
+class LineConfirmOutcome(str, enum.Enum):
+    """Why a LINE webhook bind attempt ended. Internal only -- the webhook
+    never returns this to a client, because its client is the LINE Platform,
+    which must always see 200. It decides the in-chat reply text."""
+
+    CONNECTED = "CONNECTED"
+    # Unknown, expired, or already-consumed code. Also the ordinary case where
+    # someone just messages the Official Account without a code at all.
+    PENDING = "PENDING"
+    # This LINE account already backs a different POS user (UNIQUE
+    # line_user_id). Terminal for this attempt; the code is NOT consumed, so
+    # the user can unlink there and retry within the TTL.
+    USER_ALREADY_LINKED = "USER_ALREADY_LINKED"
 
 
 class TelegramConfirmRequest(SQLModel):
