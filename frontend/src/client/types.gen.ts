@@ -137,6 +137,13 @@ export type HTTPValidationError = {
     detail?: Array<ValidationError>;
 };
 
+export type LineConnectResponse = {
+    code: string;
+    deep_link: string;
+    qr_code_data_uri: string;
+    expires_at: string;
+};
+
 export type LineState = 'PENDING' | 'FULFILLED' | 'SHORT' | 'CANCELLED';
 
 export type LowStockItemPublic = {
@@ -1205,6 +1212,12 @@ export type NotificationsDisconnectTelegramResponse = (Message);
 export type NotificationsTestTelegramResponse = (TelegramTestResult);
 
 export type NotificationsGetTelegramStatusResponse = (TelegramStatus);
+
+export type NotificationsConnectLineResponse = (LineConnectResponse);
+
+export type NotificationsDisconnectLineResponse = (Message);
+
+export type NotificationsLineWebhookResponse = (Message);
 
 export type PricingOverridesCreatePricingOverrideData = {
     requestBody: PricingOverrideCreate;

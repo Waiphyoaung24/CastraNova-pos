@@ -12,6 +12,7 @@ import {
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { LineConnectCard } from "@/components/notifications/LineConnectCard"
 import { TelegramConnectCard } from "@/components/notifications/TelegramConnectCard"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -168,6 +169,7 @@ function Notifications() {
       </Alert>
 
       <TelegramConnectCard />
+      <LineConnectCard />
 
       {isPending ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
