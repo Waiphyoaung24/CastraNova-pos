@@ -53,20 +53,43 @@ post_webhook() {  # $1 = raw JSON body; echoes the HTTP status
     --data-raw "$body"
 }
 
+login() {
+  curl -s -X POST "$API/api/v1/login/access-token" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data-urlencode "username=$email" --data-urlencode "password=$password" \
+    | python -c 'import sys,json; print(json.load(sys.stdin)["access_token"])'
+}
+
+is_connected() {  # $1 = bearer token -> True/False
+  curl -s "$API/api/v1/notifications/preferences" -H "Authorization: Bearer $1" \
+    | python -c 'import sys,json; rows=json.load(sys.stdin); print(any(r["channel"]=="LINE" and r["channel_connected"] for r in rows))'
+}
+
 if [ $# -ge 1 ]; then
   say "Delivering code $1 as LINE would"
+  token=$(login); [ -n "$token" ] || fail "could not log in"
   body="{\"destination\":\"Uoa\",\"events\":[{\"type\":\"message\",\"replyToken\":\"local-reply-token\",\"source\":{\"type\":\"user\",\"userId\":\"$LINE_USER_ID\"},\"message\":{\"type\":\"text\",\"text\":\"$1\"}}]}"
+  # Start from a known-disconnected state, or "is it connected afterwards?"
+  # answers True from a previous run and proves nothing about this delivery.
+  if [ "$(is_connected "$token")" = "True" ]; then
+    curl -s -o /dev/null -X DELETE "$API/api/v1/notifications/line/disconnect" \
+      -H "Authorization: Bearer $token"
+    ok "was already connected -- disconnected first so the result is meaningful"
+  fi
+
   status=$(post_webhook "$body")
   [ "$status" = "200" ] || fail "webhook returned $status, expected 200"
-  ok "200 -- the open browser tab should flip to Connected within ~3s"
+  # A 200 proves nothing on its own: the webhook answers 200 for an unknown,
+  # expired or already-consumed code too, deliberately, so that LINE never
+  # disables it. The binding is the only real evidence.
+  [ "$(is_connected "$token")" = "True" ] \
+    || fail "webhook accepted the request but nothing bound -- the code was unknown, expired (10 min TTL) or already used. Click Connect LINE again for a fresh one."
+  ok "bound -- the open browser tab should flip to Connected within ~3s"
   exit 0
 fi
 
 say "1. Log in as $email"
-token=$(curl -s -X POST "$API/api/v1/login/access-token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode "username=$email" --data-urlencode "password=$password" \
-  | python -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+token=$(login)
 [ -n "$token" ] || fail "could not log in"
 ok "got a token"
 
