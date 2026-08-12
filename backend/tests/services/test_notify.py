@@ -74,13 +74,16 @@ class _Auto:
 
 
 _AUTO_CHAT_ID = _Auto()
+# line_user_id became UNIQUE in m039, exactly like telegram_chat_id in m031,
+# so a shared default literal now collides across users.
+_AUTO_LINE_ID = _Auto()
 
 
 def _make_user(
     db: Session,
     *,
     role: UserRole = UserRole.BKK_ADMIN,
-    line_user_id: str | None = "L-recipient",
+    line_user_id: str | None | _Auto = _AUTO_LINE_ID,
     telegram_chat_id: str | None | _Auto = _AUTO_CHAT_ID,
 ) -> User:
     from app import crud
@@ -94,6 +97,8 @@ def _make_user(
     )
     if isinstance(telegram_chat_id, _Auto):
         telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    if isinstance(line_user_id, _Auto):
+        line_user_id = f"L-{uuid.uuid4().hex[:10]}"
     user.line_user_id = line_user_id
     user.telegram_chat_id = telegram_chat_id
     db.add(user)

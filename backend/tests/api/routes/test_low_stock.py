@@ -145,7 +145,7 @@ def _opt_in_admin(db: Session) -> User:
             role=UserRole.BKK_ADMIN,
         ),
     )
-    admin.line_user_id = "L-admin"
+    admin.line_user_id = f"L-admin-{uuid.uuid4().hex[:10]}"
     db.add(admin)
     db.add(
         NotificationPreference(

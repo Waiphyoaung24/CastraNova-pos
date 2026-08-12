@@ -229,7 +229,7 @@ def test_grid_marks_only_the_configured_channel_as_connected(
     )
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
-    user.line_user_id = "L-configured"
+    user.line_user_id = f"L-configured-{uuid.uuid4().hex[:10]}"
     db.add(user)
     db.commit()
 
@@ -341,7 +341,7 @@ def short_pull_ctx(db: Session) -> dict[str, Any]:
         crud.seed_locations(session=db)
     admin = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
     assert admin is not None
-    admin.line_user_id = "L-admin"
+    admin.line_user_id = f"L-admin-{uuid.uuid4().hex[:10]}"
     db.add(admin)
     if not db.exec(
         select(NotificationPreference).where(
