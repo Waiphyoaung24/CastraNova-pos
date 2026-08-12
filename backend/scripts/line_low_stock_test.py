@@ -1,3 +1,4 @@
+# ruff: noqa: T201 — an operator-facing CLI; its output IS the deliverable.
 """Send a REAL low-stock LINE message to a real phone, from localhost.
 
 Outbound sends do not need a public URL -- send_line calls api.line.me, which
