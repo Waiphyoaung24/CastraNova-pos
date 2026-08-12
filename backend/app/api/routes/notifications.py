@@ -1,9 +1,16 @@
+import json
+from typing import Any
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlmodel import Session
+from starlette.concurrency import run_in_threadpool
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, bind_rate_limit_identity
 from app.core.config import settings
 from app.core.limiter import (
+    LINE_CONNECT_RATE_LIMIT,
     TELEGRAM_CONFIRM_RATE_LIMIT,
     TELEGRAM_CONNECT_RATE_LIMIT,
     TELEGRAM_TEST_RATE_LIMIT,
@@ -11,6 +18,8 @@ from app.core.limiter import (
     user_or_remote_address,
 )
 from app.models import (
+    LineConfirmOutcome,
+    LineConnectResponse,
     Message,
     NotificationPreferencePublic,
     NotificationPreferencesUpdate,
@@ -174,3 +183,49 @@ def get_telegram_status(
         delivery_failing=failing,
         last_error=latest.last_error if failing and latest else None,
     )
+
+
+@router.post(
+    "/line/connect",
+    response_model=LineConnectResponse,
+    dependencies=[Depends(bind_rate_limit_identity)],
+)
+@limiter.limit(LINE_CONNECT_RATE_LIMIT, key_func=user_or_remote_address)
+def connect_line(
+    *,
+    request: Request,  # noqa: ARG001 — required by slowapi's rate-limit decorator
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> LineConnectResponse:
+    """Mint a one-time code + a line.me deep link that opens a chat with the
+    Official Account and pre-types the code, so the user only taps send.
+
+    A plain add-friend link would fire a `follow` event carrying userId but no
+    code, which cannot identify which POS user connected -- hence the
+    prefilled-message round trip.
+
+    Re-runnable: calling again mints a fresh code, so switching LINE accounts
+    is one more tap, not a dead end.
+    """
+    if not settings.LINE_BOT_BASIC_ID:
+        raise HTTPException(status_code=400, detail="LINE is not configured")
+    record = crud.create_line_connect_code(session=session, user_id=current_user.id)
+    # Percent-encode the basic ID: an unencoded '@' works but LINE deprecates
+    # it. The code is [0-9a-f] so it needs no encoding, but quote() it anyway
+    # rather than relying on that invariant holding forever.
+    deep_link = (
+        f"https://line.me/R/oaMessage/{quote(settings.LINE_BOT_BASIC_ID, safe='')}"
+        f"/?{quote(record.code, safe='')}"
+    )
+    return LineConnectResponse(
+        code=record.code,
+        deep_link=deep_link,
+        qr_code_data_uri=render_qr_png_data_uri(deep_link),
+        expires_at=record.expires_at,
+    )
+
+
+@router.delete("/line/disconnect", response_model=Message)
+def disconnect_line(*, session: SessionDep, current_user: CurrentUser) -> Message:
+    crud.disconnect_line(session=session, user=current_user)
+    return Message(message="LINE disconnected")
