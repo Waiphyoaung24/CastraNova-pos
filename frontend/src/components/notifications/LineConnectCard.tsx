@@ -28,6 +28,11 @@ export function LineConnectCard() {
   const [polling, setPolling] = useState(false)
   const [pollStartedAt, setPollStartedAt] = useState<number | null>(null)
   const [pollTimedOut, setPollTimedOut] = useState(false)
+  // Whether LINE was ALREADY bound when this connect started. A reconnect
+  // keeps the old binding until the new code is consumed, so channel_connected
+  // stays true throughout and cannot tell us the new account took effect --
+  // see the effect below.
+  const [rebinding, setRebinding] = useState(false)
 
   const { data: preferences } = useQuery({
     queryKey: ["notification-preferences"],
@@ -42,6 +47,7 @@ export function LineConnectCard() {
   const connectMutation = useMutation({
     mutationFn: () => NotificationsService.connectLine(),
     onSuccess: () => {
+      setRebinding(connected)
       setPolling(true)
       setPollStartedAt(Date.now())
       setPollTimedOut(false)
@@ -50,14 +56,21 @@ export function LineConnectCard() {
       showErrorToast("Could not start connecting LINE. Try again."),
   })
 
-  // Connected: stop polling and celebrate. The grid query is already fresh --
-  // it is what told us -- so there is nothing to invalidate here.
+  // Celebrate only on a real false -> true transition.
+  //
+  // `rebinding` guards a false positive that is otherwise immediate: on
+  // Reconnect, `connected` is already true from the existing binding, so
+  // without this the effect fires on the very next render and claims success
+  // before the user has sent anything. The backend keeps the old binding until
+  // the new code is consumed, and channel_connected is a bool, so there is no
+  // way to observe the swap -- we therefore say nothing rather than something
+  // false, and let the QR stay up until the user acts or the window closes.
   useEffect(() => {
-    if (!polling || !connected) return
+    if (!polling || !connected || rebinding) return
     setPolling(false)
     setPollStartedAt(null)
     showSuccessToast("LINE connected.")
-  }, [polling, connected, showSuccessToast])
+  }, [polling, connected, rebinding, showSuccessToast])
 
   // Give up client-side so the card doesn't poll forever if the user never
   // sends the code.
@@ -149,7 +162,9 @@ export function LineConnectCard() {
 
       {pollTimedOut && (
         <p className="text-muted-foreground text-sm">
-          Didn't detect a connection — tap Reconnect to try again.
+          {rebinding
+            ? "If you sent the code, the switch is already done — this card can't tell one LINE account from another. Reload to confirm."
+            : "Didn't detect a connection — tap Reconnect to try again."}
         </p>
       )}
     </div>

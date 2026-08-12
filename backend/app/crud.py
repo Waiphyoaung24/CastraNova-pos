@@ -9,7 +9,7 @@ from typing import Any, Literal, TypeVar, cast
 from fastapi import HTTPException
 from sqlalchemy import ColumnElement, Select, case, func, or_
 from sqlalchemy import select as sa_select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, SQLModel, col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -4092,6 +4092,19 @@ def confirm_line_connect_code(
         # code stays usable if the winner later unlinks.
         session.rollback()
         return LineConfirmOutcome.USER_ALREADY_LINKED
+    except OperationalError:
+        # Deadlock victim. This function locks the code row and then updates
+        # the User row; create_line_connect_code locks the User row and then
+        # deletes that user's code rows. Opposite order, so a user re-tapping
+        # Connect while a delayed webhook confirms the superseded code is a
+        # genuine circular wait, and Postgres kills one side.
+        #
+        # PENDING, not an exception: the caller is the unauthenticated webhook,
+        # which must return 200 or LINE eventually disables it. A deadlock is
+        # exactly the transient case LINE's own redelivery resolves, and the
+        # rollback leaves the code unconsumed so the retry can succeed.
+        session.rollback()
+        return LineConfirmOutcome.PENDING
     return LineConfirmOutcome.CONNECTED
 
 

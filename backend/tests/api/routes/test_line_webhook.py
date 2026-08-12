@@ -336,3 +336,150 @@ def test_unfollow_for_an_unknown_user_is_a_no_op(
         },
     )
     assert r.status_code == 200
+
+
+# --- hostile / malformed payloads ------------------------------------------
+#
+# Everything below reaches the handler with a VALID signature, so the trust
+# boundary has already been passed. These guard the always-200 contract: an
+# unhandled exception here is a 5xx, and repeated 5xx makes LINE disable the
+# webhook for every user.
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        pytest.param({"type": "message", "source": "not-a-dict"}, id="source-str"),
+        pytest.param({"type": "message", "source": []}, id="source-list"),
+        pytest.param({"type": "message", "source": 7}, id="source-int"),
+        pytest.param(
+            {
+                "type": "message",
+                "source": {"type": "user", "userId": "U1"},
+                "message": "not-a-dict",
+            },
+            id="message-str",
+        ),
+        pytest.param(
+            {
+                "type": "message",
+                "source": {"type": "user", "userId": "U1"},
+                "message": [],
+            },
+            id="message-list",
+        ),
+        pytest.param(
+            {
+                "type": "message",
+                "source": {"type": "user", "userId": ["not", "a", "string"]},
+                "message": {"type": "text", "text": "x"},
+            },
+            id="userid-list",
+        ),
+        pytest.param(
+            {
+                "type": "message",
+                "source": {"type": "user", "userId": "U1"},
+                "message": {"type": "text", "text": 12345},
+            },
+            id="text-int",
+        ),
+        pytest.param({"type": "message"}, id="no-source"),
+        pytest.param({}, id="empty-event"),
+    ],
+)
+def test_malformed_events_never_500(
+    client: TestClient, event: dict[str, Any]
+) -> None:
+    # `or {}` would substitute a default only for FALSY values, so a truthy
+    # non-dict sails through and raises AttributeError on .get().
+    r = _post(client, {"events": [event]})
+    assert r.status_code == 200, f"{event} produced {r.status_code}"
+
+
+def test_a_malformed_event_does_not_discard_the_rest_of_the_batch(
+    client: TestClient, db: Session
+) -> None:
+    # LINE batches events. If one bad event unwound the loop, the good events
+    # delivered alongside it would be silently lost -- and LINE would not
+    # redeliver, because it got its 200.
+    user = _create_user(db)
+    record = crud.create_line_connect_code(session=db, user_id=user.id)
+    line_id = _line_id()
+    r = _post(
+        client,
+        {
+            "events": [
+                {"type": "message", "source": "not-a-dict"},
+                _message_event(record.code, line_id),
+            ]
+        },
+    )
+    assert r.status_code == 200
+    db.refresh(user)
+    assert user.line_user_id == line_id
+
+
+def test_events_not_a_list_is_ignored(client: TestClient) -> None:
+    r = _post(client, {"events": {"not": "a list"}})
+    assert r.status_code == 200
+
+
+def test_a_non_object_payload_is_ignored(client: TestClient) -> None:
+    body = "[1, 2, 3]"
+    signature = base64.b64encode(
+        hmac.new(SECRET.encode("utf-8"), body.encode(), hashlib.sha256).digest()
+    ).decode("ascii")
+    r = client.post(
+        URL,
+        content=body.encode(),
+        headers={"x-line-signature": signature, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 200
+
+
+def test_unparseable_json_with_a_valid_signature_is_a_400(
+    client: TestClient,
+) -> None:
+    body = b"{not json at all"
+    signature = base64.b64encode(
+        hmac.new(SECRET.encode("utf-8"), body, hashlib.sha256).digest()
+    ).decode("ascii")
+    r = client.post(
+        URL,
+        content=body,
+        headers={"x-line-signature": signature, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+
+
+# --- unauthenticated resource use ------------------------------------------
+
+
+def test_an_oversized_body_is_rejected_without_buffering(client: TestClient) -> None:
+    # The route is unauthenticated AND deliberately unthrottled, so without a
+    # size cap an attacker with no valid signature can make the server buffer
+    # an arbitrarily large payload, repeatedly.
+    from app.api.routes.notifications import MAX_LINE_WEBHOOK_BODY_BYTES
+
+    oversized = b"a" * (MAX_LINE_WEBHOOK_BODY_BYTES + 1)
+    r = client.post(
+        URL,
+        content=oversized,
+        headers={
+            "x-line-signature": "irrelevant-we-should-not-get-that-far",
+            "Content-Type": "application/json",
+        },
+    )
+    assert r.status_code == 413
+
+
+def test_a_normal_sized_body_still_works(client: TestClient, db: Session) -> None:
+    # The cap must not clip real traffic: a full batch of events is small.
+    user = _create_user(db)
+    record = crud.create_line_connect_code(session=db, user_id=user.id)
+    line_id = _line_id()
+    r = _post(client, {"events": [_message_event(record.code, line_id)]})
+    assert r.status_code == 200
+    db.refresh(user)
+    assert user.line_user_id == line_id

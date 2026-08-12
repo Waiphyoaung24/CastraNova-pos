@@ -36,6 +36,11 @@ from app.services.barcode import render_qr_png_data_uri
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
+# A LINE webhook delivery is a handful of events, each a small JSON object;
+# real payloads are well under 10 KiB. 64 KiB leaves generous headroom while
+# still bounding what an unsigned caller can make us buffer.
+MAX_LINE_WEBHOOK_BODY_BYTES = 64 * 1024
+
 
 @router.get(
     "/preferences", response_model=list[NotificationPreferencePublic]
@@ -239,9 +244,21 @@ def _handle_line_event(*, session: Session, event: dict[str, Any]) -> None:
     source is ignored outright -- binding a group id would deliver a user's
     stock and pricing alerts into a group chat.
     """
-    source = event.get("source") or {}
+    # isinstance rather than `or {}`: this payload is attacker-shaped once the
+    # signature is known-good only for well-formed LINE traffic, and `or {}`
+    # substitutes a default solely for FALSY values. A truthy non-dict --
+    # "source": "x" or "message": [] -- would sail past it and blow up on
+    # .get(), which is an unhandled 500 on an endpoint that must never
+    # return one.
+    source = event.get("source")
+    if not isinstance(source, dict):
+        return
     line_user_id = source.get("userId")
-    if source.get("type") != "user" or not line_user_id:
+    # Also type-checked: line_user_id is handed to crud functions annotated
+    # `str`, and mypy cannot catch a value parsed out of arbitrary JSON.
+    if source.get("type") != "user" or not isinstance(line_user_id, str):
+        return
+    if not line_user_id:
         return
 
     if event.get("type") == "unfollow":
@@ -253,11 +270,16 @@ def _handle_line_event(*, session: Session, event: dict[str, Any]) -> None:
 
     if event.get("type") != "message":
         return
-    message = event.get("message") or {}
+    message = event.get("message")
+    if not isinstance(message, dict):
+        return
     if message.get("type") != "text":
         return
 
-    code = (message.get("text") or "").strip()
+    text = message.get("text")
+    if not isinstance(text, str):
+        return
+    code = text.strip()
     outcome = crud.confirm_line_connect_code(
         session=session, code=code, line_user_id=line_user_id
     )
@@ -300,9 +322,28 @@ async def line_webhook(*, request: Request, session: SessionDep) -> Message:
     if not settings.LINE_CHANNEL_SECRET:
         raise HTTPException(status_code=503, detail="LINE is not configured")
 
+    # Cap the body BEFORE buffering it. This endpoint is unauthenticated and
+    # deliberately unthrottled (LINE posts from rotating shared IPs), so
+    # without this an attacker with no valid signature can make the server
+    # read and hold an arbitrarily large payload in memory, repeatedly. A size
+    # cap is not a rate limit, so it does not reintroduce the IP-fairness
+    # problem that keeps a limiter off this route.
+    #
+    # Content-Length can be absent under chunked transfer, so this is a cheap
+    # first line rather than a complete one -- a hard cap belongs at the proxy.
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > MAX_LINE_WEBHOOK_BODY_BYTES:
+                raise HTTPException(status_code=413, detail="payload too large")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid body") from None
+
     # Raw bytes, before any parsing. Verifying a re-serialized dict breaks the
     # HMAC -- this ordering is the whole point.
     body = await request.body()
+    if len(body) > MAX_LINE_WEBHOOK_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="payload too large")
     if not notify.verify_line_signature(
         body=body, signature=request.headers.get("x-line-signature")
     ):
@@ -323,9 +364,21 @@ async def line_webhook(*, request: Request, session: SessionDep) -> Message:
                 # other route in this file is sync and gets a worker thread
                 # from FastAPI automatically. Sequential, not concurrent: two
                 # events in one POST share a Session, which is not thread-safe.
-                await run_in_threadpool(
-                    _handle_line_event, session=session, event=event
-                )
+                try:
+                    await run_in_threadpool(
+                        _handle_line_event, session=session, event=event
+                    )
+                except Exception:  # noqa: BLE001 — see below
+                    # Belt and braces on the always-200 contract. The handler
+                    # is written not to raise, but it runs on attacker-shaped
+                    # JSON and touches the DB, so "written not to raise" is a
+                    # claim, not a guarantee. Without this, one bad event in a
+                    # batch also discards the *remaining* good events, since
+                    # the loop would unwind.
+                    #
+                    # Deliberately not logged: the only context worth logging
+                    # is the event itself, which carries LINE userIds.
+                    session.rollback()
 
     # Always 200 past the signature gate, including for ignored events: a
     # non-200 makes LINE retry and eventually disable the webhook.
