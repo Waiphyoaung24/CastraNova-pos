@@ -1,0 +1,63 @@
+name: Scan Production Containers
+
+on:
+  pull_request:
+    branches:
+      - production
+    paths:
+      - backend/**
+      - frontend/**
+      - package.json
+      - pyproject.toml
+      - bun.lock
+      - uv.lock
+      - compose.dokploy.production.yml
+      - .github/workflows/scan-production-containers.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-container-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build backend image
+        run: docker build --file backend/Dockerfile --tag castranova-backend:scan .
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: castranova-backend:scan
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Build frontend image
+        run: >-
+          docker build
+          --file frontend/Dockerfile
+          --build-arg VITE_API_URL=https://api.castranova.cloud
+          --build-arg VITE_ENABLE_PWA=true
+          --tag castranova-frontend:scan
+          .
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: castranova-frontend:scan
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
