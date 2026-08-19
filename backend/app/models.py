@@ -59,6 +59,9 @@ class MovementType(str, enum.Enum):
     MAINTENANCE_OUT = "MAINTENANCE_OUT"
     PROJECT_OUT = "PROJECT_OUT"
     ADJUSTED_OUT = "ADJUSTED_OUT"
+    # Sale return (m035): the only inbound event besides RECEIVED. Restores a
+    # SOLD unit to stock / re-credits the FIFO batches a PART line consumed.
+    RETURNED = "RETURNED"
 
 
 class ProjectPullState(str, enum.Enum):
@@ -120,7 +123,12 @@ class SyncReviewState(str, enum.Enum):
 
 class NotificationChannel(str, enum.Enum):
     LINE = "LINE"
+    # Historical only -- no sender, no address attribute, never offered in the
+    # preference grid. Retained because Postgres cannot remove a value from a
+    # native enum type and existing notificationlog rows still carry it; that
+    # table is append-only (m021), so those rows cannot be deleted either.
     VIBER = "VIBER"
+    TELEGRAM = "TELEGRAM"
 
 
 class NotificationEvent(str, enum.Enum):
@@ -128,11 +136,30 @@ class NotificationEvent(str, enum.Enum):
     OVERRIDE_PENDING = "OVERRIDE_PENDING"
     PULL_FULFILLED = "PULL_FULFILLED"
     PULL_SHORT = "PULL_SHORT"
+    SYNC_REVIEW_PENDING = "SYNC_REVIEW_PENDING"
 
 
 class NotificationStatus(str, enum.Enum):
     SENT = "SENT"
     FAILED = "FAILED"
+
+
+# Who may receive which event. These must agree with the recipient queries in
+# app.services.notify: the four below are fetched with
+# `User.role == UserRole.BKK_ADMIN`, while notify_low_stock has no role filter.
+# Offering a staff user a checkbox for an admin-only event would persist
+# enabled=True and then silently never deliver.
+ADMIN_ONLY_EVENTS: frozenset["NotificationEvent"] = frozenset(
+    {
+        NotificationEvent.PULL_SHORT,
+        NotificationEvent.PULL_FULFILLED,
+        NotificationEvent.OVERRIDE_PENDING,
+        NotificationEvent.SYNC_REVIEW_PENDING,
+    }
+)
+ALL_ROLE_EVENTS: frozenset["NotificationEvent"] = frozenset(
+    set(NotificationEvent) - ADMIN_ONLY_EVENTS
+)
 
 
 # Shared properties
@@ -167,16 +194,67 @@ class UpdatePassword(SQLModel):
 
 # Database model, database table inferred from class name
 class User(UserBase, table=True):
+    # A chat can only ever be bound to one account -- without this, two users
+    # could silently bind the same Telegram chat and cross-feed each other's
+    # notifications. Multiple NULLs (not-yet-connected users) are unaffected:
+    # Postgres UNIQUE never compares NULL to NULL as equal.
+    __table_args__ = (
+        UniqueConstraint(
+            "telegram_chat_id", name="uq_user_telegram_chat_id"
+        ),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     hashed_password: str
     # Messaging platform recipient IDs (populated at deployment enrollment,
     # Task 5.4). Table-only — never exposed via the user API (UserBase/Public).
-    line_user_id: str | None = Field(default=None, max_length=128)
-    viber_user_id: str | None = Field(default=None, max_length=128)
+    line_user_id: str | None = Field(default=None, max_length=128, unique=True)
+    telegram_chat_id: str | None = Field(default=None, max_length=64)
+    # Display-only, captured alongside telegram_chat_id at connect time so a
+    # stale binding is visible ("Connected as @username") rather than a bare,
+    # meaningless chat id.
+    telegram_username: str | None = Field(default=None, max_length=64)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+
+
+# Mirrors the address-attribute mapping baked into services/notify.py's
+# _CHANNELS -- keep both in sync if a channel is ever added. This dict is the
+# single source of truth for "channels we can actually address": the preference
+# grid is built from its keys, so a channel absent here is invisible to the API
+# and the UI.
+CHANNEL_ADDRESS_ATTR: dict[NotificationChannel, str] = {
+    NotificationChannel.LINE: "line_user_id",
+    NotificationChannel.TELEGRAM: "telegram_chat_id",
+}
+
+
+def channel_connected(user: User, channel: NotificationChannel) -> bool:
+    """Whether `user` has an address configured for `channel`, independent of
+    any event opt-in -- a preference row is meaningless to enable if notify()
+    has no address to send to.
+
+    Total over NotificationChannel on purpose: VIBER is still a legal member
+    (historical notificationlog rows carry it) but has no address attribute,
+    and a channel we cannot address is by definition not connected.
+    """
+    attr = CHANNEL_ADDRESS_ATTR.get(channel)
+    return bool(attr and getattr(user, attr))
+
+
+def eligible_events(user: User) -> set[NotificationEvent]:
+    """The events `user` can actually receive, given their role.
+
+    Keys off `role == BKK_ADMIN` — deliberately NOT `deps.is_admin`, which also
+    treats any superuser as admin. The notify producers query the role strictly,
+    so a superuser left at the default staff role genuinely does not receive
+    admin-only events; the grid must reflect that rather than the wider check.
+    """
+    if user.role == UserRole.BKK_ADMIN:
+        return set(NotificationEvent)
+    return set(ALL_ROLE_EVENTS)
 
 
 # Properties to return via API, id is always required
@@ -188,6 +266,17 @@ class UserPublic(UserBase):
 class UsersPublic(SQLModel):
     data: list[UserPublic]
     count: int
+
+
+class UserOption(SQLModel):
+    """Lightweight actor projection for the audit User filter. Deliberately
+    unpaginated: no client parameter can amplify the response size. `email` is the
+    label fallback because `full_name` is nullable. Includes deactivated users,
+    whose historical movements still appear in the append-only ledgers."""
+
+    id: uuid.UUID
+    full_name: str | None
+    email: EmailStr
 
 
 # --- Location -----------------------------------------------------------------
@@ -269,6 +358,11 @@ class SupplierPublic(SupplierBase):
     id: uuid.UUID
 
 
+class SupplierOption(SQLModel):
+    id: uuid.UUID
+    name: str
+
+
 # --- Customer -----------------------------------------------------------------
 
 
@@ -306,6 +400,11 @@ class CustomerUpdate(SQLModel):
 
 class CustomerPublic(CustomerBase):
     id: uuid.UUID
+
+
+class CustomerOption(SQLModel):
+    id: uuid.UUID
+    name: str
 
 
 # --- Project ------------------------------------------------------------------
@@ -355,6 +454,27 @@ class ProjectPublic(ProjectBase):
     id: uuid.UUID
 
 
+class ProjectOption(SQLModel):
+    id: uuid.UUID
+    code: str
+    name: str
+
+
+class CustomersPublic(SQLModel):
+    data: list[CustomerPublic]
+    count: int
+
+
+class SuppliersPublic(SQLModel):
+    data: list[SupplierPublic]
+    count: int
+
+
+class ProjectsPublic(SQLModel):
+    data: list[ProjectPublic]
+    count: int
+
+
 # --- Product ------------------------------------------------------------------
 
 
@@ -394,6 +514,9 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(SQLModel):
+    # sku is editable only while the product is "fresh" (no stock/transactions);
+    # crud.update_product enforces that. Immutable once received/sold.
+    sku: str | None = Field(default=None, max_length=64)
     model_name: str | None = Field(default=None, max_length=255)
     brand: str | None = Field(default=None, max_length=255)
     category: str | None = Field(default=None, max_length=128)
@@ -407,6 +530,36 @@ class ProductUpdate(SQLModel):
 
 class ProductPublic(ProductBase):
     id: uuid.UUID
+    # Computed at read time (not stored): True when the product has no stock or
+    # transactions, i.e. its SKU can still be edited. Defaults to False (locked)
+    # so any caller that forgets to populate it fails safe.
+    is_fresh: bool = False
+
+
+class ProductsPublic(SQLModel):
+    data: list[ProductPublic]
+    count: int
+
+
+class ProductOption(SQLModel):
+    """Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+    receive/tickets/pulls product selection). Omits `specs` (JSONB) and admin-only
+    catalog fields (brand, category, default_min_stock_level); prices are included
+    because GET /products already exposes them to the same authenticated audience."""
+
+    id: uuid.UUID
+    sku: str
+    model_name: str
+    tracking_mode: TrackingMode
+    retail_price_thb: Decimal
+    repair_price_thb: Decimal
+
+
+class ProductPurchaseCost(SQLModel):
+    # Admin-only: latest receipt cost (COGS). Never added to ProductPublic,
+    # which is served by the staff-accessible GET /products/.
+    product_id: uuid.UUID
+    latest_purchase_cost_thb: Decimal
 
 
 # --- Low-stock alerts (FR-016) ------------------------------------------------
@@ -443,23 +596,6 @@ class BulkMinStockUpdate(SQLModel):
         return self
 
 
-# --- Exchange rates (import-time FX config; SystemSetting-backed) -------------
-
-
-class ExchangeRatesUpdate(SQLModel):
-    # THB per 1 unit of the source currency. ge=0 rejects negatives and NaN;
-    # le bounds to a sane ceiling. Persisted as decimal strings in the jsonb
-    # setting (Decimal is not JSON-serializable) to preserve precision.
-    usd_thb: Decimal = Field(ge=0, le=1_000_000)
-    mmk_thb: Decimal = Field(ge=0, le=1_000_000)
-
-
-class ExchangeRatesPublic(SQLModel):
-    usd_thb: Decimal
-    mmk_thb: Decimal
-    updated_at: datetime | None = None
-
-
 # --- Price change (append-only history; FR-002) -------------------------------
 
 
@@ -488,6 +624,7 @@ class PriceChangePublic(PriceChangeBase):
     id: uuid.UUID
     changed_by_user_id: uuid.UUID
     changed_at: datetime | None = None
+    changed_by_full_name: str | None = None
 
 
 # --- Unit (SERIALIZED stock; state cache) -------------------------------------
@@ -508,13 +645,16 @@ class UnitBase(SQLModel):
 
 class Unit(UnitBase, table=True):
     # UNIQUE(castranova_barcode), UNIQUE(supplier_id, supplier_serial) — serials
-    # may collide across suppliers; index (current_state, product_id) for SOH (§4.8).
+    # may collide across suppliers; index (current_state, product_id) for SOH (§4.8);
+    # standalone product_id index for a state-agnostic lookup (audit SKU filter,
+    # FR-019 — (current_state, product_id) above doesn't serve a product_id-only scan).
     __table_args__ = (
         UniqueConstraint("castranova_barcode", name="uq_unit_castranova_barcode"),
         UniqueConstraint(
             "supplier_id", "supplier_serial", name="uq_unit_supplier_serial"
         ),
         Index("ix_unit_state_product", "current_state", "product_id"),
+        Index("ix_unit_product", "product_id"),
         CheckConstraint(
             "purchase_cost_thb >= 0", name="ck_unit_purchase_cost_nonneg"
         ),
@@ -567,7 +707,11 @@ class UnitMovementBase(SQLModel):
 
 class UnitMovement(UnitMovementBase, table=True):
     # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
-    # index (unit_id, occurred_at DESC) for lifecycle traversal (FR-015).
+    # index (unit_id, occurred_at DESC) for lifecycle traversal (FR-015);
+    # (actor_user_id, occurred_at DESC) for the audit log's actor filter
+    # (list_audit/count_audit always pair the filter with this sort + limit);
+    # partial sale_id / stock_adjustment_id for margin_report's Sale join and
+    # FK lookups, mirroring the project_pull_id/service_ticket_id indexes.
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_unit_movement_idempotency_key"),
         Index(
@@ -586,6 +730,23 @@ class UnitMovement(UnitMovementBase, table=True):
             "service_ticket_id",
             unique=False,
             postgresql_where=text("service_ticket_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_actor_occurred",
+            "actor_user_id",
+            text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_unitmovement_sale_id",
+            "sale_id",
+            unique=False,
+            postgresql_where=text("sale_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_unitmovement_stock_adjustment_id",
+            "stock_adjustment_id",
+            unique=False,
+            postgresql_where=text("stock_adjustment_id IS NOT NULL"),
         ),
     )
 
@@ -621,6 +782,20 @@ class AuditEntryPublic(SQLModel):
     project_pull_id: uuid.UUID | None = None
     stock_adjustment_id: uuid.UUID | None = None
     notes: str | None = None
+    # Hydrated, read-only display fields for the admin detail drawer (populated
+    # by batched lookups in crud.list_audit). All optional; no cost/money — the
+    # ledger stays non-financial. The screen is admin-only, so no redaction.
+    product_model_name: str | None = None
+    product_sku: str | None = None
+    unit_castranova_barcode: str | None = None
+    unit_supplier_serial: str | None = None
+    customer_name: str | None = None  # source sale/ticket/pull customer, if any
+    actor_full_name: str | None = None  # acting user's full_name, else email
+
+
+class AuditPublic(SQLModel):
+    data: list[AuditEntryPublic]
+    count: int
 
 
 # --- Serialized receive (FR-005) request/response -----------------------------
@@ -637,6 +812,9 @@ class ReceiveSerializedRequest(SQLModel):
     supplier_id: uuid.UUID
     pieces: list[ReceivePiece] = Field(min_length=1, max_length=500)
     idempotency_key: uuid.UUID
+    # Operator-picked arrival date; None → today. The server composes the stored
+    # timestamp (routes/receipts.py) so a wrong client clock cannot forge one.
+    received_date: date | None = None
 
 
 class ReceiveSerializedResponse(SQLModel):
@@ -737,6 +915,10 @@ class PartMovement(PartMovementBase, table=True):
     # Append-only: UNIQUE(idempotency_key) for offline replay safety (§7);
     # index (product_id, occurred_at DESC) for SKU history (FR-015);
     # CHECK(quantity > 0) — direction is never encoded in the sign (§4.3).
+    # (actor_user_id, occurred_at DESC) for the audit log's actor filter
+    # (list_audit/count_audit always pair the filter with this sort + limit);
+    # partial sale_id / stock_adjustment_id for margin_report's Sale join and
+    # FK lookups, mirroring the project_pull_id/service_ticket_id indexes.
     __table_args__ = (
         UniqueConstraint(
             "idempotency_key", name="uq_part_movement_idempotency_key"
@@ -757,6 +939,23 @@ class PartMovement(PartMovementBase, table=True):
             "service_ticket_id",
             unique=False,
             postgresql_where=text("service_ticket_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_partmovement_actor_occurred",
+            "actor_user_id",
+            text("occurred_at DESC"),
+        ),
+        Index(
+            "ix_partmovement_sale_id",
+            "sale_id",
+            unique=False,
+            postgresql_where=text("sale_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_partmovement_stock_adjustment_id",
+            "stock_adjustment_id",
+            unique=False,
+            postgresql_where=text("stock_adjustment_id IS NOT NULL"),
         ),
         CheckConstraint("quantity > 0", name="ck_part_movement_qty_positive"),
     )
@@ -828,6 +1027,8 @@ class ReceiveQuantityRequest(SQLModel):
     expected_qty: int | None = Field(default=None, ge=0)
     note: str | None = Field(default=None, max_length=400)
     idempotency_key: uuid.UUID
+    # Operator-picked arrival date; None → today. Also drives the batch_no prefix.
+    received_date: date | None = None
 
 
 # --- Pricing override (FR-010; M013) ------------------------------------------
@@ -896,6 +1097,7 @@ class PricingOverridePublic(SQLModel):
     id: uuid.UUID
     target_kind: OverrideTargetKind
     product_id: uuid.UUID
+    product_sku: str
     default_price_thb: Decimal
     requested_price_thb: Decimal
     deviation_pct: Decimal
@@ -1105,13 +1307,26 @@ class SyncReviewResolve(SQLModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class SyncReviewPendingCounts(SQLModel):
+    # Named fields rather than a bare 3-tuple: three same-typed ints are
+    # trivially transposable at the call site, and the notify template reads
+    # all three.
+    total: int
+    stale: int
+    conflict: int
+
+
 # --- Sale + sale_line (FR-007; M010) ------------------------------------------
 
 
 class Sale(SQLModel, table=True):
+    # sold_at is the hottest range predicate in margin_report — every query in
+    # the family closes over [start, end) on it. Plain (not partial) index:
+    # sold_at is NOT NULL.
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_sale_idempotency_key"),
         Index("ix_sale_customer_id", "customer_id"),
+        Index("ix_sale_sold_at", "sold_at"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1144,6 +1359,21 @@ class SaleLine(SQLModel, table=True):
         UniqueConstraint(
             "pricing_override_request_id",
             name="uq_saleline_pricing_override_request_id",
+        ),
+        # Bare-FK hygiene, not report tuning: margin_report reaches this table
+        # via the indexed sale_id, so these cover parent-delete scans on
+        # unit/product instead. Partial — both columns are nullable.
+        Index(
+            "ix_saleline_unit_id",
+            "unit_id",
+            unique=False,
+            postgresql_where=text("unit_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_saleline_product_id",
+            "product_id",
+            unique=False,
+            postgresql_where=text("product_id IS NOT NULL"),
         ),
     )
 
@@ -1217,6 +1447,121 @@ class SaleCreateRequest(SQLModel):
     idempotency_key: uuid.UUID
 
 
+# --- Sale return (m035; design 2026-07-25) ------------------------------------
+
+
+class SaleReturn(SQLModel, table=True):
+    # Insert-only in practice (no update/delete endpoint), but NOT trigger-
+    # protected: the append-only guarantee that matters lives on the movements
+    # this row produces (unit_movement / part_movement / cost_line), which the
+    # M021 reject_ledger_mutation triggers already cover.
+    # returned_at is the report's date key — every margin_report aggregation for
+    # returns closes over [start, end) on it, so it is indexed like sale.sold_at.
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_sale_return_idempotency_key"),
+        Index("ix_salereturn_returned_at", "returned_at"),
+        Index("ix_salereturn_sale_id", "sale_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sale_id: uuid.UUID = Field(foreign_key="sale.id", nullable=False)
+    created_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True
+    )
+    idempotency_key: uuid.UUID
+    reason: str = Field(max_length=512)
+    returned_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    total_refund_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    total_cogs_restored_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+
+
+class SaleReturnLine(SQLModel, table=True):
+    # The over-return invariant (SUM(quantity) per sale_line <= saleline.quantity)
+    # spans rows, so it is enforced in crud under a FOR UPDATE lock on the sale
+    # line, not by a CHECK.
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_salereturnline_quantity_positive"),
+        CheckConstraint(
+            "cogs_restored_thb >= 0", name="ck_salereturnline_cogs_nonneg"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    sale_return_id: uuid.UUID = Field(
+        foreign_key="salereturn.id", nullable=False, index=True
+    )
+    sale_line_id: uuid.UUID = Field(
+        foreign_key="saleline.id", nullable=False, index=True
+    )
+    quantity: int
+    # Refund basis, snapshot-copied from the sale line at return time.
+    unit_price_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+    # Exact cost restored, summed from the reversal cost_lines (UNIT lines: the
+    # unit's purchase_cost_thb). Never a re-derived average.
+    cogs_restored_thb: Decimal = Field(sa_type=Numeric(12, 2))  # type: ignore[call-overload]
+
+
+class SaleReturnLineInput(SQLModel):
+    sale_line_id: uuid.UUID
+    # UNIT lines must be exactly 1 (checked in crud against the line kind).
+    quantity: int = Field(default=1, gt=0, le=1_000_000)
+
+
+class SaleReturnCreateRequest(SQLModel):
+    idempotency_key: uuid.UUID
+    reason: str = Field(min_length=1, max_length=512)
+    lines: list[SaleReturnLineInput] = Field(min_length=1, max_length=100)
+
+
+class SaleReturnLinePublic(SQLModel):
+    id: uuid.UUID
+    sale_line_id: uuid.UUID
+    quantity: int
+    unit_price_thb: Decimal
+    cogs_restored_thb: Decimal
+
+
+class SaleReturnPublic(SQLModel):
+    # Admin-only surface (returns are an admin desk action), so cost fields are
+    # exposed here deliberately — unlike SaleStaffPublic there is no staff variant.
+    id: uuid.UUID
+    sale_id: uuid.UUID
+    reason: str
+    returned_at: datetime
+    total_refund_thb: Decimal
+    total_cogs_restored_thb: Decimal
+    created_by_user_id: uuid.UUID
+    lines: list[SaleReturnLinePublic]
+
+
+class ReturnableLinePublic(SQLModel):
+    sale_line_id: uuid.UUID
+    line_kind: SaleLineKind
+    product_id: uuid.UUID | None
+    unit_id: uuid.UUID | None
+    label: str  # "SKU — Model name"
+    quantity_sold: int
+    quantity_returned: int
+    quantity_returnable: int
+    unit_price_thb: Decimal
+
+
+class ReturnableSalePublic(SQLModel):
+    sale_id: uuid.UUID
+    sold_at: datetime
+    customer_id: uuid.UUID
+    customer_name: str
+    lines: list[ReturnableLinePublic]
+
+
+class ReturnableSalesPublic(SQLModel):
+    sales: list[ReturnableSalePublic]
+
+
 # --- Service ticket (Maintenance, FR-008; M011) -------------------------------
 
 
@@ -1229,6 +1574,14 @@ class ServiceTicket(SQLModel, table=True):
             "idempotency_key", name="uq_service_ticket_idempotency_key"
         ),
         Index("ix_serviceticket_customer_id", "customer_id"),
+        # margin_report range-filters closed_at. Partial: open tickets are NULL
+        # and can never satisfy `>= start`, so they are dead weight in the index.
+        Index(
+            "ix_serviceticket_closed_at",
+            "closed_at",
+            unique=False,
+            postgresql_where=text("closed_at IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1262,6 +1615,9 @@ class ServiceTicketPart(SQLModel, table=True):
             "pricing_override_request_id",
             name="uq_service_ticket_part_pricing_override_request_id",
         ),
+        # Bare-FK hygiene: rows are reached via the indexed service_ticket_id,
+        # so this covers parent-delete scans on product. Plain — NOT NULL.
+        Index("ix_serviceticketpart_product_id", "product_id"),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1294,13 +1650,6 @@ class ServiceTicketPublic(SQLModel):
     parts: list[ServiceTicketPartPublic]
 
 
-class ServiceTicketCreate(SQLModel):
-    customer_id: uuid.UUID
-    issue: str = Field(min_length=1, max_length=512)
-    notes: str | None = Field(default=None, max_length=512)
-    idempotency_key: uuid.UUID
-
-
 class ServiceTicketPartCreate(SQLModel):
     sku: str = Field(max_length=64)
     quantity: int = Field(gt=0, le=1_000_000)
@@ -1309,8 +1658,16 @@ class ServiceTicketPartCreate(SQLModel):
     pricing_override_request_id: uuid.UUID | None = None
 
 
-class ServiceTicketClose(SQLModel):
+class ServiceTicketRecordRequest(SQLModel):
+    # One atomic submission: open + parts + FIFO-consume + close in a single
+    # transaction, idempotent on idempotency_key. There is no persistent
+    # open-ticket state (FR-008: opened and closed at the warehouse).
+    customer_id: uuid.UUID
+    issue: str = Field(min_length=1, max_length=512)
+    notes: str | None = Field(default=None, max_length=512)
     resolution: str | None = Field(default=None, max_length=512)
+    idempotency_key: uuid.UUID
+    parts: list[ServiceTicketPartCreate] = Field(default_factory=list)
 
 
 # --- Project pull (FR-009; M012) ----------------------------------------------
@@ -1325,6 +1682,15 @@ class ProjectPull(SQLModel, table=True):
         Index("ix_project_pull_state_created", "state", "created_at"),
         Index("ix_projectpull_customer_id", "customer_id"),
         Index("ix_projectpull_project_id", "project_id"),
+        # margin_report range-filters fulfilled_at; ix_project_pull_state_created
+        # does not help it (those queries touch neither state nor created_at).
+        # Partial: unfulfilled pulls are NULL and never satisfy `>= start`.
+        Index(
+            "ix_projectpull_fulfilled_at",
+            "fulfilled_at",
+            unique=False,
+            postgresql_where=text("fulfilled_at IS NOT NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -1407,6 +1773,8 @@ class ProjectPullLinePublic(SQLModel):
     id: uuid.UUID
     line_kind: SaleLineKind
     product_id: uuid.UUID
+    product_sku: str
+    model_name: str
     unit_serial: str | None
     requested_qty: int | None
     fulfilled_qty: int
@@ -1431,6 +1799,16 @@ class ProjectPullPublic(SQLModel):
     cancelled_at: datetime | None
     cancelled_by_user_id: uuid.UUID | None
     lines: list[ProjectPullLinePublic]
+
+
+class PricingOverridesPublic(SQLModel):
+    data: list[PricingOverridePublic]
+    count: int
+
+
+class ProjectPullsPublic(SQLModel):
+    data: list[ProjectPullPublic]
+    count: int
 
 
 # --- Notifications (FR-018; M007/M019) ----------------------------------------
@@ -1489,11 +1867,67 @@ class NotificationLog(SQLModel, table=True):
     )
 
 
+class TelegramConnectCode(SQLModel, table=True):
+    """A short-lived, single-use code binding a Telegram `/start` deep link
+    back to the user who requested it.
+
+    This is an authentication boundary, not a mere correlation key: whoever's
+    Telegram account echoes the code back gets bound to `user_id`. The code
+    must therefore be unguessable (minted with `secrets.token_urlsafe`, not a
+    short/sequential value), single-use (`consumed_at` set atomically on
+    confirm), and short-lived (`expires_at`, checked at confirm time).
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, index=True)
+    code: str = Field(unique=True, index=True, max_length=32)
+    expires_at: datetime = Field(sa_type=DateTime(timezone=True))  # type: ignore
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class LineConnectCode(SQLModel, table=True):
+    """A short-lived, single-use code binding a LINE chat message back to the
+    user who requested it.
+
+    Deliberately a separate table from TelegramConnectCode rather than a
+    `channel` column on it: altering the working Telegram table is the only
+    migration that could regress the working Telegram path. ~12 duplicated
+    lines buys that isolation.
+
+    This code carries MORE weight than its Telegram counterpart. Telegram's
+    confirm is authenticated -- it filters on `user_id == current_user.id`, so
+    a leaked code alone cannot bind an account. The LINE webhook has no
+    session at all: whoever echoes the code back gets bound to `user_id`. The
+    code alone IS the identity. Unguessable (secrets.token_hex(16), 128 bits),
+    single-use (consumed_at set atomically under FOR UPDATE) and short-lived
+    (10 minutes) are therefore load-bearing security properties, not defaults
+    to be relaxed for convenience.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, index=True)
+    code: str = Field(unique=True, index=True, max_length=32)
+    expires_at: datetime = Field(sa_type=DateTime(timezone=True))  # type: ignore
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
 class NotificationPreferencePublic(SQLModel):
-    id: uuid.UUID
+    # Nullable: the grid returns synthetic rows for pairs the user has never
+    # opted into, which have no database row yet. Clients key on
+    # (channel, event_type), not id.
+    id: uuid.UUID | None
     channel: NotificationChannel
     event_type: NotificationEvent
     enabled: bool
+    # Whether the user has an address configured for `channel` at all. A
+    # checkbox with channel_connected=False can never actually deliver.
+    channel_connected: bool
 
 
 class NotificationPreferenceUpdate(SQLModel):
@@ -1521,22 +1955,102 @@ class NotificationPreferencesUpdate(SQLModel):
         return self
 
 
+class TelegramConnectResponse(SQLModel):
+    code: str
+    deep_link: str
+    qr_code_data_uri: str
+    expires_at: datetime
+
+
+class LineConnectResponse(SQLModel):
+    code: str
+    deep_link: str
+    qr_code_data_uri: str
+    expires_at: datetime
+
+
+class LineConfirmOutcome(str, enum.Enum):
+    """Why a LINE webhook bind attempt ended. Internal only -- the webhook
+    never returns this to a client, because its client is the LINE Platform,
+    which must always see 200. It decides the in-chat reply text."""
+
+    CONNECTED = "CONNECTED"
+    # Unknown, expired, or already-consumed code. Also the ordinary case where
+    # someone just messages the Official Account without a code at all.
+    PENDING = "PENDING"
+    # This LINE account already backs a different POS user (UNIQUE
+    # line_user_id). Terminal for this attempt; the code is NOT consumed, so
+    # the user can unlink there and retry within the TTL.
+    USER_ALREADY_LINKED = "USER_ALREADY_LINKED"
+
+
+class TelegramConfirmRequest(SQLModel):
+    code: str
+
+
+class TelegramConfirmOutcome(str, enum.Enum):
+    """Why a confirm attempt ended. PENDING is the ordinary "the user hasn't
+    tapped Start yet" case and must stay distinguishable from the terminal
+    failures below, or the client would abort a poll that just needs more
+    time -- or, worse, keep polling forever on something polling can't fix."""
+
+    CONNECTED = "CONNECTED"
+    PENDING = "PENDING"
+    # This Telegram chat already backs a different account (UNIQUE
+    # telegram_chat_id). Terminal: retrying cannot resolve it.
+    CHAT_ALREADY_LINKED = "CHAT_ALREADY_LINKED"
+
+
+class TelegramConfirmResult(SQLModel):
+    connected: bool
+    telegram_username: str | None = None
+    # Human-readable reason, set only on a terminal failure the user must act
+    # on. None on both success and PENDING -- the client keeps polling while
+    # this is null and stops as soon as it isn't.
+    error: str | None = None
+
+
+class TelegramTestResult(SQLModel):
+    ok: bool
+    detail: str | None = None
+
+
+class TelegramStatus(SQLModel):
+    connected: bool
+    telegram_username: str | None = None
+    # True only when the MOST RECENT Telegram NotificationLog for this user
+    # is FAILED -- a later successful send clears it, since the binding has
+    # recovered (a stale reconnect, the user unblocking the bot, etc).
+    delivery_failing: bool = False
+    last_error: str | None = None
+
+
 # --- Channel-margin report (FR-013; read-only aggregation) --------------------
 
 
 MoneyTHB = Annotated[Decimal, Field(decimal_places=2, max_digits=14)]
 
 
-class ChannelMarginRow(SQLModel):
-    channel: Channel
+class MarginDimension(str, enum.Enum):
+    CHANNEL = "channel"
+    PRODUCT = "product"
+    CUSTOMER = "customer"
+    PROJECT = "project"
+
+
+class MarginBreakdownRow(SQLModel):
+    key: str  # channel name, entity UUID as str, or "" for the (none) bucket
+    label: str
     revenue_thb: MoneyTHB
     cogs_thb: MoneyTHB
     margin_thb: MoneyTHB
 
 
-class ChannelMarginReport(SQLModel):
+class MarginBreakdownReport(SQLModel):
     month: str  # "YYYY-MM"
-    channels: list[ChannelMarginRow]  # always 3 rows: SALE, MAINTENANCE, PROJECT
+    group_by: MarginDimension
+    channel: Channel | None  # filter applied; None = all channels
+    rows: list[MarginBreakdownRow]
     total_revenue_thb: MoneyTHB
     total_cogs_thb: MoneyTHB
     total_margin_thb: MoneyTHB
@@ -1549,6 +2063,7 @@ class StockOnHandRow(SQLModel):
     product_id: uuid.UUID
     sku: str
     model_name: str
+    brand: str | None
     category: str | None
     tracking_mode: TrackingMode
     quantity_on_hand: int
@@ -1556,12 +2071,14 @@ class StockOnHandRow(SQLModel):
 
 class StockOnHandResponse(SQLModel):
     rows: list[StockOnHandRow]
+    count: int
 
 
 class BatchDrillRow(SQLModel):
     batch_no: str
     remaining_qty: int
     received_at: datetime
+    supplier: str | None
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 
@@ -1571,6 +2088,7 @@ class UnitDrillRow(SQLModel):
     supplier_serial: str
     current_state: UnitState
     received_at: datetime
+    supplier: str | None
     # No purchase_cost_thb: COGS stays admin-only; this view is both-roles.
 
 
@@ -1638,6 +2156,31 @@ class ProjectDashboardStaffPublic(SQLModel):
     # No budget / consumed_cost — staff redaction.
 
 
+class ProjectConsumptionRowPublic(SQLModel):
+    """One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+    ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+    is physically absent from the staff payload.
+
+    Reuses SkuConsumptionDrawAdminPublic for `draws`: a FIFO batch draw is the
+    same concept here as in the SKU consumption history (FR-015)."""
+
+    line_kind: SaleLineKind  # UNIT | PART
+    product_id: uuid.UUID
+    product_sku: str
+    model_name: str
+    # UNIT: the unit's castranova_barcode. NULL for PART (no serial).
+    unit_serial: str | None
+    quantity: int  # 1 for UNIT; part_movement.quantity for PART
+    occurred_at: datetime
+    project_pull_id: uuid.UUID
+    total_cost_thb: Decimal
+    # PART: one entry per batch the movement drew from. Always empty for UNIT —
+    # a serialized unit IS its own cost layer, there is no batch to attribute.
+    # Forward ref: the draw schema is declared further down (same pattern as
+    # SkuSearchResult.consumption).
+    draws: list["SkuConsumptionDrawAdminPublic"]
+
+
 class ProjectDashboardAdminPublic(ProjectDashboardStaffPublic):
     # Admin sees the full project (adds back budget_thb). consumed_cost_thb is
     # REQUIRED so a staff payload cannot upcast to admin; budget_thb is
@@ -1645,6 +2188,9 @@ class ProjectDashboardAdminPublic(ProjectDashboardStaffPublic):
     project: ProjectPublic  # type: ignore[assignment]
     budget_thb: Decimal | None
     consumed_cost_thb: Decimal
+    # Unbounded, newest first — the pulls list above it is unbounded too, and a
+    # truncated audit view would misrepresent itself as complete.
+    consumed_items: list[ProjectConsumptionRowPublic]
 
 
 # --- Override-exceptions report (FR-010; read-only) ---------------------------
@@ -1712,6 +2258,13 @@ class SerialMovementPublic(SQLModel):
     project_pull_id: uuid.UUID | None
     stock_adjustment_id: uuid.UUID | None
     notes: str | None
+    # FR-015 enrichment (resolved at read time; no cost — serial search is
+    # cost-free for both roles).
+    from_location_name: str | None = None
+    to_location_name: str | None = None
+    actor_name: str | None = None
+    reference_kind: str | None = None  # SALE | SERVICE_TICKET | PROJECT_PULL | STOCK_ADJUSTMENT
+    reference_label: str | None = None
 
 
 class SerialSearchResult(SQLModel):
@@ -1738,6 +2291,54 @@ class SkuSearchResult(SQLModel):
     tracking_mode: TrackingMode
     total_on_hand: int
     batches: list[SkuBatchPublic]  # QUANTITY only; empty for SERIALIZED
+    consumption: list["SkuConsumptionEventPublic"] = []  # QUANTITY only
+
+
+# --- SKU consumption history (FR-015) -----------------------------------------
+
+
+class SkuConsumptionEventPublic(SQLModel):
+    """One consuming part_movement, STAFF view — attribution only, NO cost.
+    Any NEW cost/margin field MUST go on the Admin subclass only; staff must
+    never see cost data (mirrors SaleStaffPublic)."""
+
+    event_type: MovementType  # SOLD | MAINTENANCE_OUT | PROJECT_OUT | ADJUSTED_OUT
+    occurred_at: datetime
+    quantity: int
+    reference_kind: str  # SALE | SERVICE_TICKET | PROJECT_PULL | STOCK_ADJUSTMENT
+    reference_id: uuid.UUID
+    customer_name: str | None = None
+    project_name: str | None = None
+    project_code: str | None = None
+    actor_name: str | None = None
+    notes: str | None = None
+
+
+class SkuConsumptionDrawAdminPublic(SQLModel):
+    """One FIFO batch draw inside a consumption event — ADMIN only (cost)."""
+
+    batch_no: str
+    quantity: int
+    unit_cost_thb: Decimal
+    total_cost_thb: Decimal
+
+
+class SkuConsumptionEventAdminPublic(SkuConsumptionEventPublic):
+    total_cost_thb: Decimal
+    draws: list[SkuConsumptionDrawAdminPublic]
+
+
+class SkuBatchAdminPublic(SkuBatchPublic):
+    purchase_cost_thb: Decimal  # PRD FR-015 batch attribution; admin only
+
+
+class SkuSearchAdminResult(SQLModel):
+    sku: str
+    product_id: uuid.UUID
+    tracking_mode: TrackingMode
+    total_on_hand: int
+    batches: list[SkuBatchAdminPublic]
+    consumption: list[SkuConsumptionEventAdminPublic]
 
 
 # Generic message

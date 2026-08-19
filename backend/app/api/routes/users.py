@@ -8,6 +8,7 @@ from app import crud
 from app.api.deps import (
     CurrentUser,
     SessionDep,
+    get_admin,
     get_current_active_superuser,
 )
 from app.core.config import settings
@@ -17,6 +18,7 @@ from app.models import (
     UpdatePassword,
     User,
     UserCreate,
+    UserOption,
     UserPublic,
     UsersPublic,
     UserUpdate,
@@ -51,6 +53,21 @@ def read_users(
 
     users_public = [UserPublic.model_validate(user) for user in users]
     return UsersPublic(data=users_public, count=count)
+
+
+@router.get(
+    "/options",
+    response_model=list[UserOption],
+    dependencies=[Depends(get_admin)],
+)
+def read_options(session: SessionDep) -> list[UserOption]:
+    """Every user as a lightweight projection for the audit User filter.
+
+    Gated on `get_admin`, not `get_current_active_superuser` like the rest of this
+    router: `/audit` is itself admin-gated, so a BKK_ADMIN who can read the ledger
+    must be able to resolve and filter by its actors.
+    """
+    return crud.list_user_options(session=session)
 
 
 @router.post(
@@ -192,6 +209,22 @@ def update_user(
             raise HTTPException(
                 status_code=409, detail="User with this email already exists"
             )
+
+    # Block removing the last active superuser (by demotion or deactivation),
+    # which would lock everyone out of user management.
+    changes = user_in.model_dump(exclude_unset=True)
+    removes_superuser_access = (
+        changes.get("is_superuser") is False or changes.get("is_active") is False
+    )
+    if (
+        db_user.is_superuser
+        and db_user.is_active
+        and removes_superuser_access
+        and crud.count_active_superusers(session=session) <= 1
+    ):
+        raise HTTPException(
+            status_code=403, detail="Cannot remove the last active superuser"
+        )
 
     db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
     return db_user

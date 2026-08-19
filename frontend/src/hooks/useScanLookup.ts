@@ -10,6 +10,13 @@ import type { SerialSearchResult, SkuSearchResult } from "@/client/types.gen"
 export type ScanLookupResult =
   | { kind: "UNIT"; data: SerialSearchResult }
   | { kind: "PART"; data: SkuSearchResult }
+  /**
+   * The code matched a SERIALIZED product's SKU. Not actionable anywhere that
+   * consumes stock: a SKU names the product, not which physical piece, and
+   * serialized stock only moves one unit at a time (identified by its own
+   * castranova_barcode). Callers must refuse the scan and say so.
+   */
+  | { kind: "SERIALIZED_SKU"; data: SkuSearchResult }
   | { kind: "NOT_FOUND" }
 
 // ---------------------------------------------------------------------------
@@ -22,8 +29,9 @@ export type ScanLookupResult =
  * thrown ApiError (or null if the step was never attempted because a previous
  * step succeeded).
  *
- * Resolution order: serial hit → UNIT; serial 404 + sku hit → PART; both 404
- * → NOT_FOUND. Any non-404 error is re-thrown so callers see real failures.
+ * Resolution order: serial hit → UNIT; serial 404 + sku hit → PART (or
+ * SERIALIZED_SKU when that product is serial-tracked); both 404 → NOT_FOUND.
+ * Any non-404 error is re-thrown so callers see real failures.
  */
 export function resolveScanResult(
   serialOutcome: SerialSearchResult | ApiError,
@@ -42,7 +50,9 @@ export function resolveScanResult(
     return { kind: "NOT_FOUND" }
   }
   if (!(skuOutcome instanceof ApiError)) {
-    return { kind: "PART", data: skuOutcome }
+    return skuOutcome.tracking_mode === "SERIALIZED"
+      ? { kind: "SERIALIZED_SKU", data: skuOutcome }
+      : { kind: "PART", data: skuOutcome }
   }
   if (skuOutcome.status !== 404) throw skuOutcome
   return { kind: "NOT_FOUND" }

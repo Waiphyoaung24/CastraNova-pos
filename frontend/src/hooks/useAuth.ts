@@ -7,6 +7,8 @@ import {
   type UserPublic,
   UsersService,
 } from "@/client"
+import { endSession, markSessionAlive } from "@/lib/auth-session"
+import { queryClient } from "@/lib/query-client"
 import { handleError } from "@/utils"
 import useCustomToast from "./useCustomToast"
 
@@ -29,6 +31,12 @@ const useAuth = () => {
       formData: data,
     })
     localStorage.setItem("access_token", response.access_token)
+    // A fresh refresh cookie came with that token, so clear the dead-session
+    // latch that the previous logout set.
+    markSessionAlive()
+    // Flush any mutation that was paused (offline) through a prior forced
+    // logout — now that we hold a fresh token, it replays with idempotency.
+    await queryClient.resumePausedMutations()
   }
 
   const loginMutation = useMutation({
@@ -39,9 +47,16 @@ const useAuth = () => {
     onError: handleError.bind(showErrorToast),
   })
 
-  const logout = () => {
-    localStorage.removeItem("access_token")
-    navigate({ to: "/login" })
+  const logout = async () => {
+    // Clear the httponly refresh cookie server-side so an explicit logout is a
+    // true logout (a later refresh can't revive the session); best-effort so an
+    // offline/failed call still ends the local session below.
+    try {
+      await LoginService.logout()
+    } catch {
+      // ignore — endSession() still clears the local token and redirects
+    }
+    endSession()
   }
 
   return {

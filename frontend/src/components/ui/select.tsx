@@ -122,6 +122,23 @@ function SelectItem({
   )
 }
 
+function SelectEmpty({ className, ...props }: React.ComponentProps<"div">) {
+  // Non-interactive placeholder row for when a data-driven Select has no options.
+  // Radix forbids SelectItem with an empty value, so this is a plain muted div —
+  // not focusable, not selectable, skipped by keyboard navigation.
+  return (
+    <div
+      data-slot="select-empty"
+      role="presentation"
+      className={cn(
+        "text-muted-foreground py-1.5 pr-8 pl-2 text-sm select-none",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
 function SelectSeparator({
   className,
   ...props
@@ -174,6 +191,7 @@ function SelectScrollDownButton({
 export {
   Select,
   SelectContent,
+  SelectEmpty,
   SelectGroup,
   SelectItem,
   SelectLabel,

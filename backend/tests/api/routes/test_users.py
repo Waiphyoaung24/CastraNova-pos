@@ -492,3 +492,170 @@ def test_delete_user_without_privileges(
     )
     assert r.status_code == 403
     assert r.json()["detail"] == "The user doesn't have enough privileges"
+
+
+# --- Last-active-superuser demotion guard ------------------------------------
+# The shared test DB (session-scoped, no per-test rollback) keeps the seed
+# FIRST_SUPERUSER as the sole active superuser, so the "reject" tests target it.
+# They restore the seed in a finally so the RED run (no guard yet → PATCH would
+# actually demote the seed) cannot corrupt the seed for later tests.
+
+
+def _restore_seed_superuser(db: Session) -> None:
+    db.rollback()
+    db.expire_all()
+    seed = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert seed
+    seed.is_superuser = True
+    seed.is_active = True
+    db.add(seed)
+    db.commit()
+
+
+def test_cannot_demote_last_active_superuser(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    seed = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert seed
+    try:
+        r = client.patch(
+            f"{settings.API_V1_STR}/users/{seed.id}",
+            headers=superuser_token_headers,
+            json={"is_superuser": False},
+        )
+        assert r.status_code == 403
+        assert r.json()["detail"] == "Cannot remove the last active superuser"
+    finally:
+        _restore_seed_superuser(db)
+
+
+def test_cannot_deactivate_last_active_superuser(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    seed = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert seed
+    try:
+        r = client.patch(
+            f"{settings.API_V1_STR}/users/{seed.id}",
+            headers=superuser_token_headers,
+            json={"is_active": False},
+        )
+        assert r.status_code == 403
+        assert r.json()["detail"] == "Cannot remove the last active superuser"
+    finally:
+        _restore_seed_superuser(db)
+
+
+def test_can_demote_superuser_when_another_active_superuser_exists(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    # A second active superuser exists alongside the seed, so demoting it does
+    # not reach zero superusers and must be allowed.
+    extra = crud.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(),
+            password=random_lower_string(),
+            is_superuser=True,
+        ),
+    )
+    try:
+        r = client.patch(
+            f"{settings.API_V1_STR}/users/{extra.id}",
+            headers=superuser_token_headers,
+            json={"is_superuser": False},
+        )
+        assert r.status_code == 200
+        assert r.json()["is_superuser"] is False
+    finally:
+        db.delete(db.get(User, extra.id))
+        db.commit()
+
+
+def test_can_update_other_fields_on_sole_superuser(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    # The guard must only block demotion/deactivation, not ordinary edits.
+    seed = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+    assert seed
+    original_name = seed.full_name
+    try:
+        r = client.patch(
+            f"{settings.API_V1_STR}/users/{seed.id}",
+            headers=superuser_token_headers,
+            json={"full_name": "Seed Superuser"},
+        )
+        assert r.status_code == 200
+        assert r.json()["full_name"] == "Seed Superuser"
+    finally:
+        db.expire_all()
+        seed = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
+        assert seed
+        seed.full_name = original_name
+        db.add(seed)
+        db.commit()
+
+
+def test_options_not_truncated_at_100(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    emails = [random_email() for _ in range(105)]
+    for email in emails:
+        crud.create_user(
+            session=db, user_create=UserCreate(email=email, password=random_lower_string())
+        )
+
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    option_emails = {o["email"] for o in r.json()}
+    for email in emails:
+        assert email in option_emails
+
+    r = client.get(f"{settings.API_V1_STR}/users/", headers=superuser_token_headers)
+    assert r.status_code == 200
+    assert len(r.json()["data"]) == 100
+
+
+def test_bkk_admin_can_read_user_options(
+    client: TestClient, bkk_admin_token_headers: dict[str, str]
+) -> None:
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=bkk_admin_token_headers)
+    assert r.status_code == 200
+
+
+def test_staff_cannot_read_user_options(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=staff_token_headers)
+    assert r.status_code == 403
+
+
+def test_read_user_options_payload_shape(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    email = random_email()
+    user = crud.create_user(
+        session=db, user_create=UserCreate(email=email, password=random_lower_string())
+    )
+
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    match = next(o for o in r.json() if o["id"] == str(user.id))
+    assert match["email"] == email
+    assert set(match.keys()) == {"id", "full_name", "email"}
+
+
+def test_read_user_options_includes_inactive_user(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session
+) -> None:
+    email = random_email()
+    user = crud.create_user(
+        session=db, user_create=UserCreate(email=email, password=random_lower_string())
+    )
+    user.is_active = False
+    db.add(user)
+    db.commit()
+
+    r = client.get(f"{settings.API_V1_STR}/users/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    assert email in {o["email"] for o in r.json()}

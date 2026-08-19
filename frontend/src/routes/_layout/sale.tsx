@@ -1,40 +1,46 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ScanLine } from "lucide-react"
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { ShoppingCart } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import {
-  type CustomerPublic,
-  CustomersService,
-  ProductsService,
-  type SaleCreateRequest,
-  type SalePublic,
-  type SaleStaffPublic,
+import type {
+  ApiError,
+  CustomerOption,
+  PricingOverridePublic,
+  SaleCreateRequest,
+  SalePublic,
+  SaleStaffPublic,
 } from "@/client"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
+import { PricingOverridesService } from "@/client"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
+import { PriceOverrideDialog } from "@/components/pos/PriceOverrideDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
+import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
 import {
   addScanToCart,
+  applyOverride,
   buildSaleRequest,
   type CartLine,
+  cartHasPendingOverride,
+  clearOverride,
+  type LineOverride,
   removeLine,
   setLineQuantity,
 } from "@/lib/sale-cart"
+import type { Queued } from "@/lib/sync-producer"
+import { extractErrorMessage } from "@/utils"
 
 export const Route = createFileRoute("/_layout/sale")({
   component: Sale,
@@ -44,15 +50,14 @@ export const Route = createFileRoute("/_layout/sale")({
   }),
 })
 
-const WALK_IN_RE = /walk[\s-]?in/i
-
-/** A walk-in customer is the default counter sale when no specific customer is chosen. */
-function findWalkIn(customers: CustomerPublic[]): CustomerPublic | undefined {
-  return customers.find((c) => WALK_IN_RE.test(c.name))
-}
+// Matches the 409 raised by consume_quantity_fifo (backend/app/crud.py) so the
+// oversell case gets its own toast title. This couples the UI to backend prose:
+// reword that message and the sale screen silently falls back to a generic
+// error. Keep the two in sync until the backend carries a stable error code.
+const INSUFFICIENT_STOCK_PREFIX = "Insufficient stock"
 
 interface CheckoutPanelProps {
-  customers: CustomerPublic[]
+  customers: CustomerOption[]
   customerId: string
   onCustomerChange: (value: string) => void
   canCheckout: boolean
@@ -60,6 +65,7 @@ interface CheckoutPanelProps {
   /** Drives the button label: queued (offline) vs. completing vs. idle. */
   isPaused: boolean
   isPending: boolean
+  waitingForOverride: boolean
 }
 
 /**
@@ -76,25 +82,23 @@ function CheckoutPanel({
   onCheckout,
   isPaused,
   isPending,
+  waitingForOverride,
 }: CheckoutPanelProps) {
-  const customerSelectId = useId()
-
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor={customerSelectId}>Customer</Label>
-        <Select value={customerId} onValueChange={onCustomerChange}>
-          <SelectTrigger id={customerSelectId} className="w-full">
-            <SelectValue placeholder="Select a customer" />
-          </SelectTrigger>
-          <SelectContent>
-            {customers.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Label>Customer</Label>
+        <EntityCombobox
+          items={customers}
+          value={customerId || undefined}
+          onChange={(value) => onCustomerChange(value ?? "")}
+          getKey={(customer) => customer.id}
+          getLabel={(customer) => customer.name}
+          placeholder="Select a customer"
+          searchPlaceholder="Search customers…"
+          emptyText="No customers available"
+          ariaLabel="Customer"
+        />
         <CustomerCreateDialog onCreated={(c) => onCustomerChange(c.id)} />
       </div>
 
@@ -111,6 +115,11 @@ function CheckoutPanel({
             ? "Completing…"
             : "Complete sale"}
       </Button>
+      {waitingForOverride ? (
+        <p className="text-muted-foreground text-center text-sm">
+          Waiting for override approval
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -122,20 +131,13 @@ function Sale() {
   const [lines, setLines] = useState<CartLine[]>([])
   const [customerId, setCustomerId] = useState<string>("")
   const [saleResult, setSaleResult] = useState<SaleResultSummary | undefined>()
-  const scanRef = useRef<ScanInputHandle>(null)
+  const [scanNotice, setScanNotice] = useState("")
+  const scanRef = useRef<ScanFieldHandle>(null)
+  const [overrideKey, setOverrideKey] = useState<string | null>(null)
+  const overrideLine = lines.find((l) => l.key === overrideKey) ?? null
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
-    // Reference data: hold steady mid-sale to avoid price drift / refetch churn.
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions({ activeOnly: true })
+  const { data: customers } = useCustomerOptions()
 
   const priceMap = useMemo(
     () =>
@@ -143,31 +145,33 @@ function Sale() {
     [products],
   )
 
-  // Default-select the walk-in customer once customers load, if one exists.
-  useEffect(() => {
-    if (!customers || customerId) return
-    const walkIn = findWalkIn(customers)
-    if (walkIn) setCustomerId(walkIn.id)
-  }, [customers, customerId])
-
   const { resolve, result, isSearching, notFound, isError, reset } =
     useScanLookup()
 
   // Fold each resolved scan into the cart, then reset so the next scan registers.
-  // A fresh scan also clears any stale post-sale totals.
+  // A fresh scan also clears any stale post-sale totals. A serialized product's
+  // SKU is refused outright: it names the product, not the piece, so there is no
+  // unit to sell (the backend rejects such a line at checkout anyway).
   useEffect(() => {
     if (!result) return
-    if (result.kind !== "NOT_FOUND") {
+    if (result.kind === "SERIALIZED_SKU") {
+      setScanNotice(
+        `${result.data.sku} is a serialized item — scan the unit's shop barcode instead.`,
+      )
+    } else if (result.kind !== "NOT_FOUND") {
       setLines((prev) => addScanToCart(prev, result, priceMap))
+      setScanNotice("")
       setSaleResult(undefined)
+    } else {
+      setScanNotice("")
     }
     reset()
   }, [result, priceMap, reset])
 
   const mutation = useMutation<
     SalePublic | SaleStaffPublic,
-    Error,
-    SaleCreateRequest
+    ApiError,
+    Queued<SaleCreateRequest>
   >({
     // No mutationFn here on purpose: inherit the persisted ["sales"] default from
     // query-client.ts so offline mutations are queued and replayed by key.
@@ -179,74 +183,123 @@ function Sale() {
           "total_cogs_thb" in data ? data.total_cogs_thb : undefined,
       })
       setLines([])
+      setOverrideKey(null)
       showSuccessToast("Sale completed.")
       // Return focus to the scan field so the next sale can begin immediately.
       scanRef.current?.focus()
     },
-    onError: () => {
-      showErrorToast("Could not complete the sale. Please try again.")
+    // Surface the server reason (e.g. "Product X is inactive", "Unit already
+    // SOLD", insufficient stock) — these are user-actionable and retrying will
+    // never clear them. Falls back to a generic message. Insufficient-stock
+    // conflicts get a dedicated title so they don't read as a generic fault.
+    onError: (err: ApiError) => {
+      const message = extractErrorMessage(err)
+      if (err.status === 409 && message.startsWith(INSUFFICIENT_STOCK_PREFIX)) {
+        showErrorToast(message, "Insufficient Stock")
+        return
+      }
+      showErrorToast(message)
     },
   })
+
+  const handleOverrideCreated = useCallback(
+    (key: string, override: LineOverride) => {
+      setLines((prev) => applyOverride(prev, key, override))
+    },
+    [],
+  )
+
+  const handleOverrideDecided = useCallback(
+    (key: string, decided: PricingOverridePublic) => {
+      if (decided.state === "APPROVED") {
+        setLines((prev) =>
+          applyOverride(prev, key, {
+            id: decided.id,
+            state: decided.state,
+            requestedPriceThb: Number(decided.requested_price_thb),
+          }),
+        )
+        showSuccessToast("Override approved.")
+      } else if (decided.state === "REJECTED") {
+        setLines((prev) => clearOverride(prev, key))
+        showErrorToast("Override rejected — price reverted.")
+      }
+    },
+    [showSuccessToast, showErrorToast],
+  )
 
   // Gating on !isPending intentionally locks checkout while a sale is in flight
   // OR queued offline (isPaused keeps isPending true). This is the single-sale-
   // offline design: the spec only requires one queued sale surviving reload +
   // replay — multi-sale-offline cart-clearing is explicitly out of scope.
+  const waitingForOverride = cartHasPendingOverride(lines)
   const canCheckout =
-    lines.length > 0 && customerId !== "" && !mutation.isPending
+    lines.length > 0 &&
+    customerId !== "" &&
+    !mutation.isPending &&
+    !waitingForOverride
 
   const handleCheckout = useCallback(() => {
     if (!canCheckout) return
     // One idempotency key per attempt, captured into the variables passed to
     // mutate — an offline replay reuses the same key so the backend dedupes.
     const request = buildSaleRequest(lines, customerId, crypto.randomUUID())
-    mutation.mutate(request)
+    mutation.mutate(queued(request, request.idempotency_key))
   }, [canCheckout, lines, customerId, mutation])
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Sale</h1>
-        <p className="text-muted-foreground">
-          Scan items to build a sale, then check out.
-        </p>
-      </div>
+      <PageHeader
+        title="Sale"
+        description="Scan items to build a sale, then check out."
+      />
 
       <div className="grid gap-6 md:grid-cols-[1fr_20rem]">
         {/* Left pane: scan bar + cart lines */}
         <div className="space-y-4">
-          <div className="space-y-2">
-            {/* ScanInput carries its own aria-label="Scan barcode"; this is a
-                visible caption, not a form-control label. */}
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <ScanLine
-                className="text-muted-foreground size-4"
-                aria-hidden="true"
-              />
-              Scan item
-            </p>
-            <ScanInput ref={scanRef} onScan={resolve} />
-            <CameraScanFallback onScan={resolve} />
-            {/* Two statically-typed live regions: a dynamic aria-live value is
-                unreliable across screen readers, so each politeness level gets
-                its own always-present region. */}
-            <p
-              aria-live="assertive"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isError
-                ? "Scan lookup failed. Try again."
-                : notFound
-                  ? "No item found for that code."
-                  : ""}
-            </p>
-            <p
-              aria-live="polite"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isSearching ? "Searching…" : ""}
-            </p>
-          </div>
+          <Alert>
+            <ShoppingCart />
+            <AlertTitle>Build a counter sale</AlertTitle>
+            <AlertDescription>
+              Scan each item as you go — it's added to the cart and priced
+              automatically. Choose a customer, then complete the sale to record
+              it and draw the stock down.
+            </AlertDescription>
+          </Alert>
+
+          <ScanField
+            ref={scanRef}
+            label="Scan item"
+            clearOnScan
+            onScan={resolve}
+            status={
+              // Two statically-typed live regions: a dynamic aria-live value is
+              // unreliable across screen readers, so each politeness level gets
+              // its own always-present region.
+              <>
+                <p
+                  aria-live="assertive"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isError
+                    ? "Scan lookup failed. Try again."
+                    : notFound
+                      ? "No item found for that code."
+                      : scanNotice}
+                </p>
+                <p
+                  aria-live="polite"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isSearching ? "Searching…" : ""}
+                </p>
+              </>
+            }
+          />
+          <p className="text-muted-foreground text-sm">
+            Scan the shop barcode on a unit, or a product code (SKU) for counted
+            items.
+          </p>
 
           <ScanCart
             lines={lines}
@@ -256,7 +309,28 @@ function Sale() {
             }
             onRemove={(key) => setLines((prev) => removeLine(prev, key))}
             saleResult={saleResult}
+            onPriceClick={setOverrideKey}
           />
+          <PriceOverrideDialog
+            line={overrideLine}
+            onOpenChange={(open) => {
+              if (!open) setOverrideKey(null)
+            }}
+            onCreated={handleOverrideCreated}
+            targetKind="SALE_LINE"
+          />
+          {lines
+            .filter((l) => l.override?.state === "PENDING")
+            .map((l) =>
+              l.override ? (
+                <PendingOverrideWatcher
+                  key={l.override.id}
+                  overrideId={l.override.id}
+                  lineKey={l.key}
+                  onDecided={handleOverrideDecided}
+                />
+              ) : null,
+            )}
         </div>
 
         {/* Right pane (desktop): customer + checkout */}
@@ -269,6 +343,7 @@ function Sale() {
             onCheckout={handleCheckout}
             isPaused={mutation.isPaused}
             isPending={mutation.isPending}
+            waitingForOverride={waitingForOverride}
           />
         </div>
       </div>
@@ -285,8 +360,56 @@ function Sale() {
           onCheckout={handleCheckout}
           isPaused={mutation.isPaused}
           isPending={mutation.isPending}
+          waitingForOverride={waitingForOverride}
         />
       </div>
     </div>
   )
+}
+
+/**
+ * Polls one PENDING override until the admin decides it (FR-010). One instance
+ * is rendered per pending line — a component per query keeps hooks out of
+ * loops. Unmounts once the decision is applied (the line stops being PENDING).
+ */
+function PendingOverrideWatcher({
+  overrideId,
+  lineKey,
+  onDecided,
+}: {
+  overrideId: string
+  lineKey: string
+  onDecided: (key: string, decided: PricingOverridePublic) => void
+}) {
+  const { data, isError } = useQuery({
+    queryKey: ["pricing-override", overrideId],
+    queryFn: () => PricingOverridesService.getPricingOverride({ overrideId }),
+    // v5 function form — keep polling every 4s until a decision lands.
+    refetchInterval: (query) =>
+      query.state.data === undefined || query.state.data.state === "PENDING"
+        ? 4_000
+        : false,
+    // The 4s interval IS the retry mechanism: default retries would burst up
+    // to 4 requests per failed tick against PRICING_OVERRIDE_POLL_RATE_LIMIT.
+    retry: false,
+  })
+
+  // Toast fns from useCustomToast change identity every render, which would
+  // churn onDecided and re-fire this effect on unrelated re-renders; a ref
+  // keeps the latest callback without re-running the effect.
+  const onDecidedRef = useRef(onDecided)
+  onDecidedRef.current = onDecided
+
+  useEffect(() => {
+    if (data && data.state !== "PENDING") onDecidedRef.current(lineKey, data)
+  }, [data, lineKey])
+
+  if (isError) {
+    return (
+      <p aria-live="polite" className="text-muted-foreground text-sm">
+        Couldn't check approval status — retrying…
+      </p>
+    )
+  }
+  return null
 }

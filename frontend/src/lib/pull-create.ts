@@ -2,21 +2,13 @@ import type {
   ProjectPullCreate,
   ProjectPullLineCreate,
 } from "@/client/types.gen"
-import type { ScanLookupResult } from "@/hooks/useScanLookup"
 
 // ---------------------------------------------------------------------------
 // Pure create-cart logic for the project-pull screen (admin create flow).
 //
-// UNIT scans become serialized request lines (keyed by barcode, qty 1). PART
-// scans become quantity request lines (keyed by sku, qty merges). The catalog
-// (sku -> {productId, modelName}) supplies display names. No cost anywhere.
+// UNIT lines are serialized request lines (keyed by barcode, qty 1). PART
+// lines are quantity request lines (keyed by sku, qty merges). No cost anywhere.
 // ---------------------------------------------------------------------------
-
-/** Catalog entry keyed by sku, built from the products query. */
-export type CreateCatalogEntry = {
-  productId: string
-  modelName: string
-}
 
 /** A request line in the create cart, keyed by barcode (UNIT) or sku (PART). */
 export type CreateLine = {
@@ -31,58 +23,60 @@ export type CreateLine = {
   requestedQty: number
 }
 
-/**
- * Append a scanned item to the create cart, or merge it.
- * UNIT: keyed by barcode; re-scan is a no-op (same ref). Always added (a scanned
- *       unit is real); name falls back to its sku if absent from the catalog.
- * PART: keyed by sku; must be in the catalog, else unchanged (same ref); re-scan
- *       increments requestedQty.
- * NOT_FOUND: unchanged (same ref).
- */
-export function addScanToCreateCart(
+/** Merge a QUANTITY product into the cart as a PART line, keyed by sku. */
+export function addPartToCreateCart(
   lines: CreateLine[],
-  scan: ScanLookupResult,
-  catalog: Map<string, CreateCatalogEntry>,
+  product: { productId: string; sku: string; modelName: string },
+  qty: number,
 ): CreateLine[] {
-  if (scan.kind === "UNIT") {
-    const key = scan.data.castranova_barcode
-    if (lines.some((l) => l.lineKind === "UNIT" && l.key === key)) return lines
-    const entry = catalog.get(scan.data.sku)
-    return [
-      ...lines,
-      {
-        key,
+  const add = Math.max(1, Math.floor(Number.isFinite(qty) ? qty : 1))
+  const key = product.sku
+  if (lines.some((l) => l.key === key)) {
+    return lines.map((l) =>
+      l.key === key ? { ...l, requestedQty: l.requestedQty + add } : l,
+    )
+  }
+  return [
+    ...lines,
+    {
+      key,
+      lineKind: "PART",
+      productId: product.productId,
+      sku: product.sku,
+      modelName: product.modelName,
+      requestedQty: add,
+    },
+  ]
+}
+
+/**
+ * Append one UNIT line per serial (keyed by serial), skipping serials already
+ * in the cart. Returns the same array ref when nothing fresh is added.
+ */
+export function addUnitsToCreateCart(
+  lines: CreateLine[],
+  product: { productId: string; sku: string; modelName: string },
+  serials: string[],
+): CreateLine[] {
+  const present = new Set(
+    lines.filter((l) => l.lineKind === "UNIT").map((l) => l.key),
+  )
+  const fresh = serials.filter((s) => s.length > 0 && !present.has(s))
+  if (fresh.length === 0) return lines
+  return [
+    ...lines,
+    ...fresh.map(
+      (serial): CreateLine => ({
+        key: serial,
         lineKind: "UNIT",
-        productId: scan.data.product_id,
-        sku: scan.data.sku,
-        modelName: entry?.modelName ?? scan.data.sku,
-        unitSerial: key,
+        productId: product.productId,
+        sku: product.sku,
+        modelName: product.modelName,
+        unitSerial: serial,
         requestedQty: 1,
-      },
-    ]
-  }
-  if (scan.kind === "PART") {
-    const entry = catalog.get(scan.data.sku)
-    if (!entry) return lines
-    const key = scan.data.sku
-    if (lines.some((l) => l.key === key)) {
-      return lines.map((l) =>
-        l.key === key ? { ...l, requestedQty: l.requestedQty + 1 } : l,
-      )
-    }
-    return [
-      ...lines,
-      {
-        key,
-        lineKind: "PART",
-        productId: entry.productId,
-        sku: scan.data.sku,
-        modelName: entry.modelName,
-        requestedQty: 1,
-      },
-    ]
-  }
-  return lines
+      }),
+    ),
+  ]
 }
 
 /** Set a PART line's requestedQty (floored at 1). UNIT lines are left at 1. */

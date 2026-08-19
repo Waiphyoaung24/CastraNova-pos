@@ -27,10 +27,10 @@ test.describe("Admin user management", () => {
 
     await page.getByRole("button", { name: "Add User" }).click()
 
-    await page.getByPlaceholder("Email").fill(email)
-    await page.getByPlaceholder("Full name").fill(fullName)
-    await page.getByPlaceholder("Password").first().fill(password)
-    await page.getByPlaceholder("Password").last().fill(password)
+    await page.getByPlaceholder("user@example.com").fill(email)
+    await page.getByPlaceholder("e.g. Jane Smith").fill(fullName)
+    await page.getByPlaceholder("At least 8 characters").fill(password)
+    await page.getByPlaceholder("Re-enter the password").fill(password)
 
     await page.getByRole("button", { name: "Save" }).click()
 
@@ -42,29 +42,10 @@ test.describe("Admin user management", () => {
     await expect(userRow).toBeVisible()
   })
 
-  test("Create a superuser", async ({ page }) => {
-    await page.goto("/admin")
-
-    const email = randomEmail()
-    const password = randomPassword()
-
-    await page.getByRole("button", { name: "Add User" }).click()
-
-    await page.getByPlaceholder("Email").fill(email)
-    await page.getByPlaceholder("Password").first().fill(password)
-    await page.getByPlaceholder("Password").last().fill(password)
-    await page.getByLabel("Is superuser?").check()
-    await page.getByLabel("Is active?").check()
-
-    await page.getByRole("button", { name: "Save" }).click()
-
-    await expect(page.getByText("User created successfully")).toBeVisible()
-
-    await expect(page.getByRole("dialog")).not.toBeVisible()
-
-    const userRow = page.getByRole("row").filter({ hasText: email })
-    await expect(userRow.getByText("Superuser")).toBeVisible()
-  })
+  // "Create a superuser" was removed on 2026-08-01: the Add User dialog no
+  // longer has an "Is superuser?" control (roles are set via the Role select,
+  // which offers only Admin and Staff), so a superuser cannot be created
+  // through the UI at all. roles.spec.ts covers the Admin-via-role-select path.
 
   test("Edit a user successfully", async ({ page }) => {
     await page.goto("/admin")
@@ -75,10 +56,10 @@ test.describe("Admin user management", () => {
     const updatedName = "Updated Name"
 
     await page.getByRole("button", { name: "Add User" }).click()
-    await page.getByPlaceholder("Email").fill(email)
-    await page.getByPlaceholder("Full name").fill(originalName)
-    await page.getByPlaceholder("Password").first().fill(password)
-    await page.getByPlaceholder("Password").last().fill(password)
+    await page.getByPlaceholder("user@example.com").fill(email)
+    await page.getByPlaceholder("e.g. Jane Smith").fill(originalName)
+    await page.getByPlaceholder("At least 8 characters").fill(password)
+    await page.getByPlaceholder("Re-enter the password").fill(password)
     await page.getByRole("button", { name: "Save" }).click()
 
     await expect(page.getByText("User created successfully")).toBeVisible()
@@ -89,7 +70,7 @@ test.describe("Admin user management", () => {
 
     await page.getByRole("menuitem", { name: "Edit User" }).click()
 
-    await page.getByPlaceholder("Full name").fill(updatedName)
+    await page.getByPlaceholder("e.g. Jane Smith").fill(updatedName)
     await page.getByRole("button", { name: "Save" }).click()
 
     await expect(page.getByText("User updated successfully")).toBeVisible()
@@ -107,9 +88,9 @@ test.describe("Admin user management", () => {
     const password = randomPassword()
 
     await page.getByRole("button", { name: "Add User" }).click()
-    await page.getByPlaceholder("Email").fill(email)
-    await page.getByPlaceholder("Password").first().fill(password)
-    await page.getByPlaceholder("Password").last().fill(password)
+    await page.getByPlaceholder("user@example.com").fill(email)
+    await page.getByPlaceholder("At least 8 characters").fill(password)
+    await page.getByPlaceholder("Re-enter the password").fill(password)
     await page.getByRole("button", { name: "Save" }).click()
 
     await expect(page.getByText("User created successfully")).toBeVisible()
@@ -136,7 +117,7 @@ test.describe("Admin user management", () => {
     await page.goto("/admin")
 
     await page.getByRole("button", { name: "Add User" }).click()
-    await page.getByPlaceholder("Email").fill("test@example.com")
+    await page.getByPlaceholder("user@example.com").fill("test@example.com")
 
     await page.getByRole("button", { name: "Cancel" }).click()
 
@@ -148,8 +129,8 @@ test.describe("Admin user management", () => {
 
     await page.getByRole("button", { name: "Add User" }).click()
 
-    await page.getByPlaceholder("Email").fill("invalid-email")
-    await page.getByPlaceholder("Email").blur()
+    await page.getByPlaceholder("user@example.com").fill("invalid-email")
+    await page.getByPlaceholder("user@example.com").blur()
 
     await expect(page.getByText("Invalid email address")).toBeVisible()
   })
@@ -159,9 +140,9 @@ test.describe("Admin user management", () => {
 
     await page.getByRole("button", { name: "Add User" }).click()
 
-    await page.getByPlaceholder("Email").fill(randomEmail())
-    await page.getByPlaceholder("Password").first().fill("short")
-    await page.getByPlaceholder("Password").last().fill("short")
+    await page.getByPlaceholder("user@example.com").fill(randomEmail())
+    await page.getByPlaceholder("At least 8 characters").fill("short")
+    await page.getByPlaceholder("Re-enter the password").fill("short")
     await page.getByRole("button", { name: "Save" }).click()
 
     await expect(
@@ -174,10 +155,10 @@ test.describe("Admin user management", () => {
 
     await page.getByRole("button", { name: "Add User" }).click()
 
-    await page.getByPlaceholder("Email").fill(randomEmail())
-    await page.getByPlaceholder("Password").first().fill(randomPassword())
-    await page.getByPlaceholder("Password").last().fill("different12345")
-    await page.getByPlaceholder("Password").last().blur()
+    await page.getByPlaceholder("user@example.com").fill(randomEmail())
+    await page.getByPlaceholder("At least 8 characters").fill(randomPassword())
+    await page.getByPlaceholder("Re-enter the password").fill("different12345")
+    await page.getByPlaceholder("Re-enter the password").blur()
 
     await expect(page.getByText("The passwords don't match")).toBeVisible()
   })

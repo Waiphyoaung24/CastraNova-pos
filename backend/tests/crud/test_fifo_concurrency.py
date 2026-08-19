@@ -20,11 +20,14 @@ from app.core.config import settings
 from app.core.db import engine
 from app.models import (
     CostLine,
+    CustomerCreate,
     Location,
     MovementType,
     PartBatch,
     PartMovement,
+    Product,
     ProductCreate,
+    ServiceTicketPartCreate,
     SupplierCreate,
     TrackingMode,
 )
@@ -139,6 +142,86 @@ def test_concurrent_fifo_no_oversell_no_deadlock(
         select(PartMovement).where(
             PartMovement.product_id == product_id,
             PartMovement.event_type == MovementType.SOLD,
+        )
+    ).all()
+    assert len(movements) == EXPECTED_WINNERS
+    total_costed = 0
+    for movement in movements:
+        cost_lines = db.exec(
+            select(CostLine).where(CostLine.part_movement_id == movement.id)
+        ).all()
+        assert sum(c.quantity for c in cost_lines) == movement.quantity
+        total_costed += sum(c.quantity for c in cost_lines)
+    assert total_costed == EXPECTED_CONSUMED
+
+
+def _record_once(
+    customer_id: uuid.UUID, sku: str, actor_user_id: uuid.UUID
+) -> str:
+    """One isolated consumer via the atomic record endpoint's crud path: record a
+    ticket consuming NEEDED. Returns 'ok', 'conflict', or 'error:<repr>'."""
+    with Session(engine) as session:
+        try:
+            crud.record_service_ticket(
+                session=session,
+                customer_id=customer_id,
+                issue="concurrent repair",
+                parts=[ServiceTicketPartCreate(sku=sku, quantity=NEEDED)],
+                idempotency_key=uuid.uuid4(),
+                actor_user_id=actor_user_id,
+            )
+            return "ok"
+        except HTTPException as exc:
+            session.rollback()
+            return "conflict" if exc.status_code == 409 else f"error:{exc.detail}"
+        except Exception as exc:  # deadlock / 500 / anything unexpected
+            session.rollback()
+            return f"error:{exc!r}"
+
+
+def test_concurrent_record_service_ticket_no_oversell_no_deadlock(
+    db: Session, stocked_product: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """The atomic record_service_ticket must hold the same §4.6 invariants under
+    a race: no oversell, no negative stock, one MAINTENANCE_OUT movement per
+    winner, clean 409 for losers, no deadlock/500."""
+    product_id, actor_user_id = stocked_product
+    product = db.get(Product, product_id)
+    assert product is not None
+    sku = product.sku
+    customer = crud.create_customer(
+        session=db, customer_in=CustomerCreate(name="Conc Repair")
+    )
+    db.commit()  # visible to the worker sessions (separate connections)
+    customer_id = customer.id
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        results = list(
+            pool.map(
+                lambda _: _record_once(customer_id, sku, actor_user_id),
+                range(WORKERS),
+            )
+        )
+
+    errors = [r for r in results if r.startswith("error:")]
+    assert not errors, errors
+    winners = results.count("ok")
+    losers = results.count("conflict")
+    assert winners == EXPECTED_WINNERS
+    assert losers == WORKERS - EXPECTED_WINNERS
+    assert losers >= 1  # real contention — at least one clean 409
+
+    db.expire_all()
+    batches = db.exec(
+        select(PartBatch).where(PartBatch.product_id == product_id)
+    ).all()
+    assert all(b.remaining_qty >= 0 for b in batches)
+    assert sum(b.remaining_qty for b in batches) == EXPECTED_REMAINING
+
+    movements = db.exec(
+        select(PartMovement).where(
+            PartMovement.product_id == product_id,
+            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
         )
     ).all()
     assert len(movements) == EXPECTED_WINNERS

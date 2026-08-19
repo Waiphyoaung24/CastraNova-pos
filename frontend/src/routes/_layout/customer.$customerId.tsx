@@ -6,6 +6,7 @@ import {
   type ProjectSummaryAdminPublic,
   type ProjectSummaryStaffPublic,
 } from "@/client"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -59,25 +60,27 @@ function CustomerDetail() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        {isAdmin && (
-          <Link
-            to="/projects"
-            className="text-muted-foreground text-sm hover:underline"
-          >
-            ← Projects
-          </Link>
-        )}
-        <div className="mt-2 flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">{customer.name}</h1>
+      <PageHeader
+        backLink={
+          isAdmin && (
+            <Link
+              to="/projects"
+              className="text-muted-foreground text-sm hover:underline"
+            >
+              ← Projects
+            </Link>
+          )
+        }
+        title={customer.name}
+        badge={
           <Badge variant="secondary">{customer.type ?? "END_CUSTOMER"}</Badge>
-        </div>
-        {(customer.contact || customer.country) && (
-          <p className="text-muted-foreground">
-            {[customer.contact, customer.country].filter(Boolean).join(" · ")}
-          </p>
-        )}
-      </div>
+        }
+        description={
+          customer.contact || customer.country
+            ? [customer.contact, customer.country].filter(Boolean).join(" · ")
+            : undefined
+        }
+      />
 
       {isAdmin && (
         <Card>

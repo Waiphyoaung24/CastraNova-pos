@@ -112,6 +112,14 @@ services:
       - POSTGRES_APP_USER=${POSTGRES_APP_USER}
       - POSTGRES_APP_PASSWORD=${POSTGRES_APP_PASSWORD}
       - SENTRY_DSN=${SENTRY_DSN}
+      # Trust X-Forwarded-For so the login rate limit keys on the real client,
+      # not Traefik's container IP (which made the 5/15min limit shop-global).
+      # Traefik strips client-supplied X-Forwarded-* by default, so end users
+      # can't spoof it. Residual risk (security review 2026-07-16): "*" also
+      # trusts XFF from other containers on the shared docker networks, and
+      # compose.override/dokploy publish backend ports directly — pin this to
+      # the proxy subnet once the production topology is settled.
+      - FORWARDED_ALLOW_IPS=*
 
     healthcheck:
       test:

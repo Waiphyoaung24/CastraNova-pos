@@ -59,3 +59,18 @@ export async function requireAdmin(): Promise<void> {
     throw redirect({ to: "/" })
   }
 }
+
+/**
+ * Superuser-only guard for user management (the Admin/Users page). Plain Admins
+ * (BKK_ADMIN) are redirected to "/". The backend user routes are already gated on
+ * `get_current_active_superuser`; this mirrors that on the client for clean UX.
+ */
+export async function requireSuperuser(): Promise<void> {
+  if (!isLoggedIn()) {
+    throw redirect({ to: "/login" })
+  }
+  const user = await UsersService.readUserMe()
+  if (!roleFlags(user).isSuperuser) {
+    throw redirect({ to: "/" })
+  }
+}

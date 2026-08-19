@@ -12,8 +12,15 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.main import api_router
 from app.core.config import settings
 from app.core.limiter import limiter
+from app.core.logging import (
+    configure_logging,
+    scrub_telegram_token_from_breadcrumb,
+    scrub_telegram_token_from_event,
+)
 
 logger = logging.getLogger(__name__)
+
+configure_logging()
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
@@ -21,7 +28,12 @@ def custom_generate_unique_id(route: APIRoute) -> str:
 
 
 if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
-    sentry_sdk.init(dsn=str(settings.SENTRY_DSN), enable_tracing=True)
+    sentry_sdk.init(
+        dsn=str(settings.SENTRY_DSN),
+        enable_tracing=True,
+        before_send=scrub_telegram_token_from_event,
+        before_breadcrumb=scrub_telegram_token_from_breadcrumb,
+    )
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

@@ -70,7 +70,7 @@ const baseItems: Entry[] = [
       { icon: ClipboardList, title: "Pulls", path: "/pulls" },
     ],
   },
-  // Notification opt-in (LINE/Viber), per-user, both roles (FR-018).
+  // Notification opt-in (LINE/Telegram), per-user, both roles (FR-018).
   { icon: Bell, title: "Notifications", path: "/notifications" },
 ]
 
@@ -118,21 +118,26 @@ const adminItems: Entry[] = [
   },
   // Append-only audit ledger viewer + offline sync-review queue — admin-only.
   { icon: ScrollText, title: "Audit", path: "/audit" },
+]
+
+// User-management page — Superuser-only (Superuser owns user management).
+const superuserItems: Entry[] = [
   { icon: Users, title: "Admin", path: "/admin" },
 ]
 
 export function AppSidebar() {
   const { user: currentUser } = useAuth()
-  const { isAdmin } = useRole()
+  const { isAdmin, isSuperuser } = useRole()
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="px-4 py-6 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:items-center">
         <Logo variant="responsive" />
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="scrollbar-thin">
         <Main entries={baseItems} label="Workspace" />
         {isAdmin ? <Main entries={adminItems} label="Admin" /> : null}
+        {isSuperuser ? <Main entries={superuserItems} label="Users" /> : null}
       </SidebarContent>
       <SidebarFooter>
         <User user={currentUser} />

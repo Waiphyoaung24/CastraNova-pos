@@ -64,6 +64,9 @@ def test_reconciles_privileges_and_discovers_ledgers(
         "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON "
         'SEQUENCES TO "castranova_app"',
         'GRANT DELETE ON "user" TO "castranova_app"',
+        'GRANT DELETE ON product TO "castranova_app"',
+        'GRANT DELETE ON telegramconnectcode TO "castranova_app"',
+        'GRANT DELETE ON lineconnectcode TO "castranova_app"',
         'REVOKE ALL ON alembic_version FROM "castranova_app"',
         'REVOKE UPDATE, DELETE ON public.unitmovement FROM "castranova_app"',
         'REVOKE UPDATE, DELETE ON public.futureledger FROM "castranova_app"',

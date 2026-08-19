@@ -11,6 +11,8 @@ LEGAL = [
     (S.IN_STOCK, M.MAINTENANCE_OUT, S.MAINTENANCE_OUT),
     (S.IN_STOCK, M.PROJECT_OUT, S.PROJECT_OUT),
     (S.IN_STOCK, M.ADJUSTED_OUT, S.ADJUSTED_OUT),
+    # Sale return (m035): the one edge back out of SOLD.
+    (S.SOLD, M.RETURNED, S.IN_STOCK),
 ]
 
 _LEGAL_KEYS = {(frm, mv) for frm, mv, _ in LEGAL}

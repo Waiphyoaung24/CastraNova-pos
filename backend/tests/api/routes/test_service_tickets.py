@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Iterator
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +22,8 @@ from app.models import (
     SupplierCreate,
     TrackingMode,
 )
+
+PREFIX = settings.API_V1_STR
 
 
 def _approved_ticket_override(
@@ -44,8 +47,6 @@ def _approved_ticket_override(
         session=db, override_id=ovr.id, decision="APPROVED", decided_by_user_id=user.id
     )
     return ovr.id
-
-PREFIX = settings.API_V1_STR
 
 
 @pytest.fixture
@@ -85,116 +86,126 @@ def seed_ticket_ctx(db: Session) -> Iterator[tuple[uuid.UUID, str, uuid.UUID]]:
     yield customer.id, product.sku, product.id
 
 
-def _open_body(customer_id: uuid.UUID, **over: object) -> dict:
-    body: dict = {
+def _record_body(
+    customer_id: uuid.UUID,
+    *,
+    parts: list[dict[str, Any]] | None = None,
+    **over: object,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
         "customer_id": str(customer_id),
         "issue": "Compressor noisy",
         "idempotency_key": str(uuid.uuid4()),
+        "parts": parts if parts is not None else [],
     }
     body.update(over)
     return body
 
 
-def _open(
-    client: TestClient, headers: dict[str, str], customer_id: uuid.UUID, **over: object
-) -> dict:
-    r = client.post(
-        f"{PREFIX}/service-tickets", headers=headers, json=_open_body(customer_id, **over)
+def _record(
+    client: TestClient,
+    headers: dict[str, str],
+    customer_id: uuid.UUID,
+    *,
+    parts: list[dict[str, Any]] | None = None,
+    **over: object,
+) -> Any:
+    return client.post(
+        f"{PREFIX}/service-tickets/record",
+        headers=headers,
+        json=_record_body(customer_id, parts=parts, **over),
+    )
+
+
+def _maint_movements(db: Session, product_id: uuid.UUID) -> list[PartMovement]:
+    return list(
+        db.exec(
+            select(PartMovement).where(
+                PartMovement.product_id == product_id,
+                PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+            )
+        ).all()
+    )
+
+
+def test_record_creates_closed_ticket(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
+) -> None:
+    customer_id, _, _ = seed_ticket_ctx
+    r = _record(
+        client, staff_token_headers, customer_id, resolution="Replaced bearings"
     )
     assert r.status_code == 200, r.text
-    return r.json()
-
-
-def test_open_ticket_creates_open_ticket(
-    client: TestClient,
-    staff_token_headers: dict[str, str],
-    seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
-) -> None:
-    customer_id, _, _ = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    assert ticket["closed_at"] is None
+    ticket = r.json()
+    # Recorded == closed: there is no persistent open state.
+    assert ticket["closed_at"] is not None
     assert ticket["opened_at"]
     assert ticket["issue"] == "Compressor noisy"
+    assert ticket["resolution"] == "Replaced bearings"
+    assert ticket["parts"] == []
 
 
-def test_open_ticket_idempotent_replay(
-    client: TestClient,
-    staff_token_headers: dict[str, str],
-    seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
-) -> None:
-    customer_id, _, _ = seed_ticket_ctx
-    body = _open_body(customer_id)
-    r1 = client.post(f"{PREFIX}/service-tickets", headers=staff_token_headers, json=body)
-    r2 = client.post(f"{PREFIX}/service-tickets", headers=staff_token_headers, json=body)
-    assert r1.status_code == 200 and r2.status_code == 200
-    assert r1.json()["id"] == r2.json()["id"]
-
-
-def test_add_part_defaults_to_repair_price(
+def test_record_part_defaults_to_repair_price(
     client: TestClient,
     staff_token_headers: dict[str, str],
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
     customer_id, sku, product_id = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    r = client.post(
-        f"{PREFIX}/service-tickets/{ticket['id']}/parts",
-        headers=staff_token_headers,
-        json={"sku": sku, "quantity": 2},
+    r = _record(
+        client,
+        staff_token_headers,
+        customer_id,
+        parts=[{"sku": sku, "quantity": 2}],
     )
     assert r.status_code == 200, r.text
-    part = r.json()
+    part = r.json()["parts"][0]
     assert part["product_id"] == str(product_id)
     assert part["quantity"] == 2
     assert part["unit_price_thb"] == "20.00"  # product.repair_price_thb
 
 
-def test_add_part_unknown_sku_404(
+def test_record_unknown_sku_404_creates_nothing(
     client: TestClient,
     staff_token_headers: dict[str, str],
+    db: Session,
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
     customer_id, _, _ = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    r = client.post(
-        f"{PREFIX}/service-tickets/{ticket['id']}/parts",
-        headers=staff_token_headers,
-        json={"sku": "NOPE", "quantity": 1},
+    before = len(db.exec(select(ServiceTicket)).all())
+    r = _record(
+        client,
+        staff_token_headers,
+        customer_id,
+        parts=[{"sku": "NOPE", "quantity": 1}],
     )
     assert r.status_code == 404
+    db.expire_all()
+    assert len(db.exec(select(ServiceTicket)).all()) == before  # no orphan ticket
 
 
-def test_close_runs_fifo_and_sets_closed_at(
+def test_record_runs_fifo_and_closes(
     client: TestClient,
     staff_token_headers: dict[str, str],
     db: Session,
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
     customer_id, sku, product_id = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    tid = ticket["id"]
-    client.post(
-        f"{PREFIX}/service-tickets/{tid}/parts",
-        headers=staff_token_headers,
-        json={"sku": sku, "quantity": 5},  # 3@10 + 2@12
-    )
-    r = client.post(
-        f"{PREFIX}/service-tickets/{tid}/close",
-        headers=staff_token_headers,
-        json={"resolution": "Replaced bearings"},
+    r = _record(
+        client,
+        staff_token_headers,
+        customer_id,
+        parts=[{"sku": sku, "quantity": 5}],  # 3@10 + 2@12
+        resolution="Replaced bearings",
     )
     assert r.status_code == 200, r.text
     closed = r.json()
     assert closed["closed_at"] is not None
-    assert closed["resolution"] == "Replaced bearings"
+    tid = closed["id"]
 
     db.expire_all()
-    movements = db.exec(
-        select(PartMovement).where(
-            PartMovement.product_id == product_id,
-            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
-        )
-    ).all()
+    movements = _maint_movements(db, product_id)
     assert len(movements) == 1
     assert movements[0].quantity == 5
     assert movements[0].service_ticket_id == uuid.UUID(tid)
@@ -205,57 +216,54 @@ def test_close_runs_fifo_and_sets_closed_at(
     assert sum(c.total_cost_thb for c in cost_lines) == Decimal("54.00")
 
 
-def test_add_part_to_closed_ticket_rejected(
+def test_record_idempotent_replay_consumes_once(
     client: TestClient,
     staff_token_headers: dict[str, str],
+    db: Session,
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
-    customer_id, sku, _ = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    tid = ticket["id"]
-    client.post(
-        f"{PREFIX}/service-tickets/{tid}/parts",
-        headers=staff_token_headers,
-        json={"sku": sku, "quantity": 1},
+    # The whole-ticket idempotency_key makes a replay return the same ticket and
+    # consume stock exactly once — the regression the old 3-call flow could not
+    # guarantee (add-part was not idempotent -> duplicate part lines).
+    customer_id, sku, product_id = seed_ticket_ctx
+    body = _record_body(customer_id, parts=[{"sku": sku, "quantity": 2}])
+    r1 = client.post(
+        f"{PREFIX}/service-tickets/record", headers=staff_token_headers, json=body
     )
-    client.post(f"{PREFIX}/service-tickets/{tid}/close", headers=staff_token_headers, json={})
-    r = client.post(
-        f"{PREFIX}/service-tickets/{tid}/parts",
-        headers=staff_token_headers,
-        json={"sku": sku, "quantity": 1},
+    r2 = client.post(
+        f"{PREFIX}/service-tickets/record", headers=staff_token_headers, json=body
     )
-    assert r.status_code == 409
+    assert r1.status_code == 200 and r2.status_code == 200, r2.text
+    assert r1.json()["id"] == r2.json()["id"]  # same ticket
+    # exactly one part line, consumed exactly once
+    assert len(r2.json()["parts"]) == 1
+    db.expire_all()
+    movements = _maint_movements(db, product_id)
+    assert len(movements) == 1
+    assert movements[0].quantity == 2
 
 
-def test_close_insufficient_stock_409_keeps_ticket_open(
+def test_record_insufficient_stock_409_creates_nothing(
     client: TestClient,
     staff_token_headers: dict[str, str],
     db: Session,
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
     customer_id, sku, product_id = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    tid = ticket["id"]
-    client.post(
-        f"{PREFIX}/service-tickets/{tid}/parts",
-        headers=staff_token_headers,
-        json={"sku": sku, "quantity": 100},  # only 7 in stock
+    before = len(db.exec(select(ServiceTicket)).all())
+    r = _record(
+        client,
+        staff_token_headers,
+        customer_id,
+        parts=[{"sku": sku, "quantity": 100}],  # only 7 in stock
     )
-    r = client.post(f"{PREFIX}/service-tickets/{tid}/close", headers=staff_token_headers, json={})
     assert r.status_code == 409
-
     db.expire_all()
-    ticket_row = db.get(ServiceTicket, uuid.UUID(tid))
-    assert ticket_row is not None and ticket_row.closed_at is None  # not closed
-    assert not db.exec(
-        select(PartMovement).where(
-            PartMovement.product_id == product_id,
-            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
-        )
-    ).all()  # no consumption written (the RECEIVED seed movements remain)
+    assert len(db.exec(select(ServiceTicket)).all()) == before  # nothing committed
+    assert not _maint_movements(db, product_id)  # no consumption written
 
 
-def test_add_part_with_approved_override_uses_price(
+def test_record_part_with_approved_override_uses_price(
     client: TestClient,
     staff_token_headers: dict[str, str],
     db: Session,
@@ -264,21 +272,23 @@ def test_add_part_with_approved_override_uses_price(
     # FR-010: a price other than repair_price (20.00) needs an approved override.
     customer_id, sku, product_id = seed_ticket_ctx
     override_id = _approved_ticket_override(db, product_id, "35.00")
-    ticket = _open(client, staff_token_headers, customer_id)
-    r = client.post(
-        f"{PREFIX}/service-tickets/{ticket['id']}/parts",
-        headers=staff_token_headers,
-        json={
-            "sku": sku,
-            "quantity": 1,
-            "pricing_override_request_id": str(override_id),
-        },
+    r = _record(
+        client,
+        staff_token_headers,
+        customer_id,
+        parts=[
+            {
+                "sku": sku,
+                "quantity": 1,
+                "pricing_override_request_id": str(override_id),
+            }
+        ],
     )
     assert r.status_code == 200, r.text
-    assert r.json()["unit_price_thb"] == "35.00"  # override, not repair_price 20.00
+    assert r.json()["parts"][0]["unit_price_thb"] == "35.00"  # override, not 20.00
 
 
-def test_add_part_with_pending_override_blocked(
+def test_record_part_with_pending_override_blocked(
     client: TestClient,
     staff_token_headers: dict[str, str],
     db: Session,
@@ -298,64 +308,54 @@ def test_add_part_with_pending_override_blocked(
         ),
         created_by_user_id=user.id,
     )
-    ticket = _open(client, staff_token_headers, customer_id)
-    r = client.post(
-        f"{PREFIX}/service-tickets/{ticket['id']}/parts",
-        headers=staff_token_headers,
-        json={
-            "sku": sku,
-            "quantity": 1,
-            "pricing_override_request_id": str(ovr.id),
-        },
+    r = _record(
+        client,
+        staff_token_headers,
+        customer_id,
+        parts=[
+            {"sku": sku, "quantity": 1, "pricing_override_request_id": str(ovr.id)}
+        ],
     )
     assert r.status_code == 400, r.text
 
 
-def test_close_ticket_with_no_parts_succeeds(
+def test_record_no_parts_succeeds(
     client: TestClient,
     staff_token_headers: dict[str, str],
     db: Session,
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
     customer_id, _, product_id = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    r = client.post(
-        f"{PREFIX}/service-tickets/{ticket['id']}/close",
-        headers=staff_token_headers,
-        json={},
-    )
+    r = _record(client, staff_token_headers, customer_id)
     assert r.status_code == 200, r.text
     assert r.json()["closed_at"] is not None
     db.expire_all()
-    assert not db.exec(
-        select(PartMovement).where(
-            PartMovement.product_id == product_id,
-            PartMovement.event_type == MovementType.MAINTENANCE_OUT,
-        )
-    ).all()
+    assert not _maint_movements(db, product_id)
 
 
-def test_close_is_idempotent(
+def test_record_duplicate_sku_422(
     client: TestClient,
     staff_token_headers: dict[str, str],
-    db: Session,
     seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
 ) -> None:
+    # One line per SKU (the UI merges by SKU); two lines for the same SKU is a
+    # client bug, rejected rather than double-consumed.
     customer_id, sku, _ = seed_ticket_ctx
-    ticket = _open(client, staff_token_headers, customer_id)
-    tid = ticket["id"]
-    client.post(
-        f"{PREFIX}/service-tickets/{tid}/parts",
-        headers=staff_token_headers,
-        json={"sku": sku, "quantity": 2},
+    r = _record(
+        client,
+        staff_token_headers,
+        customer_id,
+        parts=[{"sku": sku, "quantity": 1}, {"sku": sku, "quantity": 2}],
     )
-    client.post(f"{PREFIX}/service-tickets/{tid}/close", headers=staff_token_headers, json={})
-    db.expire_all()
-    cost_lines_before = len(db.exec(select(CostLine)).all())
+    assert r.status_code == 422, r.text
 
-    r2 = client.post(
-        f"{PREFIX}/service-tickets/{tid}/close", headers=staff_token_headers, json={}
+
+def test_record_requires_auth(
+    client: TestClient,
+    seed_ticket_ctx: tuple[uuid.UUID, str, uuid.UUID],
+) -> None:
+    customer_id, _, _ = seed_ticket_ctx
+    r = client.post(
+        f"{PREFIX}/service-tickets/record", json=_record_body(customer_id)
     )
-    assert r2.status_code == 200  # idempotent, not a re-consume
-    db.expire_all()
-    assert len(db.exec(select(CostLine)).all()) == cost_lines_before
+    assert r.status_code == 401

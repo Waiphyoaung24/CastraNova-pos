@@ -1,14 +1,14 @@
 import { ArrowLeft, Minus, Plus, Trash2 } from "lucide-react"
-import { type Ref, useId } from "react"
-import type { ProjectPublic } from "@/client/types.gen"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { useId, useState } from "react"
+import type { ProductOption, ProjectOption } from "@/client/types.gen"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectEmpty,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -24,18 +24,16 @@ import {
 import type { CreateLine } from "@/lib/pull-create"
 
 interface PullCreatePanelProps {
-  projects: ProjectPublic[]
+  projects: ProjectOption[]
   projectId: string
   onProjectChange: (value: string) => void
   adminNotes: string
   onNotesChange: (value: string) => void
+  products: ProductOption[]
+  onAddItem: (productId: string, qty: number) => void
+  addNotice: string
+  isAdding: boolean
   lines: CreateLine[]
-  scanRef: Ref<ScanInputHandle>
-  onScan: (code: string) => void
-  isSearching: boolean
-  notFound: boolean
-  isError: boolean
-  scanNotice: string
   onQtyChange: (key: string, qty: number) => void
   onRemove: (key: string) => void
   onSubmit: () => void
@@ -49,79 +47,126 @@ export function PullCreatePanel({
   onProjectChange,
   adminNotes,
   onNotesChange,
+  products,
+  onAddItem,
+  addNotice,
+  isAdding,
   lines,
-  scanRef,
-  onScan,
-  isSearching,
-  notFound,
-  isError,
-  scanNotice,
   onQtyChange,
   onRemove,
   onSubmit,
   onBack,
   isPending,
 }: PullCreatePanelProps) {
-  const projectSelectId = useId()
   const notesId = useId()
+  const itemSelectId = useId()
+  const [selectedProductId, setSelectedProductId] = useState("")
+  const [qty, setQty] = useState(1)
   const canCreate = projectId !== "" && lines.length > 0 && !isPending
 
   return (
     <div className="space-y-4">
       <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-        <ArrowLeft /> Back to queue
+        <ArrowLeft /> Back to requests
       </Button>
 
-      <h2 className="text-lg font-semibold">New project pull</h2>
+      <h2 className="text-lg font-semibold">New stock request</h2>
 
       <div className="space-y-2">
-        <Label htmlFor={projectSelectId}>Project</Label>
-        <Select value={projectId} onValueChange={onProjectChange}>
-          <SelectTrigger id={projectSelectId} className="w-full">
-            <SelectValue placeholder="Select a project" />
-          </SelectTrigger>
-          <SelectContent>
-            {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name} ({p.code})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Label>Project</Label>
+        <EntityCombobox
+          items={projects}
+          value={projectId}
+          onChange={(id) => onProjectChange(id ?? "")}
+          getKey={(project) => project.id}
+          getLabel={(project) => `${project.name} (${project.code})`}
+          placeholder="Select a project"
+          searchPlaceholder="Search projects…"
+          emptyText="No projects available"
+          ariaLabel="Project"
+        />
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor={notesId}>Admin notes (optional)</Label>
+        <Label htmlFor={notesId}>Notes for the warehouse (optional)</Label>
         <Input
           id={notesId}
           value={adminNotes}
           onChange={(e) => onNotesChange(e.target.value)}
           maxLength={512}
+          placeholder="Any special handling notes (optional)"
         />
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Scan item to request</p>
-        <ScanInput ref={scanRef} onScan={onScan} />
-        <CameraScanFallback onScan={onScan} />
-        <p
-          aria-live="assertive"
-          className="text-muted-foreground min-h-5 text-sm"
-        >
-          {isError
-            ? "Scan lookup failed. Try again."
-            : notFound
-              ? "No item found for that code."
-              : scanNotice}
-        </p>
+        <Label htmlFor={itemSelectId}>Add item to request</Label>
+        <div className="flex items-end gap-2">
+          <Select
+            value={selectedProductId}
+            onValueChange={setSelectedProductId}
+          >
+            <SelectTrigger id={itemSelectId} className="w-full">
+              <SelectValue placeholder="Select an item" />
+            </SelectTrigger>
+            <SelectContent>
+              {products.length ? (
+                products.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.model_name} ({p.sku})
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectEmpty>No items available</SelectEmpty>
+              )}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-11"
+              disabled={qty <= 1}
+              aria-label="Decrease quantity"
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
+            >
+              <Minus />
+            </Button>
+            <span className="num w-8 text-center" aria-hidden="true">
+              {qty}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-11"
+              aria-label="Increase quantity"
+              onClick={() => setQty((q) => q + 1)}
+            >
+              <Plus />
+            </Button>
+          </div>
+          <Button
+            type="button"
+            className="h-11"
+            disabled={selectedProductId === "" || isAdding}
+            onClick={() => {
+              onAddItem(selectedProductId, qty)
+              setSelectedProductId("")
+              setQty(1)
+            }}
+          >
+            {isAdding ? "Adding…" : "Add"}
+          </Button>
+        </div>
         <p aria-live="polite" className="text-muted-foreground min-h-5 text-sm">
-          {isSearching ? "Searching…" : ""}
+          {addNotice}
         </p>
       </div>
 
       {lines.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
-          Scan items to build the pull request.
+          Select items to add to this request.
         </p>
       ) : (
         <Table>
@@ -206,7 +251,7 @@ export function PullCreatePanel({
         disabled={!canCreate}
         className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
       >
-        {isPending ? "Creating…" : "Create pull"}
+        {isPending ? "Creating…" : "Create request"}
       </button>
     </div>
   )

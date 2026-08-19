@@ -12,6 +12,9 @@ from sqlmodel import Session, select
 from app import crud
 from app.core.config import settings
 from app.models import (
+    ADMIN_ONLY_EVENTS,
+    ALL_ROLE_EVENTS,
+    CHANNEL_ADDRESS_ATTR,
     CustomerCreate,
     NotificationChannel,
     NotificationEvent,
@@ -25,8 +28,11 @@ from app.models import (
     SaleLineKind,
     SupplierCreate,
     TrackingMode,
+    UserRole,
 )
 from app.services import notify
+from tests.utils.user import authentication_token_from_email_with_role
+from tests.utils.utils import random_email
 
 PREFIX = settings.API_V1_STR
 
@@ -79,7 +85,7 @@ def test_patch_preferences_upsert_idempotent(
     body = {
         "preferences": [
             {
-                "channel": "VIBER",
+                "channel": "TELEGRAM",
                 "event_type": "LOW_STOCK",
                 "enabled": True,
             }
@@ -94,7 +100,7 @@ def test_patch_preferences_upsert_idempotent(
     created = [
         p
         for p in r1.json()
-        if p["channel"] == "VIBER" and p["event_type"] == "LOW_STOCK"
+        if p["channel"] == "TELEGRAM" and p["event_type"] == "LOW_STOCK"
     ]
     assert len(created) == 1 and created[0]["enabled"] is True
 
@@ -109,7 +115,7 @@ def test_patch_preferences_upsert_idempotent(
     toggled = [
         p
         for p in r2.json()
-        if p["channel"] == "VIBER" and p["event_type"] == "LOW_STOCK"
+        if p["channel"] == "TELEGRAM" and p["event_type"] == "LOW_STOCK"
     ]
     assert len(toggled) == 1 and toggled[0]["enabled"] is False
 
@@ -119,7 +125,7 @@ def test_patch_preferences_upsert_idempotent(
     rows = db.exec(
         select(NotificationPreference).where(
             NotificationPreference.user_id == admin.id,
-            NotificationPreference.channel == NotificationChannel.VIBER,
+            NotificationPreference.channel == NotificationChannel.TELEGRAM,
             NotificationPreference.event_type == NotificationEvent.LOW_STOCK,
         )
     ).all()
@@ -167,6 +173,161 @@ def test_preferences_isolated_between_users(
     )
 
 
+# --- generated preference grid ------------------------------------------------
+#
+# The grid is what makes opt-in self-service. Before it, GET returned only
+# persisted rows, so a fresh user saw an empty page with no way to create one
+# and provisioning needed hand-written SQL.
+
+
+def _grid_pairs(rows: list[dict[str, Any]]) -> set[tuple[str, str]]:
+    return {(p["channel"], p["event_type"]) for p in rows}
+
+
+def test_grid_offers_every_channel_event_pair_to_a_fresh_user(
+    client: TestClient, db: Session
+) -> None:
+    headers = authentication_token_from_email_with_role(
+        client=client, email=random_email(), db=db, role=UserRole.YGN_STAFF
+    )
+    r = client.get(f"{PREFIX}/notifications/preferences", headers=headers)
+    assert r.status_code == 200, r.text
+    rows = r.json()
+
+    expected = {
+        (c.value, e.value) for c in CHANNEL_ADDRESS_ATTR for e in ALL_ROLE_EVENTS
+    }
+    assert _grid_pairs(rows) == expected
+    # Nothing persisted yet, so every row is a synthetic default.
+    assert all(p["enabled"] is False for p in rows)
+    assert all(p["id"] is None for p in rows)
+    # A fresh user has no address configured on any channel: every row must
+    # say so, or the UI would offer a checkbox that can never deliver.
+    assert all(p["channel_connected"] is False for p in rows)
+
+
+def test_grid_omits_channels_with_no_address_attribute(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
+    """A channel notify() cannot address must not appear in the grid at all --
+    offering the checkbox would promise a send that never happens. VIBER is
+    still a legal enum member, so the grid must key off CHANNEL_ADDRESS_ATTR
+    rather than the enum."""
+    r = client.get(f"{PREFIX}/notifications/preferences", headers=staff_token_headers)
+    assert r.status_code == 200, r.text
+    channels = {p["channel"] for p in r.json()}
+    assert "VIBER" not in channels
+    assert channels == {c.value for c in CHANNEL_ADDRESS_ATTR}
+
+
+def test_grid_marks_only_the_configured_channel_as_connected(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    headers = authentication_token_from_email_with_role(
+        client=client, email=email, db=db, role=UserRole.YGN_STAFF
+    )
+    user = crud.get_user_by_email(session=db, email=email)
+    assert user is not None
+    user.line_user_id = f"L-configured-{uuid.uuid4().hex[:10]}"
+    db.add(user)
+    db.commit()
+
+    r = client.get(f"{PREFIX}/notifications/preferences", headers=headers)
+    assert r.status_code == 200, r.text
+    rows = r.json()
+
+    by_channel = {p["channel"] for p in rows if p["channel_connected"]}
+    assert by_channel == {"LINE"}
+
+
+def test_grid_excludes_admin_only_events_from_staff(
+    client: TestClient, staff_token_headers: dict[str, str]
+) -> None:
+    r = client.get(f"{PREFIX}/notifications/preferences", headers=staff_token_headers)
+    assert r.status_code == 200, r.text
+    offered_events = {p["event_type"] for p in r.json()}
+    # Assert presence first: without this the test passes vacuously against an
+    # empty grid and proves nothing.
+    assert NotificationEvent.LOW_STOCK.value in offered_events
+    for event in ADMIN_ONLY_EVENTS:
+        assert event.value not in offered_events
+
+
+def test_grid_offers_all_events_to_admin(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    r = client.get(
+        f"{PREFIX}/notifications/preferences", headers=superuser_token_headers
+    )
+    assert r.status_code == 200, r.text
+    offered = _grid_pairs(r.json())
+    assert offered == {
+        (c.value, e.value) for c in CHANNEL_ADDRESS_ATTR for e in NotificationEvent
+    }
+
+
+def test_grid_preserves_a_persisted_opt_in(client: TestClient, db: Session) -> None:
+    """A persisted row must win over the synthetic default, or toggling a
+    preference on would appear to do nothing after a reload."""
+    headers = authentication_token_from_email_with_role(
+        client=client, email=random_email(), db=db, role=UserRole.YGN_STAFF
+    )
+    client.patch(
+        f"{PREFIX}/notifications/preferences",
+        headers=headers,
+        json={
+            "preferences": [
+                {
+                    "channel": "TELEGRAM",
+                    "event_type": "LOW_STOCK",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    r = client.get(f"{PREFIX}/notifications/preferences", headers=headers)
+    assert r.status_code == 200, r.text
+    rows = r.json()
+
+    match = [
+        p
+        for p in rows
+        if p["channel"] == "TELEGRAM" and p["event_type"] == "LOW_STOCK"
+    ]
+    # Exactly one row — the persisted one replaces the synthetic, not joins it.
+    assert len(match) == 1
+    assert match[0]["enabled"] is True
+    assert match[0]["id"] is not None
+    # The rest of the grid is still offered alongside it.
+    assert len(rows) == len(CHANNEL_ADDRESS_ATTR) * len(ALL_ROLE_EVENTS)
+
+
+def test_patch_response_matches_get_response_shape(
+    client: TestClient, db: Session
+) -> None:
+    """PATCH returns the full merged grid, the same shape as GET, so the
+    client can replace its state wholesale after a toggle instead of merging
+    two different response shapes."""
+    headers = authentication_token_from_email_with_role(
+        client=client, email=random_email(), db=db, role=UserRole.YGN_STAFF
+    )
+    r_patch = client.patch(
+        f"{PREFIX}/notifications/preferences",
+        headers=headers,
+        json={
+            "preferences": [
+                {"channel": "LINE", "event_type": "LOW_STOCK", "enabled": True}
+            ]
+        },
+    )
+    assert r_patch.status_code == 200, r_patch.text
+    r_get = client.get(f"{PREFIX}/notifications/preferences", headers=headers)
+    assert r_get.status_code == 200, r_get.text
+    assert _grid_pairs(r_patch.json()) == _grid_pairs(r_get.json())
+    assert len(r_patch.json()) == len(CHANNEL_ADDRESS_ATTR) * len(ALL_ROLE_EVENTS)
+
+
 # --- trigger ------------------------------------------------------------------
 
 
@@ -180,7 +341,7 @@ def short_pull_ctx(db: Session) -> dict[str, Any]:
         crud.seed_locations(session=db)
     admin = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
     assert admin is not None
-    admin.line_user_id = "L-admin"
+    admin.line_user_id = f"L-admin-{uuid.uuid4().hex[:10]}"
     db.add(admin)
     if not db.exec(
         select(NotificationPreference).where(

@@ -9,7 +9,10 @@ from app.models import (
     ProjectCreate,
     ProjectDashboardAdminPublic,
     ProjectDashboardStaffPublic,
+    ProjectOption,
     ProjectPublic,
+    ProjectsPublic,
+    ProjectStatus,
     ProjectUpdate,
 )
 
@@ -18,14 +21,40 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 @router.get(
-    "/", response_model=list[ProjectPublic], dependencies=[Depends(get_admin)]
+    "/", response_model=ProjectsPublic, dependencies=[Depends(get_admin)]
 )
 def read_projects(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=255,
+            description="Case-insensitive substring match on code or name",
+        ),
+    ] = None,
+    customer_id: Annotated[
+        uuid.UUID | None, Query(description="Exact customer match")
+    ] = None,
+    status: ProjectStatus | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[ProjectPublic]:
-    return crud.list_projects(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+) -> ProjectsPublic:
+    return ProjectsPublic(
+        data=crud.list_projects(
+            session=session,
+            q=q,
+            customer_id=customer_id,
+            status=status,
+            skip=skip,
+            limit=limit,
+        ),
+        count=crud.count_projects(session=session, q=q, customer_id=customer_id, status=status),
+    )
+
+
+@router.get("/options", response_model=list[ProjectOption], dependencies=[Depends(get_admin)])
+def read_options(session: SessionDep) -> list[ProjectOption]:
+    return crud.list_project_options(session=session)
 
 
 @router.post(

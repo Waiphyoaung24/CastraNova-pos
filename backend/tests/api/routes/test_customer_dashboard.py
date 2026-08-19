@@ -266,26 +266,15 @@ def _seed_customer_with_closed_ticket(
     )
     db.expire_all()
     r = client.post(
-        f"{PREFIX}/service-tickets",
+        f"{PREFIX}/service-tickets/record",
         headers=staff_token_headers,
         json={
             "customer_id": str(customer.id),
             "issue": "Noisy compressor",
             "idempotency_key": str(uuid.uuid4()),
+            "resolution": "Replaced bearings",
+            "parts": [{"sku": product.sku, "quantity": 2}],
         },
-    )
-    assert r.status_code == 200, r.text
-    tid = r.json()["id"]
-    r = client.post(
-        f"{PREFIX}/service-tickets/{tid}/parts",
-        headers=staff_token_headers,
-        json={"sku": product.sku, "quantity": 2},
-    )
-    assert r.status_code == 200, r.text
-    r = client.post(
-        f"{PREFIX}/service-tickets/{tid}/close",
-        headers=staff_token_headers,
-        json={"resolution": "Replaced bearings"},
     )
     assert r.status_code == 200, r.text
     assert r.json()["closed_at"] is not None

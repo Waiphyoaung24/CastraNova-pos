@@ -43,6 +43,7 @@ def test_movement_types():
         "MAINTENANCE_OUT",
         "PROJECT_OUT",
         "ADJUSTED_OUT",
+        "RETURNED",
     }
 
 

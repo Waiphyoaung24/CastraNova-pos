@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Pencil } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
@@ -27,7 +27,15 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { LoadingButton } from "@/components/ui/loading-button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 
@@ -41,7 +49,7 @@ const formSchema = z
       .optional()
       .or(z.literal("")),
     confirm_password: z.string().optional(),
-    is_superuser: z.boolean().optional(),
+    role: z.enum(["BKK_ADMIN", "YGN_STAFF"]).optional(),
     is_active: z.boolean().optional(),
   })
   .refine((data) => !data.password || data.password === data.confirm_password, {
@@ -58,6 +66,7 @@ interface EditUserProps {
 
 const EditUser = ({ user, onSuccess }: EditUserProps) => {
   const [isOpen, setIsOpen] = useState(false)
+  const roleDisplayId = useId()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
@@ -68,7 +77,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
     defaultValues: {
       email: user.email,
       full_name: user.full_name ?? undefined,
-      is_superuser: user.is_superuser,
+      role: user.role ?? "YGN_STAFF",
       is_active: user.is_active,
     },
   })
@@ -92,6 +101,10 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
     const { confirm_password: _, ...submitData } = data
     if (!submitData.password) {
       delete submitData.password
+    }
+    // Never change the seed superuser's tier: drop role so exclude_unset preserves it.
+    if (user.is_superuser) {
+      delete submitData.role
     }
     mutation.mutate(submitData)
   }
@@ -125,7 +138,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                     </FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Email"
+                        placeholder="user@example.com"
                         type="email"
                         {...field}
                         required
@@ -143,7 +156,11 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                   <FormItem>
                     <FormLabel>Full Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="Full name" type="text" {...field} />
+                      <Input
+                        placeholder="e.g. Jane Smith"
+                        type="text"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -158,7 +175,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                     <FormLabel>Set Password</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Password"
+                        placeholder="At least 8 characters"
                         type="password"
                         {...field}
                       />
@@ -176,7 +193,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                     <FormLabel>Confirm Password</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Password"
+                        placeholder="Re-enter the password"
                         type="password"
                         {...field}
                       />
@@ -186,21 +203,42 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="is_superuser"
-                render={({ field }) => (
-                  <FormItem className="flex items-center gap-3 space-y-0">
-                    <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                    <FormLabel className="font-normal">Is superuser?</FormLabel>
-                  </FormItem>
-                )}
-              />
+              {user.is_superuser ? (
+                <div className="grid gap-2">
+                  <Label htmlFor={roleDisplayId}>Role</Label>
+                  <Input
+                    id={roleDisplayId}
+                    value="Superuser"
+                    disabled
+                    readOnly
+                  />
+                </div>
+              ) : (
+                <FormField
+                  control={form.control}
+                  name="role"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Role</FormLabel>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="BKK_ADMIN">Admin</SelectItem>
+                          <SelectItem value="YGN_STAFF">Staff</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}

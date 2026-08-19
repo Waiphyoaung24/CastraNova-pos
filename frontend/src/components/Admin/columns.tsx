@@ -3,11 +3,15 @@ import type { ColumnDef } from "@tanstack/react-table"
 import type { UserPublic } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { TierBadge } from "./TierBadge"
 import { UserActionsMenu } from "./UserActionsMenu"
 
 export type UserTableData = UserPublic & {
   isCurrentUser: boolean
 }
+
+/** Column widths for the users DataTable, in column order (sums to 100%). */
+export const USER_COLUMN_WIDTHS = ["26%", "32%", "14%", "16%", "12%"]
 
 export const columns: ColumnDef<UserTableData>[] = [
   {
@@ -39,13 +43,9 @@ export const columns: ColumnDef<UserTableData>[] = [
     ),
   },
   {
-    accessorKey: "is_superuser",
+    accessorKey: "role",
     header: "Role",
-    cell: ({ row }) => (
-      <Badge variant={row.original.is_superuser ? "default" : "secondary"}>
-        {row.original.is_superuser ? "Superuser" : "User"}
-      </Badge>
-    ),
+    cell: ({ row }) => <TierBadge user={row.original} />,
   },
   {
     accessorKey: "is_active",

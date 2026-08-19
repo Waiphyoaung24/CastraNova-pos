@@ -1,13 +1,15 @@
+import secrets
 import uuid
-from collections.abc import Callable
-from datetime import date, datetime, timezone
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, case, func
+from sqlalchemy import ColumnElement, Select, case, func, or_
 from sqlalchemy import select as sa_select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, SQLModel, col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -18,25 +20,33 @@ from app.core.state_machine import (
     assert_unit_transition,
 )
 from app.models import (
+    CHANNEL_ADDRESS_ATTR,
     AdjustmentTarget,
     AuditEntryPublic,
     BatchDrillRow,
     Channel,
-    ChannelMarginReport,
-    ChannelMarginRow,
     CostLine,
     Customer,
     CustomerCreate,
+    CustomerOption,
+    CustomerType,
     CustomerUpdate,
-    ExchangeRatesPublic,
-    ExchangeRatesUpdate,
     HoldingPeriodReport,
     HoldingPeriodRow,
+    LineConfirmOutcome,
+    LineConnectCode,
     LineState,
     Location,
     LowStockItemPublic,
+    MarginBreakdownReport,
+    MarginBreakdownRow,
+    MarginDimension,
     MovementType,
+    NotificationChannel,
+    NotificationEvent,
+    NotificationLog,
     NotificationPreference,
+    NotificationPreferencePublic,
     NotificationPreferenceUpdate,
     OverrideExceptionRow,
     OverrideExceptionsReport,
@@ -45,13 +55,17 @@ from app.models import (
     PartBatch,
     PartMovement,
     PriceChange,
+    PriceChangePublic,
     PricingOverrideCreate,
     PricingOverrideRequest,
     Product,
     ProductCreate,
+    ProductOption,
     ProductUpdate,
     Project,
+    ProjectConsumptionRowPublic,
     ProjectCreate,
+    ProjectOption,
     ProjectPull,
     ProjectPullCreate,
     ProjectPullFulfillLine,
@@ -60,15 +74,27 @@ from app.models import (
     ProjectStatus,
     ProjectUpdate,
     ReceivePiece,
+    ReturnableLinePublic,
+    ReturnableSalePublic,
+    ReturnableSalesPublic,
     Sale,
     SaleLine,
     SaleLineInput,
     SaleLineKind,
+    SaleReturn,
+    SaleReturnCreateRequest,
+    SaleReturnLine,
     SerialMovementPublic,
     SerialSearchResult,
     ServiceTicket,
     ServiceTicketPart,
+    ServiceTicketPartCreate,
+    SkuBatchAdminPublic,
     SkuBatchPublic,
+    SkuConsumptionDrawAdminPublic,
+    SkuConsumptionEventAdminPublic,
+    SkuConsumptionEventPublic,
+    SkuSearchAdminResult,
     SkuSearchResult,
     StockAdjustment,
     StockAdjustmentCreate,
@@ -76,11 +102,16 @@ from app.models import (
     StockOnHandRow,
     Supplier,
     SupplierCreate,
+    SupplierOption,
     SupplierUpdate,
     SyncReviewItem,
     SyncReviewItemCreate,
+    SyncReviewPendingCounts,
+    SyncReviewReason,
     SyncReviewState,
     SystemSetting,
+    TelegramConfirmOutcome,
+    TelegramConnectCode,
     TrackingMode,
     Unit,
     UnitDrillRow,
@@ -88,7 +119,10 @@ from app.models import (
     UnitState,
     User,
     UserCreate,
+    UserOption,
     UserUpdate,
+    channel_connected,
+    eligible_events,
     get_datetime_utc,
 )
 
@@ -121,6 +155,31 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
     statement = select(User).where(User.email == email)
     session_user = session.exec(statement).first()
     return session_user
+
+
+def count_active_superusers(*, session: Session) -> int:
+    """Number of users who can still log in with superuser access. Used to block
+    demoting/deactivating the last one (which would lock everyone out of user
+    management).
+
+    Locks the matching rows with FOR UPDATE so two concurrent demotions of the
+    last two superusers serialize instead of both reading 2 and racing to zero
+    (FOR UPDATE can't apply to a bare COUNT aggregate, so we lock+count rows)."""
+    statement = (
+        select(User.id)
+        .where(col(User.is_superuser).is_(True), col(User.is_active).is_(True))
+        .with_for_update()
+    )
+    return len(session.exec(statement).all())
+
+
+def list_user_options(*, session: Session) -> list[UserOption]:
+    rows = session.exec(
+        select(col(User.id), col(User.full_name), col(User.email)).order_by(
+            func.coalesce(col(User.full_name), col(User.email))
+        )
+    ).all()
+    return [UserOption(id=row[0], full_name=row[1], email=row[2]) for row in rows]
 
 
 _T = TypeVar("_T", bound=SQLModel)
@@ -187,11 +246,10 @@ def seed_locations(*, session: Session) -> None:
 # --- System settings (singleton key/jsonb store; §4.2 row 8) ------------------
 
 OVERRIDE_THRESHOLD_KEY = "override_deviation_threshold_pct"
-DEFAULT_OVERRIDE_THRESHOLD_PCT = 5.0
+# JSONB-seeded; read back as Decimal via Decimal(str(...)) at the read site.
+DEFAULT_OVERRIDE_THRESHOLD_PCT: float = 5.0
 HOLDING_THRESHOLD_KEY = "holding_period_threshold_days"
 DEFAULT_HOLDING_THRESHOLD_DAYS = 90
-EXCHANGE_RATES_KEY = "exchange_rates_thb"
-DEFAULT_EXCHANGE_RATES: dict[str, str] = {"USD_THB": "0", "MMK_THB": "0"}
 
 
 def get_setting(*, session: Session, key: str, default: Any = None) -> Any:
@@ -225,45 +283,11 @@ def set_setting(
     return row
 
 
-def get_exchange_rates(*, session: Session) -> ExchangeRatesPublic:
-    row = session.exec(
-        select(SystemSetting).where(SystemSetting.key == EXCHANGE_RATES_KEY)
-    ).first()
-    raw = row.value if row else DEFAULT_EXCHANGE_RATES
-    # value is always {"USD_THB","MMK_THB"} decimal strings — only ever written
-    # by set_exchange_rates (validated ge=0) or the seed default; safe to parse.
-    return ExchangeRatesPublic(
-        usd_thb=Decimal(str(raw.get("USD_THB", "0"))),
-        mmk_thb=Decimal(str(raw.get("MMK_THB", "0"))),
-        updated_at=row.updated_at if row else None,
-    )
-
-
-def set_exchange_rates(
-    *,
-    session: Session,
-    rates: ExchangeRatesUpdate,
-    updated_by_user_id: uuid.UUID | None = None,
-) -> ExchangeRatesPublic:
-    row = set_setting(
-        session=session,
-        key=EXCHANGE_RATES_KEY,
-        value={"USD_THB": str(rates.usd_thb), "MMK_THB": str(rates.mmk_thb)},
-        updated_by_user_id=updated_by_user_id,
-    )
-    return ExchangeRatesPublic(
-        usd_thb=rates.usd_thb,
-        mmk_thb=rates.mmk_thb,
-        updated_at=row.updated_at,
-    )
-
-
 def seed_system_settings(*, session: Session) -> None:
     """Idempotently seed the default configurable thresholds."""
     defaults: list[tuple[str, Any]] = [
         (OVERRIDE_THRESHOLD_KEY, DEFAULT_OVERRIDE_THRESHOLD_PCT),
         (HOLDING_THRESHOLD_KEY, DEFAULT_HOLDING_THRESHOLD_DAYS),
-        (EXCHANGE_RATES_KEY, DEFAULT_EXCHANGE_RATES),
     ]
     for key, value in defaults:
         if not session.exec(
@@ -271,6 +295,16 @@ def seed_system_settings(*, session: Session) -> None:
         ).first():
             session.add(SystemSetting(key=key, value=value))
     session.commit()
+
+
+def _ilike_term(q: str) -> str:
+    """Escape LIKE wildcards in user input before wrapping it as `%q%`.
+
+    Without this, a literal `%` or `_` typed into a catalog search box would
+    be interpreted as a SQL wildcard instead of a literal character.
+    """
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 # --- Supplier -----------------------------------------------------------------
@@ -284,21 +318,62 @@ def create_supplier(*, session: Session, supplier_in: SupplierCreate) -> Supplie
     return db_obj
 
 
-def get_supplier(*, session: Session, supplier_id: Any) -> Supplier | None:
+def get_supplier(*, session: Session, supplier_id: uuid.UUID) -> Supplier | None:
     return session.get(Supplier, supplier_id)
 
 
+_S = TypeVar("_S", bound=Select[Any])
+
+
+def _supplier_where(stmt: _S, *, q: str | None, country: str | None) -> _S:
+    if q and q.strip():
+        stmt = stmt.where(col(Supplier.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    if country and country.strip():
+        stmt = stmt.where(col(Supplier.country) == country.strip())
+    return stmt
+
+
 def list_suppliers(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Supplier]:
-    return list(
-        session.exec(
-            select(Supplier)
-            .order_by(col(Supplier.created_at).desc().nulls_last(), col(Supplier.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = _supplier_where(select(Supplier), q=q, country=country)
+    stmt = (
+        stmt.order_by(col(Supplier.created_at).desc().nulls_last(), col(Supplier.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def list_supplier_options(*, session: Session) -> list[SupplierOption]:
+    rows = session.exec(
+        select(col(Supplier.id), col(Supplier.name)).order_by(col(Supplier.name))
+    ).all()
+    return [SupplierOption(id=row[0], name=row[1]) for row in rows]
+
+
+def list_supplier_countries(*, session: Session) -> list[str]:
+    rows = session.exec(
+        select(col(Supplier.country))
+        .where(col(Supplier.country).is_not(None))
+        .distinct()
+        .order_by(col(Supplier.country))
+    ).all()
+    return [row for row in rows if row]
+
+
+def count_suppliers(
+    *, session: Session, q: str | None = None, country: str | None = None
+) -> int:
+    stmt = _supplier_where(
+        select(func.count()).select_from(Supplier), q=q, country=country
+    )
+    return session.exec(stmt).one()
 
 
 def update_supplier(
@@ -323,21 +398,71 @@ def create_customer(*, session: Session, customer_in: CustomerCreate) -> Custome
     return db_obj
 
 
-def get_customer(*, session: Session, customer_id: Any) -> Customer | None:
+def get_customer(*, session: Session, customer_id: uuid.UUID) -> Customer | None:
     return session.get(Customer, customer_id)
 
 
+def _customer_filter_clauses(
+    *, q: str | None, country: str | None, type: CustomerType | None
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        clauses.append(col(Customer.name).ilike(_ilike_term(q.strip()), escape="\\"))
+    if country and country.strip():
+        clauses.append(col(Customer.country) == country.strip())
+    if type is not None:
+        clauses.append(col(Customer.type) == type)
+    return clauses
+
+
 def list_customers(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    type: CustomerType | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Customer]:
-    return list(
-        session.exec(
-            select(Customer)
-            .order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Customer)
+    for clause in _customer_filter_clauses(q=q, country=country, type=type):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Customer.created_at).desc().nulls_last(), col(Customer.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def list_customer_options(*, session: Session) -> list[CustomerOption]:
+    rows = session.exec(
+        select(col(Customer.id), col(Customer.name)).order_by(col(Customer.name))
+    ).all()
+    return [CustomerOption(id=row[0], name=row[1]) for row in rows]
+
+
+def list_customer_countries(*, session: Session) -> list[str]:
+    rows = session.exec(
+        select(col(Customer.country))
+        .where(col(Customer.country).is_not(None))
+        .distinct()
+        .order_by(col(Customer.country))
+    ).all()
+    return [row for row in rows if row]
+
+
+def count_customers(
+    *,
+    session: Session,
+    q: str | None = None,
+    country: str | None = None,
+    type: CustomerType | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Customer)
+    for clause in _customer_filter_clauses(q=q, country=country, type=type):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
 
 
 def update_customer(
@@ -368,21 +493,72 @@ def create_project(*, session: Session, project_in: ProjectCreate) -> Project:
     return db_obj
 
 
-def get_project(*, session: Session, project_id: Any) -> Project | None:
+def get_project(*, session: Session, project_id: uuid.UUID) -> Project | None:
     return session.get(Project, project_id)
 
 
+def _project_filter_clauses(
+    *,
+    q: str | None,
+    customer_id: uuid.UUID | None,
+    status: ProjectStatus | None,
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        term = _ilike_term(q.strip())
+        clauses.append(
+            or_(
+                col(Project.code).ilike(term, escape="\\"),
+                col(Project.name).ilike(term, escape="\\"),
+            )
+        )
+    if customer_id is not None:
+        clauses.append(col(Project.customer_id) == customer_id)
+    if status is not None:
+        clauses.append(col(Project.status) == status)
+    return clauses
+
+
 def list_projects(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    customer_id: uuid.UUID | None = None,
+    status: ProjectStatus | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Project]:
-    return list(
-        session.exec(
-            select(Project)
-            .order_by(col(Project.created_at).desc().nulls_last(), col(Project.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Project)
+    for clause in _project_filter_clauses(q=q, customer_id=customer_id, status=status):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Project.created_at).desc().nulls_last(), col(Project.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def list_project_options(*, session: Session) -> list[ProjectOption]:
+    rows = session.exec(
+        select(col(Project.id), col(Project.code), col(Project.name))
+        .where(Project.status == ProjectStatus.ACTIVE)
+        .order_by(col(Project.code))
+    ).all()
+    return [ProjectOption(id=row[0], code=row[1], name=row[2]) for row in rows]
+
+
+def count_projects(
+    *,
+    session: Session,
+    q: str | None = None,
+    customer_id: uuid.UUID | None = None,
+    status: ProjectStatus | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Project)
+    for clause in _project_filter_clauses(q=q, customer_id=customer_id, status=status):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
 
 
 def update_project(
@@ -417,21 +593,221 @@ def create_product(*, session: Session, product_in: ProductCreate) -> Product:
     return db_obj
 
 
-def get_product(*, session: Session, product_id: Any) -> Product | None:
+def get_product(*, session: Session, product_id: uuid.UUID) -> Product | None:
     return session.get(Product, product_id)
 
 
+def is_product_fresh(*, session: Session, product_id: uuid.UUID) -> bool:
+    """True when the product has never entered the stock system — no ``Unit`` and
+    no ``PartBatch`` row references it. That is the exact condition under which
+    the SKU is safe to edit: ``batch_no`` (the only artifact that bakes the SKU
+    string in) is created only at receive time, and no sale/movement/ticket/pull
+    can exist without stock first."""
+    has_unit = session.exec(
+        select(Unit.id).where(Unit.product_id == product_id).limit(1)
+    ).first()
+    if has_unit is not None:
+        return False
+    has_batch = session.exec(
+        select(PartBatch.id).where(PartBatch.product_id == product_id).limit(1)
+    ).first()
+    return has_batch is None
+
+
+def product_has_price_history(*, session: Session, product_id: uuid.UUID) -> bool:
+    """True when at least one ``PriceChange`` row references the product.
+
+    ``pricechange`` is one of the append-only ledgers guarded by m021's
+    reject_ledger_mutation trigger, so its rows can never be deleted. A product
+    that has been re-priced therefore cannot be deleted either — it is retired
+    via ``is_active`` instead. Deliberately separate from ``is_product_fresh``,
+    which governs SKU editability and must not tighten because of a re-price."""
+    row = session.exec(
+        select(PriceChange.id).where(PriceChange.product_id == product_id).limit(1)
+    ).first()
+    return row is not None
+
+
+def delete_product(*, session: Session, db_product: Product) -> None:
+    """Hard-delete a product that has never entered the stock system.
+
+    Callers MUST have checked ``is_product_fresh`` and
+    ``product_has_price_history`` first — this does not re-check. Any other
+    table still referencing it surfaces as an IntegrityError, reported as 409
+    rather than a 500 — most plausibly a ``PricingOverrideRequest``, whose
+    product_id neither check covers, or a row that appeared between the checks
+    and this commit. The message stays generic precisely because this path is
+    reached by references that are *not* stock."""
+    session.delete(db_product)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Product is still referenced by other records and cannot be "
+                "deleted. Set it to inactive instead."
+            ),
+        )
+
+
+def products_fresh_ids(
+    *, session: Session, product_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Batched ``is_product_fresh`` for a page of products (no N+1): the given ids
+    minus any that appear in ``Unit`` or ``PartBatch``."""
+    if not product_ids:
+        return set()
+    ids = set(product_ids)
+    used_units = session.exec(
+        select(col(Unit.product_id)).where(col(Unit.product_id).in_(ids)).distinct()
+    ).all()
+    used_batches = session.exec(
+        select(col(PartBatch.product_id))
+        .where(col(PartBatch.product_id).in_(ids))
+        .distinct()
+    ).all()
+    return ids - (set(used_units) | set(used_batches))
+
+
+def _product_filter_clauses(
+    *,
+    q: str | None,
+    brand: str | None,
+    category: str | None,
+    tracking_mode: TrackingMode | None,
+    is_active: bool | None,
+) -> list[ColumnElement[bool]]:
+    clauses: list[ColumnElement[bool]] = []
+    if q and q.strip():
+        term = _ilike_term(q.strip())
+        clauses.append(
+            or_(
+                col(Product.sku).ilike(term, escape="\\"),
+                col(Product.model_name).ilike(term, escape="\\"),
+            )
+        )
+    if brand and brand.strip():
+        clauses.append(col(Product.brand).ilike(_ilike_term(brand.strip()), escape="\\"))
+    if category and category.strip():
+        clauses.append(
+            col(Product.category).ilike(_ilike_term(category.strip()), escape="\\")
+        )
+    if tracking_mode is not None:
+        clauses.append(col(Product.tracking_mode) == tracking_mode)
+    if is_active is not None:
+        clauses.append(col(Product.is_active) == is_active)
+    return clauses
+
+
 def list_products(
-    *, session: Session, skip: int = 0, limit: int = 100
+    *,
+    session: Session,
+    q: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    tracking_mode: TrackingMode | None = None,
+    is_active: bool | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[Product]:
-    return list(
-        session.exec(
-            select(Product)
-            .order_by(col(Product.created_at).desc().nulls_last(), col(Product.id))
-            .offset(skip)
-            .limit(limit)
-        ).all()
+    stmt = select(Product)
+    for clause in _product_filter_clauses(
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=tracking_mode,
+        is_active=is_active,
+    ):
+        stmt = stmt.where(clause)
+    stmt = (
+        stmt.order_by(col(Product.created_at).desc().nulls_last(), col(Product.id))
+        .offset(skip)
+        .limit(limit)
     )
+    return list(session.exec(stmt).all())
+
+
+def count_products(
+    *,
+    session: Session,
+    q: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    tracking_mode: TrackingMode | None = None,
+    is_active: bool | None = None,
+) -> int:
+    stmt = select(func.count()).select_from(Product)
+    for clause in _product_filter_clauses(
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=tracking_mode,
+        is_active=is_active,
+    ):
+        stmt = stmt.where(clause)
+    return session.exec(stmt).one()
+
+
+def list_product_options(
+    *, session: Session, active_only: bool = False
+) -> list[ProductOption]:
+    """Every product as a lightweight {id, sku, model_name, tracking_mode, prices}
+    projection, ordered by SKU. Unpaginated single round-trip for pickers/lookups
+    across the app; includes inactive products, whose historical movements still
+    appear in the append-only ledgers."""
+    statement = select(  # type: ignore[call-overload]
+            col(Product.id),
+            col(Product.sku),
+            col(Product.model_name),
+            col(Product.tracking_mode),
+            col(Product.retail_price_thb),
+            col(Product.repair_price_thb),
+        ).order_by(col(Product.sku))
+    if active_only:
+        statement = statement.where(Product.is_active)
+    rows = session.exec(statement).all()
+    return [
+        ProductOption(
+            id=r[0],
+            sku=r[1],
+            model_name=r[2],
+            tracking_mode=r[3],
+            retail_price_thb=r[4],
+            repair_price_thb=r[5],
+        )
+        for r in rows
+    ]
+
+
+def latest_purchase_costs(*, session: Session) -> dict[uuid.UUID, Decimal]:
+    """Latest purchase cost per product — the purchase_cost_thb of the most
+    recent receipt: newest PartBatch (QUANTITY) or newest Unit (SERIALIZED) by
+    received_at. COGS / admin-only data. Set-based via Postgres DISTINCT ON (one
+    row per product per source), merged in Python; no N+1. Products with no
+    receipts are absent from the result."""
+    latest: dict[uuid.UUID, tuple[datetime, Decimal]] = {}
+    batch_rows = session.execute(
+        sa_select(
+            col(PartBatch.product_id), col(PartBatch.received_at), col(PartBatch.purchase_cost_thb)
+        )
+        .order_by(col(PartBatch.product_id), col(PartBatch.received_at).desc(), col(PartBatch.id).desc())
+        .distinct(col(PartBatch.product_id))
+    ).all()
+    unit_rows = session.execute(
+        sa_select(col(Unit.product_id), col(Unit.received_at), col(Unit.purchase_cost_thb))
+        .order_by(col(Unit.product_id), col(Unit.received_at).desc(), col(Unit.id).desc())
+        .distinct(col(Unit.product_id))
+    ).all()
+    # On an exact cross-source received_at tie, batch_rows wins by iteration order; benign in practice (products are single-tracking-mode).
+    for source in (batch_rows, unit_rows):
+        for r in source:
+            product_id, received_at, cost = r[0], r[1], r[2]
+            current = latest.get(product_id)
+            if current is None or received_at > current[0]:
+                latest[product_id] = (received_at, cost)
+    return {pid: value[1] for pid, value in latest.items()}
 
 
 def update_product(
@@ -442,6 +818,17 @@ def update_product(
     changed_by_user_id: uuid.UUID,
 ) -> Product:
     data = product_in.model_dump(exclude_unset=True)
+    # SKU is editable only while the product is fresh (no stock/transactions).
+    new_sku = data.get("sku")
+    if new_sku is not None and new_sku != db_product.sku:
+        if not is_product_fresh(session=session, product_id=db_product.id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "SKU can only be changed before the product has any stock or "
+                    "transactions."
+                ),
+            )
     # Record a price_change row for each price field that actually changes (FR-002),
     # in the same transaction as the product update.
     for field in _PRICE_FIELDS:
@@ -459,25 +846,56 @@ def update_product(
     db_product.sqlmodel_update(data)
     db_product.updated_at = get_datetime_utc()
     session.add(db_product)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="SKU already exists")
     session.refresh(db_product)
     return db_product
 
 
-def list_price_history(*, session: Session, product_id: Any) -> list[PriceChange]:
-    return list(
+def list_price_history(
+    *, session: Session, product_id: uuid.UUID
+) -> list[PriceChangePublic]:
+    rows = list(
         session.exec(
             select(PriceChange)
             .where(PriceChange.product_id == product_id)
             .order_by(col(PriceChange.changed_at).desc())
         ).all()
     )
+    if not rows:
+        return []
+    actor_ids = {r.changed_by_user_id for r in rows}
+    actors = {
+        u.id: u
+        for u in session.exec(select(User).where(col(User.id).in_(actor_ids))).all()
+    }
+    return [
+        PriceChangePublic(
+            id=r.id,
+            product_id=r.product_id,
+            field=r.field,
+            old_value=r.old_value,
+            new_value=r.new_value,
+            reason=r.reason,
+            changed_by_user_id=r.changed_by_user_id,
+            changed_at=r.changed_at,
+            changed_by_full_name=(
+                actor.full_name or actor.email
+                if (actor := actors.get(r.changed_by_user_id)) is not None
+                else None
+            ),
+        )
+        for r in rows
+    ]
 
 
 # --- Serialized receive (FR-005) ----------------------------------------------
 
 
-def get_unit(*, session: Session, unit_id: Any) -> Unit | None:
+def get_unit(*, session: Session, unit_id: uuid.UUID) -> Unit | None:
     return session.get(Unit, unit_id)
 
 
@@ -502,6 +920,16 @@ def _units_by_movement_key(
     }
 
 
+def _require_active_product(product: Product) -> None:
+    """Inactive (discontinued) products can't be transacted. Mirrors the
+    active-only pickers at the API boundary — typed SKUs, scanned barcodes,
+    and offline replays all bypass the picker filter."""
+    if not product.is_active:
+        raise HTTPException(
+            status_code=400, detail=f"Product {product.sku} is inactive"
+        )
+
+
 def receive_serialized(
     *,
     session: Session,
@@ -510,11 +938,13 @@ def receive_serialized(
     pieces: list[ReceivePiece],
     idempotency_key: uuid.UUID,
     received_by_user_id: uuid.UUID,
+    received_at: datetime | None = None,
 ) -> list[Unit]:
     """Receive SERIALIZED pieces: one unit + one RECEIVED movement each, in one
     transaction. Idempotent per request — replaying the same idempotency_key
     returns the already-created units without inserting duplicates (FR-005, S5)."""
-    if not session.get(Product, product_id):
+    product = session.get(Product, product_id)
+    if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     if not session.get(Supplier, supplier_id):
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -542,7 +972,15 @@ def receive_serialized(
         )
         return [replay[key] for key in move_keys]
 
+    # Guarded after the replay lookup (as in receive_quantity): a replay of a
+    # receipt made while the product was active must still return its units,
+    # even if the product has since been retired.
+    _require_active_product(product)
+
     state = assert_unit_transition(UnitState.RECEIVED, MovementType.RECEIVED)
+    # One receipt is one delivery: every piece shares the arrival timestamp.
+    if received_at is None:
+        received_at = get_datetime_utc()
     units: list[Unit] = []
     for piece, move_key in zip(pieces, move_keys, strict=True):
         unit = Unit(
@@ -554,6 +992,7 @@ def receive_serialized(
             current_location_id=ygn.id,
             purchase_cost_thb=piece.purchase_cost_thb,
             received_by_user_id=received_by_user_id,
+            received_at=received_at,
         )
         session.add(unit)
         session.flush()
@@ -667,6 +1106,7 @@ def receive_quantity(
     supplier_batch_ref: str | None = None,
     expected_qty: int | None = None,
     note: str | None = None,
+    received_at: datetime | None = None,
 ) -> PartBatch:
     """Receive a QUANTITY batch: one part_batch (``remaining_qty == received_qty``)
     + one RECEIVED part_movement, in one transaction. Idempotent per request —
@@ -685,6 +1125,7 @@ def receive_quantity(
     product = session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    _require_active_product(product)
     if product.tracking_mode != TrackingMode.QUANTITY:
         raise HTTPException(
             status_code=400, detail="Product is not QUANTITY-tracked"
@@ -695,13 +1136,20 @@ def receive_quantity(
     if not ygn:
         raise HTTPException(status_code=500, detail="YGN_WH location not seeded")
 
+    # An operator-picked receive date arrives already composed with a clock time
+    # (routes/receipts.py). Normalising to a concrete timestamp here — rather
+    # than leaving the column default to fire — lets batch_no share the same
+    # date, so a backdated receipt's label matches its received_at.
+    if received_at is None:
+        received_at = get_datetime_utc()
+
     batch = PartBatch(
         product_id=product_id,
         batch_no=next_batch_no(
             session=session,
             product_id=product_id,
             sku=product.sku,
-            today=date.today(),
+            today=received_at.date(),
         ),
         supplier_id=supplier_id,
         supplier_batch_ref=supplier_batch_ref,
@@ -709,6 +1157,7 @@ def receive_quantity(
         remaining_qty=received_qty,
         purchase_cost_thb=purchase_cost_thb,
         received_by_user_id=received_by_user_id,
+        received_at=received_at,
     )
     session.add(batch)
     session.flush()  # assign the batch row before the movement FK references it
@@ -793,21 +1242,24 @@ def consume_quantity_fifo(
         )
         remaining -= take
 
-    # FR-016 low-stock crossing: flag a FRESH downward crossing below the per-SKU
-    # threshold (was at/above before, now below). Read-only product fetch + a set
-    # insert — no new locks, no change to FIFO/409 semantics. The route pops these
-    # post-commit and dispatches a background alert.
+    # FR-016 low-stock: flag any consumption that leaves on-hand below the
+    # per-SKU threshold, not just the first crossing -- quantity_needed > 0 is
+    # enforced above, so every call here is a real decrease, and each one that
+    # ends below threshold is its own low-stock fact worth alerting on. Read-only
+    # product fetch + a set insert — no new locks, no change to FIFO/409
+    # semantics. The route pops these post-commit and dispatches a background
+    # alert.
     after = total_available - quantity_needed
     product = session.get(Product, product_id)
     threshold = product.default_min_stock_level if product else None
-    if threshold is not None and total_available >= threshold and after < threshold:
+    if threshold is not None and after < threshold:
         session.info.setdefault("low_stock_crossed", set()).add(product_id)
 
     return cost_lines
 
 
 def pop_low_stock_crossed(session: Session) -> set[uuid.UUID]:
-    """Return and clear the product_ids flagged as crossing below their low-stock
+    """Return and clear the product_ids flagged as ending below their low-stock
     threshold during this session's consumption (FR-016)."""
     crossed: set[uuid.UUID] = session.info.get("low_stock_crossed", set())
     session.info["low_stock_crossed"] = set()
@@ -983,7 +1435,7 @@ def create_pricing_override(
 
 
 def get_pricing_override(
-    *, session: Session, override_id: Any
+    *, session: Session, override_id: uuid.UUID
 ) -> PricingOverrideRequest | None:
     return session.get(PricingOverrideRequest, override_id)
 
@@ -1004,6 +1456,15 @@ def list_pricing_overrides(
         .limit(limit)
     )
     return list(session.exec(stmt).all())
+
+
+def count_pricing_overrides(
+    *, session: Session, state: OverrideState | None = None
+) -> int:
+    statement = select(func.count()).select_from(PricingOverrideRequest)
+    if state is not None:
+        statement = statement.where(PricingOverrideRequest.state == state)
+    return session.exec(statement).one()
 
 
 def decide_pricing_override(
@@ -1115,8 +1576,9 @@ def override_exceptions_report(
     *, session: Session, year: int, month: int
 ) -> OverrideExceptionsReport:
     """Monthly list of pricing overrides requested in [month_start, next) UTC,
-    with per-state counts (FR-010, spec §8). Grouped by created_at (request
-    date); each row carries the product SKU for readability."""
+    with per-state counts (FR-010, spec §8). Sorted by deviation size (largest
+    first); ties break by created_at ascending, then id for a total order. Each
+    row carries the product SKU for readability."""
     start = datetime(year, month, 1, tzinfo=timezone.utc)
     if month == 12:
         end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
@@ -1130,7 +1592,11 @@ def override_exceptions_report(
             col(PricingOverrideRequest.created_at) >= start,
             col(PricingOverrideRequest.created_at) < end,
         )
-        .order_by(col(PricingOverrideRequest.created_at))
+        .order_by(
+            col(PricingOverrideRequest.deviation_pct).desc(),
+            col(PricingOverrideRequest.created_at).asc(),
+            col(PricingOverrideRequest.id),
+        )
     ).all()
 
     counts: dict[OverrideState, int] = dict.fromkeys(OverrideState, 0)
@@ -1252,6 +1718,145 @@ def holding_period_report(
 # --- Search (FR-015, Flow F) --------------------------------------------------
 
 
+def _build_serial_movements(
+    *, session: Session, movements: list[UnitMovement]
+) -> list[SerialMovementPublic]:
+    """Resolve a unit's movements to display labels (locations, actor, linked
+    sale/ticket/pull). No cost — serialized search is cost-free for both roles."""
+    if not movements:
+        return []
+
+    loc_ids: set[uuid.UUID] = set()
+    actor_ids: set[uuid.UUID] = set()
+    sale_ids: set[uuid.UUID] = set()
+    ticket_ids: set[uuid.UUID] = set()
+    pull_ids: set[uuid.UUID] = set()
+    for m in movements:
+        if m.from_location_id is not None:
+            loc_ids.add(m.from_location_id)
+        if m.to_location_id is not None:
+            loc_ids.add(m.to_location_id)
+        actor_ids.add(m.actor_user_id)
+        if m.sale_id is not None:
+            sale_ids.add(m.sale_id)
+        if m.service_ticket_id is not None:
+            ticket_ids.add(m.service_ticket_id)
+        if m.project_pull_id is not None:
+            pull_ids.add(m.project_pull_id)
+
+    locations = {
+        loc.id: loc.name
+        for loc in (
+            session.exec(select(Location).where(col(Location.id).in_(loc_ids))).all()
+            if loc_ids
+            else []
+        )
+    }
+    actors = {
+        u.id: u.full_name
+        for u in (
+            session.exec(select(User).where(col(User.id).in_(actor_ids))).all()
+            if actor_ids
+            else []
+        )
+    }
+    sales = {
+        s.id: s
+        for s in (
+            session.exec(select(Sale).where(col(Sale.id).in_(sale_ids))).all()
+            if sale_ids
+            else []
+        )
+    }
+    tickets = {
+        t.id: t
+        for t in (
+            session.exec(
+                select(ServiceTicket).where(col(ServiceTicket.id).in_(ticket_ids))
+            ).all()
+            if ticket_ids
+            else []
+        )
+    }
+    pulls = {
+        p.id: p
+        for p in (
+            session.exec(select(ProjectPull).where(col(ProjectPull.id).in_(pull_ids))).all()
+            if pull_ids
+            else []
+        )
+    }
+    cust_ids: set[uuid.UUID] = set()
+    proj_ids: set[uuid.UUID] = set()
+    for s in sales.values():
+        cust_ids.add(s.customer_id)
+    for t in tickets.values():
+        cust_ids.add(t.customer_id)
+    for p in pulls.values():
+        cust_ids.add(p.customer_id)
+        proj_ids.add(p.project_id)
+    customers = {
+        c.id: c.name
+        for c in (
+            session.exec(select(Customer).where(col(Customer.id).in_(cust_ids))).all()
+            if cust_ids
+            else []
+        )
+    }
+    projects = {
+        pr.id: pr
+        for pr in (
+            session.exec(select(Project).where(col(Project.id).in_(proj_ids))).all()
+            if proj_ids
+            else []
+        )
+    }
+
+    out: list[SerialMovementPublic] = []
+    for m in movements:
+        kind: str | None = None
+        label: str | None = None
+        if m.sale_id is not None:
+            kind = "SALE"
+            sale = sales.get(m.sale_id)
+            label = customers.get(sale.customer_id) if sale else None
+        elif m.service_ticket_id is not None:
+            kind = "SERVICE_TICKET"
+            ticket = tickets.get(m.service_ticket_id)
+            label = customers.get(ticket.customer_id) if ticket else None
+        elif m.project_pull_id is not None:
+            kind = "PROJECT_PULL"
+            pull = pulls.get(m.project_pull_id)
+            proj = projects.get(pull.project_id) if pull else None
+            label = f"Project {proj.code} — {proj.name}" if proj else None
+        elif m.stock_adjustment_id is not None:
+            kind = "STOCK_ADJUSTMENT"
+        out.append(
+            SerialMovementPublic(
+                event_type=m.event_type,
+                from_location_id=m.from_location_id,
+                to_location_id=m.to_location_id,
+                occurred_at=m.occurred_at,
+                actor_user_id=m.actor_user_id,
+                sale_id=m.sale_id,
+                service_ticket_id=m.service_ticket_id,
+                project_pull_id=m.project_pull_id,
+                stock_adjustment_id=m.stock_adjustment_id,
+                notes=m.notes,
+                from_location_name=(
+                    locations.get(m.from_location_id) if m.from_location_id else None
+                ),
+                to_location_name=(
+                    locations.get(m.to_location_id) if m.to_location_id else None
+                ),
+                actor_name=actors.get(m.actor_user_id),
+                reference_kind=kind,
+                reference_label=label,
+            )
+        )
+    return out
+
+
 def search_serial(
     *, session: Session, barcode: str
 ) -> SerialSearchResult:
@@ -1275,18 +1880,178 @@ def search_serial(
         sku=product.sku,
         supplier_serial=unit.supplier_serial,
         current_state=unit.current_state,
-        movements=[SerialMovementPublic.model_validate(m) for m in movements],
+        movements=_build_serial_movements(session=session, movements=list(movements)),
     )
 
 
-def search_sku(*, session: Session, sku: str) -> SkuSearchResult:
-    """Batch attribution + quantity-on-hand for one SKU (FR-015). QUANTITY lists
-    its part_batch rows (oldest-first) with remaining_qty; SERIALIZED reports the
-    in-stock unit count. No cost fields (search is both-roles)."""
+_CONSUMING_EVENTS = (
+    MovementType.SOLD,
+    MovementType.MAINTENANCE_OUT,
+    MovementType.PROJECT_OUT,
+    MovementType.ADJUSTED_OUT,
+)
+_CONSUMPTION_LIMIT = 200  # bounded most-recent page (spec §7)
+
+
+def _resolve_counterparty(
+    m: PartMovement,
+    sales: dict[uuid.UUID, Sale],
+    tickets: dict[uuid.UUID, ServiceTicket],
+    pulls: dict[uuid.UUID, ProjectPull],
+    adjustments: dict[uuid.UUID, StockAdjustment],
+    customers: dict[uuid.UUID, Customer],
+    projects: dict[uuid.UUID, Project],
+) -> tuple[str, uuid.UUID, str | None, str | None, str | None, str | None]:
+    """Branch on the single non-null parent FK -> (reference_kind, reference_id,
+    customer_name, project_name, project_code, notes)."""
+    if m.sale_id is not None:
+        s = sales.get(m.sale_id)
+        cust = customers.get(s.customer_id) if s else None
+        return "SALE", m.sale_id, (cust.name if cust else None), None, None, m.notes
+    if m.service_ticket_id is not None:
+        t = tickets.get(m.service_ticket_id)
+        cust = customers.get(t.customer_id) if t else None
+        return ("SERVICE_TICKET", m.service_ticket_id,
+                (cust.name if cust else None), None, None, m.notes)
+    if m.project_pull_id is not None:
+        p = pulls.get(m.project_pull_id)
+        cust = customers.get(p.customer_id) if p else None
+        proj = projects.get(p.project_id) if p else None
+        return ("PROJECT_PULL", m.project_pull_id, (cust.name if cust else None),
+                (proj.name if proj else None), (proj.code if proj else None), m.notes)
+    if m.stock_adjustment_id is not None:
+        a = adjustments.get(m.stock_adjustment_id)
+        return ("STOCK_ADJUSTMENT", m.stock_adjustment_id, None, None, None,
+                (a.reason if a else m.notes))
+    # Consuming events always carry a parent FK; defensive fallback only.
+    return "UNKNOWN", m.id, None, None, None, m.notes
+
+
+def _build_consumption_events(
+    *, session: Session, movements: list[PartMovement], is_admin: bool
+) -> list[SkuConsumptionEventPublic]:
+    """Resolve consuming part_movements to attribution events (bulk, no N+1).
+    Cost (draws + total_cost_thb) is populated only when is_admin."""
+    if not movements:
+        return []
+
+    sale_ids: set[uuid.UUID] = set()
+    ticket_ids: set[uuid.UUID] = set()
+    pull_ids: set[uuid.UUID] = set()
+    adj_ids: set[uuid.UUID] = set()
+    actor_ids: set[uuid.UUID] = set()
+    for m in movements:
+        actor_ids.add(m.actor_user_id)
+        if m.sale_id is not None:
+            sale_ids.add(m.sale_id)
+        elif m.service_ticket_id is not None:
+            ticket_ids.add(m.service_ticket_id)
+        elif m.project_pull_id is not None:
+            pull_ids.add(m.project_pull_id)
+        elif m.stock_adjustment_id is not None:
+            adj_ids.add(m.stock_adjustment_id)
+
+    def _by_id(model: Any, ids: set[uuid.UUID]) -> dict[uuid.UUID, Any]:
+        if not ids:
+            return {}
+        rows = session.exec(select(model).where(col(model.id).in_(ids))).all()
+        return {r.id: r for r in rows}
+
+    sales = _by_id(Sale, sale_ids)
+    tickets = _by_id(ServiceTicket, ticket_ids)
+    pulls = _by_id(ProjectPull, pull_ids)
+    adjustments = _by_id(StockAdjustment, adj_ids)
+    actors = _by_id(User, actor_ids)
+
+    customer_ids: set[uuid.UUID] = set()
+    project_ids: set[uuid.UUID] = set()
+    for s in sales.values():
+        customer_ids.add(s.customer_id)
+    for t in tickets.values():
+        customer_ids.add(t.customer_id)
+    for p in pulls.values():
+        customer_ids.add(p.customer_id)
+        project_ids.add(p.project_id)
+    customers = _by_id(Customer, customer_ids)
+    projects = _by_id(Project, project_ids)
+
+    draws_by_movement: dict[uuid.UUID, list[SkuConsumptionDrawAdminPublic]] = {}
+    if is_admin:
+        movement_ids = [m.id for m in movements]
+        cost_lines = session.exec(
+            select(CostLine)
+            .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
+            .where(col(CostLine.part_movement_id).in_(movement_ids))
+            .order_by(col(PartBatch.received_at), col(PartBatch.id))
+        ).all()
+        batch_ids = {cl.part_batch_id for cl in cost_lines}
+        batch_no = {
+            b.id: b.batch_no
+            for b in (
+                session.exec(
+                    select(PartBatch).where(col(PartBatch.id).in_(batch_ids))
+                ).all()
+                if batch_ids
+                else []
+            )
+        }
+        for cl in cost_lines:
+            draws_by_movement.setdefault(cl.part_movement_id, []).append(
+                SkuConsumptionDrawAdminPublic(
+                    batch_no=batch_no.get(cl.part_batch_id, "—"),
+                    quantity=cl.quantity,
+                    unit_cost_thb=cl.unit_cost_thb,
+                    total_cost_thb=cl.total_cost_thb,
+                )
+            )
+
+    events: list[SkuConsumptionEventPublic] = []
+    for m in movements:
+        kind, ref_id, cust_name, proj_name, proj_code, notes = _resolve_counterparty(
+            m, sales, tickets, pulls, adjustments, customers, projects
+        )
+        actor = actors.get(m.actor_user_id)
+        common: dict[str, Any] = {
+            "event_type": m.event_type,
+            "occurred_at": m.occurred_at,
+            "quantity": m.quantity,
+            "reference_kind": kind,
+            "reference_id": ref_id,
+            "customer_name": cust_name,
+            "project_name": proj_name,
+            "project_code": proj_code,
+            "actor_name": (actor.full_name if actor else None),
+            "notes": notes,
+        }
+        if is_admin:
+            draws = draws_by_movement.get(m.id, [])
+            events.append(
+                SkuConsumptionEventAdminPublic(
+                    **common,
+                    total_cost_thb=sum(
+                        (d.total_cost_thb for d in draws), Decimal("0.00")
+                    ),
+                    draws=draws,
+                )
+            )
+        else:
+            events.append(SkuConsumptionEventPublic(**common))
+    return events
+
+
+def search_sku(
+    *, session: Session, sku: str, is_admin: bool
+) -> SkuSearchResult | SkuSearchAdminResult:
+    """Batch attribution + QOH + consumption history for one SKU (FR-015).
+    QUANTITY lists part_batch rows (oldest-first) and consuming part_movements
+    (newest-first, bounded). SERIALIZED reports in-stock unit count, no
+    consumption. Cost (batch purchase_cost, per-draw + total COGS) is returned
+    only when is_admin — staff get attribution without money (spec §4, §6.5)."""
     product = session.exec(select(Product).where(Product.sku == sku)).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    movements: list[PartMovement] = []
     if product.tracking_mode == TrackingMode.QUANTITY:
         batches = session.exec(
             select(PartBatch)
@@ -1294,7 +2059,26 @@ def search_sku(*, session: Session, sku: str) -> SkuSearchResult:
             .order_by(col(PartBatch.received_at), col(PartBatch.id))
         ).all()
         total = sum(b.remaining_qty for b in batches)
-        batch_pub = [SkuBatchPublic.model_validate(b) for b in batches]
+        # Uses ix_part_movement_product_occurred (product_id, occurred_at DESC)
+        # for the equality + ordering; event_type is NOT in that index, so it is
+        # applied as an in-heap filter (the scan is bounded in practice by this
+        # product's movement-history depth). If deep non-consuming histories ever
+        # show up in pg_stat_statements, add a partial index
+        # (product_id, occurred_at DESC) WHERE event_type IN (consuming...).
+        movements = list(
+            session.exec(
+                select(PartMovement)
+                .where(
+                    PartMovement.product_id == product.id,
+                    col(PartMovement.event_type).in_(_CONSUMING_EVENTS),
+                )
+                .order_by(
+                    col(PartMovement.occurred_at).desc(),
+                    col(PartMovement.id).desc(),
+                )
+                .limit(_CONSUMPTION_LIMIT)
+            ).all()
+        )
     else:
         total = len(
             session.exec(
@@ -1304,14 +2088,28 @@ def search_sku(*, session: Session, sku: str) -> SkuSearchResult:
                 )
             ).all()
         )
-        batch_pub = []
+        batches = []
 
+    events = _build_consumption_events(
+        session=session, movements=movements, is_admin=is_admin
+    )
+
+    if is_admin:
+        return SkuSearchAdminResult(
+            sku=product.sku,
+            product_id=product.id,
+            tracking_mode=product.tracking_mode,
+            total_on_hand=total,
+            batches=[SkuBatchAdminPublic.model_validate(b) for b in batches],
+            consumption=cast(list[SkuConsumptionEventAdminPublic], events),
+        )
     return SkuSearchResult(
         sku=product.sku,
         product_id=product.id,
         tracking_mode=product.tracking_mode,
         total_on_hand=total,
-        batches=batch_pub,
+        batches=[SkuBatchPublic.model_validate(b) for b in batches],
+        consumption=events,
     )
 
 
@@ -1433,6 +2231,8 @@ def create_stock_adjustment(
     ).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    # No _require_active_product here, deliberately: adjustments are the
+    # reconciliation path for draining an inactive product's residual stock.
     if product.tracking_mode != TrackingMode.QUANTITY:
         raise HTTPException(
             status_code=400,
@@ -1519,8 +2319,12 @@ def create_stock_adjustment(
 
 def create_sync_review_item(
     *, session: Session, data: SyncReviewItemCreate, submitted_by_user_id: uuid.UUID
-) -> SyncReviewItem:
+) -> tuple[SyncReviewItem, bool]:
     """Ingest a STALE/CONFLICT offline mutation into the admin review queue.
+
+    Returns ``(item, replayed)``. ``replayed`` is True when an existing row was
+    returned instead of a fresh insert — the caller uses it to avoid
+    re-notifying for an item already sitting in the queue.
 
     Idempotent by ``idempotency_key``: a re-POST of the same offline item
     returns the existing row (UNIQUE constraint + IntegrityError rollback path
@@ -1545,7 +2349,7 @@ def create_sync_review_item(
             stored_user_id=item.submitted_by_user_id,
             caller_user_id=submitted_by_user_id,
         )
-    return item
+    return item, replayed
 
 
 def get_sync_review_item(
@@ -1566,6 +2370,22 @@ def list_sync_review_items(
         stmt = stmt.where(col(SyncReviewItem.state) == state)
     stmt = stmt.order_by(col(SyncReviewItem.created_at)).offset(skip).limit(limit)
     return list(session.exec(stmt).all())
+
+
+def count_pending_sync_review_items(*, session: Session) -> SyncReviewPendingCounts:
+    """PENDING queue depth, split by reason — the numbers the admin alert
+    quotes. One grouped scan, served by ix_syncreviewitem_state_created."""
+    rows = session.execute(
+        sa_select(col(SyncReviewItem.reason), func.count())
+        .where(col(SyncReviewItem.state) == SyncReviewState.PENDING)
+        .group_by(col(SyncReviewItem.reason))
+    ).all()
+    by_reason: dict[SyncReviewReason, int] = {r: int(n) for r, n in rows}
+    stale = int(by_reason.get(SyncReviewReason.STALE, 0))
+    conflict = int(by_reason.get(SyncReviewReason.CONFLICT, 0))
+    return SyncReviewPendingCounts(
+        total=stale + conflict, stale=stale, conflict=conflict
+    )
 
 
 def resolve_sync_review_item(
@@ -1608,8 +2428,99 @@ def resolve_sync_review_item(
 # --- Serialized sale (FR-007) -------------------------------------------------
 
 
-def get_sale(*, session: Session, sale_id: Any) -> Sale | None:
+def get_sale(*, session: Session, sale_id: uuid.UUID) -> Sale | None:
     return session.get(Sale, sale_id)
+
+
+@dataclass(frozen=True)
+class SaleReceiptData:
+    """Resolved display inputs for one sale's receipt PDF (non-financial beyond
+    price + total)."""
+
+    sale_id: uuid.UUID
+    sold_at: datetime
+    customer_name: str
+    sold_by: str
+    lines: list[tuple[str, int, Decimal]]
+    total_thb: Decimal
+
+
+def _receipt_line_label(
+    *,
+    line: SaleLine,
+    units: dict[uuid.UUID, Unit],
+    products: dict[uuid.UUID, Product],
+) -> str:
+    """Human-readable label for a receipt line: parts as ``Model (SKU)``, units
+    as ``Model · serial``. Falls back to ``Unknown product`` if a row is gone."""
+    if line.unit_id is not None:
+        unit = units.get(line.unit_id)
+        prod = products.get(unit.product_id) if unit is not None else None
+        name = prod.model_name if prod is not None else "Unknown product"
+        if unit is not None and unit.supplier_serial:
+            return f"{name} · {unit.supplier_serial}"
+        return name
+    if line.product_id is not None:
+        prod = products.get(line.product_id)
+        if prod is not None:
+            return f"{prod.model_name} ({prod.sku})"
+    return "Unknown product"
+
+
+def get_sale_receipt_data(
+    *, session: Session, sale_id: uuid.UUID
+) -> SaleReceiptData | None:
+    """Resolve a sale into receipt display data via batched lookups (no N+1).
+    Returns None when the sale does not exist."""
+    sale = get_sale(session=session, sale_id=sale_id)
+    if sale is None:
+        return None
+    sale_lines = session.exec(
+        select(SaleLine).where(SaleLine.sale_id == sale.id)
+    ).all()
+
+    unit_ids = {ln.unit_id for ln in sale_lines if ln.unit_id is not None}
+    product_ids = {ln.product_id for ln in sale_lines if ln.product_id is not None}
+    units: dict[uuid.UUID, Unit] = {
+        u.id: u
+        for u in (
+            session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all()
+            if unit_ids
+            else []
+        )
+    }
+    for u in units.values():
+        product_ids.add(u.product_id)
+    products: dict[uuid.UUID, Product] = {
+        p.id: p
+        for p in (
+            session.exec(select(Product).where(col(Product.id).in_(product_ids))).all()
+            if product_ids
+            else []
+        )
+    }
+
+    customer = session.get(Customer, sale.customer_id)
+    customer_name = customer.name if customer is not None else "Unknown"
+    user = session.get(User, sale.created_by_user_id)
+    sold_by = (user.full_name or user.email) if user is not None else "Unknown"
+
+    lines: list[tuple[str, int, Decimal]] = [
+        (
+            _receipt_line_label(line=ln, units=units, products=products),
+            ln.quantity,
+            ln.unit_price_thb,
+        )
+        for ln in sale_lines
+    ]
+    return SaleReceiptData(
+        sale_id=sale.id,
+        sold_at=sale.sold_at,
+        customer_name=customer_name,
+        sold_by=sold_by,
+        lines=lines,
+        total_thb=sale.total_thb,
+    )
 
 
 def _sale_by_key(*, session: Session, idempotency_key: uuid.UUID) -> Sale | None:
@@ -1695,6 +2606,7 @@ def create_sale(
             ).first()
             if not product:
                 raise HTTPException(status_code=404, detail="Product not found")
+            _require_active_product(product)
             if product.tracking_mode != TrackingMode.QUANTITY:
                 raise HTTPException(
                     status_code=400,
@@ -1760,6 +2672,7 @@ def create_sale(
             )
         product = session.get(Product, unit.product_id)
         assert product is not None  # FK guarantees existence
+        _require_active_product(product)
         unit_price = product.retail_price_thb
         override_id = unit_override_by_barcode.get(barcode)
         if override_id is not None:
@@ -1887,11 +2800,467 @@ def create_sale(
     return sale
 
 
+# --- Sale returns (design 2026-07-25) -----------------------------------------
+
+
+def _sale_return_by_key(
+    *, session: Session, idempotency_key: uuid.UUID
+) -> SaleReturn | None:
+    return session.exec(
+        select(SaleReturn).where(SaleReturn.idempotency_key == idempotency_key)
+    ).first()
+
+
+def _returned_so_far(*, session: Session, sale_line_id: uuid.UUID) -> int:
+    """Units of a sale line already returned. Only meaningful while the sale
+    line is held FOR UPDATE — that lock is the serialization point."""
+    total = session.exec(
+        select(func.coalesce(func.sum(SaleReturnLine.quantity), 0)).where(
+            SaleReturnLine.sale_line_id == sale_line_id
+        )
+    ).one()
+    return int(total)
+
+
+def _return_unit_line(
+    *,
+    session: Session,
+    ret: SaleReturn,
+    sale_line: SaleLine,
+    quantity: int,
+    actor_user_id: uuid.UUID,
+    fallback_location_id: uuid.UUID,
+) -> Decimal:
+    """Walk a sold unit back to stock and return the cost restored.
+
+    The unit goes back to wherever it stood before the sale (the SOLD movement's
+    from_location_id), not to a generic bin, so its location history reads as a
+    clean round trip.
+    """
+    if quantity != 1:
+        raise HTTPException(
+            status_code=422, detail="UNIT line return quantity must be 1"
+        )
+    assert sale_line.unit_id is not None  # ck_saleline_unit_requires_unit_id
+    unit = session.exec(
+        select(Unit).where(Unit.id == sale_line.unit_id).with_for_update()
+    ).first()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    try:
+        new_state = assert_unit_transition(unit.current_state, MovementType.RETURNED)
+    except IllegalTransition:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unit cannot be returned from {unit.current_state.value}",
+        )
+
+    sold = session.exec(
+        select(UnitMovement)
+        .where(
+            UnitMovement.unit_id == unit.id,
+            UnitMovement.sale_id == sale_line.sale_id,
+            UnitMovement.event_type == MovementType.SOLD,
+        )
+        .order_by(col(UnitMovement.occurred_at).desc())
+    ).first()
+    back_to = (
+        sold.from_location_id
+        if sold is not None and sold.from_location_id is not None
+        else fallback_location_id
+    )
+
+    session.add(
+        UnitMovement(
+            unit_id=unit.id,
+            event_type=MovementType.RETURNED,
+            from_location_id=unit.current_location_id,
+            to_location_id=back_to,
+            sale_id=sale_line.sale_id,
+            actor_user_id=actor_user_id,
+            idempotency_key=uuid.uuid5(ret.idempotency_key, f"unit:{sale_line.id}"),
+        )
+    )
+    unit.current_state = new_state
+    unit.current_location_id = back_to
+    unit.updated_at = get_datetime_utc()
+    session.add(unit)
+    return unit.purchase_cost_thb
+
+
+def _return_part_line(
+    *,
+    session: Session,
+    ret: SaleReturn,
+    sale_line: SaleLine,
+    already_returned: int,
+    quantity: int,
+    actor_user_id: uuid.UUID,
+    from_location_id: uuid.UUID,
+    to_location_id: uuid.UUID,
+) -> Decimal:
+    """Roll back ``quantity`` units of a PART sale line onto the exact batches
+    the sale consumed, at the exact cost, and return the cost restored.
+
+    The sale's cost_lines record which batch supplied each unit. We walk them in
+    REVERSE consumption order (newest-received batch first) and skip the units a
+    prior partial return already restored, so repeated partial returns are
+    deterministic and never restore the same unit twice. The batch is a cost
+    bucket, not a physical bin: nobody knows which piece came back, and FIFO was
+    itself an accounting convention — the return reverses that convention.
+    """
+    assert sale_line.product_id is not None  # PART lines always carry a product
+    sold = session.exec(
+        select(PartMovement).where(
+            PartMovement.sale_id == sale_line.sale_id,
+            PartMovement.product_id == sale_line.product_id,
+            PartMovement.event_type == MovementType.SOLD,
+        )
+    ).first()
+    if sold is None:
+        raise HTTPException(
+            status_code=409, detail="Original consumption movement not found"
+        )
+
+    # Reverse consumption order == reverse FIFO. Ordering by the batch's
+    # (received_at, id) is deterministic across re-reads; cost_line.created_at
+    # is not (same-transaction inserts).
+    consumed = session.exec(
+        select(CostLine, PartBatch)
+        .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
+        .where(CostLine.part_movement_id == sold.id)
+        .order_by(col(PartBatch.received_at).desc(), col(PartBatch.id).desc())
+    ).all()
+
+    plan: list[tuple[uuid.UUID, int, Decimal]] = []  # (batch_id, qty, unit_cost)
+    to_skip, to_restore = already_returned, quantity
+    for cost_line, batch in consumed:
+        avail = cost_line.quantity
+        if to_skip:
+            skipped = min(to_skip, avail)
+            to_skip -= skipped
+            avail -= skipped
+        if avail and to_restore:
+            take = min(avail, to_restore)
+            plan.append((batch.id, take, cost_line.unit_cost_thb))
+            to_restore -= take
+        if to_restore == 0:
+            break
+    if to_restore:
+        # Belt-and-suspenders: the caller's over-return check should have caught
+        # this. Reaching here means the sale line and its cost lines disagree.
+        raise HTTPException(
+            status_code=409, detail="Return exceeds the quantity originally consumed"
+        )
+
+    # Re-lock the target batches in the SAME (received_at, id) order that
+    # consume_quantity_fifo uses, so a concurrent sale and return on this product
+    # acquire batch locks in one global order and cannot deadlock.
+    #
+    # populate_existing is load-bearing, not a micro-optimization: the cost-line
+    # join above already pulled these PartBatch rows into the identity map
+    # UNLOCKED. Without it SQLAlchemy hands back those stale objects and the
+    # `remaining_qty += qty` below is computed from a pre-lock value, silently
+    # clobbering a concurrent sale's decrement (a lost update — caught by
+    # tests/crud/test_return_concurrency.py).
+    locked = {
+        b.id: b
+        for b in session.exec(
+            select(PartBatch)
+            .where(col(PartBatch.id).in_([bid for bid, _, _ in plan]))
+            .order_by(col(PartBatch.received_at), col(PartBatch.id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+    }
+
+    movement = PartMovement(
+        product_id=sale_line.product_id,
+        event_type=MovementType.RETURNED,
+        quantity=quantity,
+        from_location_id=from_location_id,
+        to_location_id=to_location_id,
+        sale_id=sale_line.sale_id,
+        actor_user_id=actor_user_id,
+        idempotency_key=uuid.uuid5(ret.idempotency_key, f"part:{sale_line.id}"),
+    )
+    session.add(movement)
+    session.flush()
+
+    restored = Decimal("0.00")
+    for batch_id, qty, unit_cost in plan:
+        batch = locked[batch_id]
+        # Safe against ck_part_batch_qty_bounds (remaining_qty <= received_qty):
+        # a batch is only ever credited back units it supplied to THIS sale.
+        batch.remaining_qty += qty
+        batch.updated_at = get_datetime_utc()
+        session.add(batch)
+        session.add(
+            CostLine(
+                part_movement_id=movement.id,
+                part_batch_id=batch_id,
+                quantity=qty,
+                unit_cost_thb=unit_cost,
+                total_cost_thb=qty * unit_cost,
+            )
+        )
+        restored += qty * unit_cost
+    return restored
+
+
+def create_sale_return(
+    *,
+    session: Session,
+    sale_id: uuid.UUID,
+    payload: SaleReturnCreateRequest,
+    created_by_user_id: uuid.UUID,
+) -> SaleReturn:
+    """Record a customer return of one or more sale lines, admin-only.
+
+    Restores stock by APPENDING reversal movements (never mutating the ledgers):
+    PART lines re-credit the exact batches the sale consumed at the original
+    cost; UNIT lines walk SOLD -> IN_STOCK. Refund is fixed at the sale line's
+    unit_price_thb. Everything commits in one transaction — any failing line
+    rolls the whole return back. Idempotent on ``idempotency_key``.
+    """
+    replay = _sale_return_by_key(
+        session=session, idempotency_key=payload.idempotency_key
+    )
+    if replay is not None:
+        _assert_replay_actor(
+            stored_user_id=replay.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
+        if replay.sale_id != sale_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key already used for a different sale",
+            )
+        return replay
+
+    if session.get(Sale, sale_id) is None:
+        raise HTTPException(status_code=404, detail="Sale not found")
+
+    line_ids: set[uuid.UUID] = set()
+    for line in payload.lines:
+        if line.sale_line_id in line_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Duplicate sale_line_id; merge into one line",
+            )
+        line_ids.add(line.sale_line_id)
+
+    # Lock the cited sale lines in id order. This is the ONLY serialization point
+    # for two concurrent returns of the same line: SaleReturnLine rows may not
+    # exist yet, so FOR UPDATE on them would lock nothing.
+    sale_lines = {
+        sl.id: sl
+        for sl in session.exec(
+            select(SaleLine)
+            .where(col(SaleLine.id).in_(line_ids))
+            .order_by(col(SaleLine.id))
+            .with_for_update()
+        ).all()
+    }
+    for line in payload.lines:
+        sl = sale_lines.get(line.sale_line_id)
+        if sl is None or sl.sale_id != sale_id:
+            raise HTTPException(
+                status_code=404, detail="Sale line not part of this sale"
+            )
+
+    ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
+    customer_loc = session.exec(
+        select(Location).where(Location.code == "CUSTOMER")
+    ).first()
+    if not ygn or not customer_loc:
+        raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    ret = SaleReturn(
+        sale_id=sale_id,
+        created_by_user_id=created_by_user_id,
+        idempotency_key=payload.idempotency_key,
+        reason=payload.reason,
+        total_refund_thb=Decimal("0.00"),
+        total_cogs_restored_thb=Decimal("0.00"),
+    )
+    session.add(ret)
+    session.flush()
+
+    total_refund = Decimal("0.00")
+    total_cogs = Decimal("0.00")
+    # Deterministic line order so concurrent returns take unit/batch locks in the
+    # same order (mirrors create_sale's sorted part_reqs).
+    for line in sorted(payload.lines, key=lambda ln: str(ln.sale_line_id)):
+        sl = sale_lines[line.sale_line_id]
+        already = _returned_so_far(session=session, sale_line_id=sl.id)
+        if already + line.quantity > sl.quantity:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Over-return: {sl.quantity - already} returnable, "
+                    f"requested {line.quantity}"
+                ),
+            )
+        if sl.line_kind == SaleLineKind.UNIT:
+            cogs = _return_unit_line(
+                session=session,
+                ret=ret,
+                sale_line=sl,
+                quantity=line.quantity,
+                actor_user_id=created_by_user_id,
+                fallback_location_id=ygn.id,
+            )
+        else:
+            cogs = _return_part_line(
+                session=session,
+                ret=ret,
+                sale_line=sl,
+                already_returned=already,
+                quantity=line.quantity,
+                actor_user_id=created_by_user_id,
+                from_location_id=customer_loc.id,
+                to_location_id=ygn.id,
+            )
+        session.add(
+            SaleReturnLine(
+                sale_return_id=ret.id,
+                sale_line_id=sl.id,
+                quantity=line.quantity,
+                unit_price_thb=sl.unit_price_thb,
+                cogs_restored_thb=cogs,
+            )
+        )
+        total_refund += sl.unit_price_thb * line.quantity
+        total_cogs += cogs
+
+    ret.total_refund_thb = total_refund
+    ret.total_cogs_restored_thb = total_cogs
+    session.add(ret)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        winner = _sale_return_by_key(
+            session=session, idempotency_key=payload.idempotency_key
+        )
+        if winner is None:
+            raise
+        _assert_replay_actor(
+            stored_user_id=winner.created_by_user_id,
+            caller_user_id=created_by_user_id,
+        )
+        return winner
+    session.refresh(ret)
+    return ret
+
+
+_RETURNABLE_SALE_LIMIT = 20  # bounded, most-recent-first (hardening spec §7)
+
+
+def list_returnable_sales(
+    *,
+    session: Session,
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+    limit: int = _RETURNABLE_SALE_LIMIT,
+) -> ReturnableSalesPublic:
+    """Recent sales holding still-returnable lines for one unit or one SKU.
+
+    Fully-returned lines are omitted, so an empty result means "nothing here can
+    be returned" — which is exactly what the UI needs to decide between offering
+    a return and offering a write-off.
+    """
+    if (castranova_barcode is None) == (sku is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide exactly one of castranova_barcode or sku",
+        )
+
+    stmt = (
+        select(SaleLine, Sale)
+        .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
+        .order_by(col(Sale.sold_at).desc(), col(Sale.id))
+    )
+    if castranova_barcode is not None:
+        stmt = stmt.join(Unit, col(SaleLine.unit_id) == col(Unit.id)).where(
+            Unit.castranova_barcode == castranova_barcode
+        )
+    else:
+        product = session.exec(select(Product).where(Product.sku == sku)).first()
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        stmt = stmt.where(SaleLine.product_id == product.id)
+
+    # Over-fetch: fully-returned lines are filtered out below, so the raw row
+    # count is an upper bound on the sales we can actually offer.
+    rows = session.exec(stmt.limit(limit * 4)).all()
+
+    # Batched label lookups. A UNIT line carries unit_id, not product_id, so the
+    # product comes through Unit — same recovery the margin report does.
+    unit_ids = [sl.unit_id for sl, _ in rows if sl.unit_id is not None]
+    unit_product: dict[uuid.UUID, uuid.UUID] = (
+        {
+            u.id: u.product_id
+            for u in session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all()
+        }
+        if unit_ids
+        else {}
+    )
+
+    def _product_of(sale_line: SaleLine) -> uuid.UUID | None:
+        if sale_line.product_id is not None:
+            return sale_line.product_id
+        if sale_line.unit_id is None:
+            return None
+        return unit_product.get(sale_line.unit_id)
+
+    labels = _product_labels(
+        session,
+        [pid for pid in {_product_of(sl) for sl, _ in rows} if pid is not None],
+    )
+    customers = _customer_labels(session, [s.customer_id for _, s in rows])
+
+    by_sale: dict[uuid.UUID, ReturnableSalePublic] = {}
+    for sale_line, sale in rows:
+        returned = _returned_so_far(session=session, sale_line_id=sale_line.id)
+        returnable = sale_line.quantity - returned
+        if returnable <= 0:
+            continue
+        pid = _product_of(sale_line)
+        entry = by_sale.get(sale.id)
+        if entry is None:
+            if len(by_sale) >= limit:
+                continue
+            entry = ReturnableSalePublic(
+                sale_id=sale.id,
+                sold_at=sale.sold_at,
+                customer_id=sale.customer_id,
+                customer_name=customers.get(sale.customer_id, ""),
+                lines=[],
+            )
+            by_sale[sale.id] = entry
+        entry.lines.append(
+            ReturnableLinePublic(
+                sale_line_id=sale_line.id,
+                line_kind=sale_line.line_kind,
+                product_id=pid,
+                unit_id=sale_line.unit_id,
+                label=labels.get(pid, "") if pid else "",
+                quantity_sold=sale_line.quantity,
+                quantity_returned=returned,
+                quantity_returnable=returnable,
+                unit_price_thb=sale_line.unit_price_thb,
+            )
+        )
+    return ReturnableSalesPublic(sales=list(by_sale.values()))
+
+
 # --- Maintenance / service tickets (FR-008) -----------------------------------
 
 
 def get_service_ticket(
-    *, session: Session, ticket_id: Any
+    *, session: Session, ticket_id: uuid.UUID
 ) -> ServiceTicket | None:
     return session.get(ServiceTicket, ticket_id)
 
@@ -1908,177 +3277,180 @@ def list_service_ticket_parts(
     )
 
 
-def open_service_ticket(
+def record_service_ticket(
     *,
     session: Session,
     customer_id: uuid.UUID,
     issue: str,
+    parts: list[ServiceTicketPartCreate],
     idempotency_key: uuid.UUID,
-    created_by_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
     notes: str | None = None,
+    resolution: str | None = None,
 ) -> ServiceTicket:
-    """Open a maintenance ticket. Idempotent on idempotency_key — replaying an
-    offline ticket-open returns the existing ticket without re-validating (FR-008,
-    S6). Customer existence is only checked on a genuine create."""
-    existing = session.exec(
+    """Record a maintenance ticket in one transaction (FR-008, Flow C): create the
+    ticket, add its parts, FIFO-consume each from stock (one
+    part_movement(MAINTENANCE_OUT) + cost_line[] per line), and stamp closed_at —
+    it is created already closed. Idempotent on idempotency_key: an offline replay
+    returns the existing ticket without re-consuming (S6). There is no persistent
+    open-ticket state.
+
+    Price defaults to the product's repair_price_thb; a different price requires an
+    approved SERVICE_TICKET_PART override (FR-010 / Flow C.3) — no free-form price
+    bypass. Insufficient stock on any line 409s and commits nothing. Mirrors
+    create_sale's atomic-idempotent shape."""
+    replay = session.exec(
         select(ServiceTicket).where(
             ServiceTicket.idempotency_key == idempotency_key
         )
     ).first()
-    if existing is not None:
+    if replay is not None:
         _assert_replay_actor(
-            stored_user_id=existing.created_by_user_id,
-            caller_user_id=created_by_user_id,
+            stored_user_id=replay.created_by_user_id,
+            caller_user_id=actor_user_id,
         )
-        return existing
+        return replay
+
     if not session.get(Customer, customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
-    ticket, replayed = get_or_replay(
-        session=session,
-        statement=select(ServiceTicket).where(
-            ServiceTicket.idempotency_key == idempotency_key
-        ),
-        build=lambda: ServiceTicket(
-            customer_id=customer_id,
-            issue=issue,
-            notes=notes,
-            created_by_user_id=created_by_user_id,
-            idempotency_key=idempotency_key,
-        ),
+
+    # Validate every line up front (fail fast, no orphan ticket). Each SKU
+    # resolves to a QUANTITY product; duplicate SKUs are rejected (the UI merges
+    # by SKU); an override may be cited on at most one line.
+    part_reqs: list[tuple[Product, int, uuid.UUID | None]] = []
+    seen_skus: set[str] = set()
+    seen_override_ids: set[uuid.UUID] = set()
+    for line in parts:
+        if line.sku in seen_skus:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Duplicate part line for SKU {line.sku}; merge into one",
+            )
+        seen_skus.add(line.sku)
+        oid = line.pricing_override_request_id
+        if oid is not None and oid in seen_override_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="An override may be applied to at most one line",
+            )
+        product = session.exec(
+            select(Product).where(Product.sku == line.sku)
+        ).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        _require_active_product(product)
+        if product.tracking_mode != TrackingMode.QUANTITY:
+            raise HTTPException(
+                status_code=400,
+                detail="Service part requires a QUANTITY-tracked product",
+            )
+        part_reqs.append((product, line.quantity, oid))
+        if oid is not None:
+            seen_override_ids.add(oid)
+
+    # Lock cited overrides FOR UPDATE in id order BEFORE consuming batches (lock
+    # order: overrides -> batches), matching create_sale / the old close path, so
+    # concurrent consumers cannot deadlock and a single-use override is serialized.
+    locked_overrides: dict[uuid.UUID, PricingOverrideRequest] = {
+        oid: _lock_override(session=session, override_id=oid)
+        for oid in sorted(seen_override_ids, key=str)
+    }
+
+    ygn_loc = None
+    customer_loc = None
+    if part_reqs:
+        ygn_loc = session.exec(
+            select(Location).where(Location.code == "YGN_WH")
+        ).first()
+        customer_loc = session.exec(
+            select(Location).where(Location.code == "CUSTOMER")
+        ).first()
+        if not ygn_loc or not customer_loc:
+            raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    ticket = ServiceTicket(
+        customer_id=customer_id,
+        issue=issue,
+        notes=notes,
+        resolution=resolution,
+        created_by_user_id=actor_user_id,
+        idempotency_key=idempotency_key,
+        closed_at=get_datetime_utc(),
     )
-    if replayed:
-        # Concurrent same-key writer won the UNIQUE race — still bind the actor.
-        _assert_replay_actor(
-            stored_user_id=ticket.created_by_user_id,
-            caller_user_id=created_by_user_id,
-        )
-    return ticket
+    session.add(ticket)
+    session.flush()
 
-
-def add_service_ticket_part(
-    *,
-    session: Session,
-    ticket_id: uuid.UUID,
-    sku: str,
-    quantity: int,
-    pricing_override_request_id: uuid.UUID | None = None,
-) -> ServiceTicketPart:
-    """Add a part line to an open ticket. Price defaults to the product's
-    repair_price_thb; a different price requires an approved pricing override
-    (FR-010 / Flow C.3) — there is no free-form price bypass. Rejected once the
-    ticket is closed (its parts are immutable then). The ticket row is locked FOR
-    UPDATE so this serializes against a concurrent close — a part can never be
-    inserted into a ticket that close has already consumed.
-
-    Lock order: ticket -> override. This path never locks units/batches (FIFO
-    consumption happens at close), so it cannot form a cycle with create_sale
-    (override -> units -> batches) or close (ticket -> batches). A future change
-    that adds batch consumption here must re-check that ordering."""
-    ticket = session.exec(
-        select(ServiceTicket)
-        .where(ServiceTicket.id == ticket_id)
-        .with_for_update()
-    ).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Service ticket not found")
-    if ticket.closed_at is not None:
-        raise HTTPException(status_code=409, detail="Service ticket is closed")
-    product = session.exec(select(Product).where(Product.sku == sku)).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    if product.tracking_mode != TrackingMode.QUANTITY:
-        raise HTTPException(
-            status_code=400, detail="Service part requires a QUANTITY-tracked product"
-        )
-    unit_price = product.repair_price_thb
-    if pricing_override_request_id is not None:
-        override = _lock_override(
-            session=session, override_id=pricing_override_request_id
-        )
-        unit_price = _apply_override_price(
-            session=session,
-            override=override,
-            target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
-            product_id=product.id,
-        )
-    part = ServiceTicketPart(
-        service_ticket_id=ticket.id,
-        product_id=product.id,
-        quantity=quantity,
-        unit_price_thb=unit_price,
-        pricing_override_request_id=pricing_override_request_id,
-    )
-    session.add(part)
-    session.commit()
-    session.refresh(part)
-    return part
-
-
-def close_service_ticket(
-    *,
-    session: Session,
-    ticket_id: uuid.UUID,
-    actor_user_id: uuid.UUID,
-    resolution: str | None = None,
-) -> ServiceTicket:
-    """Close a ticket: FIFO-consume each part line, writing one
-    part_movement(MAINTENANCE_OUT) + cost_line[] per line, and stamp closed_at —
-    all in one transaction (Flow C.4). The ticket row is locked FOR UPDATE and a
-    re-close is idempotent (already-closed tickets return unchanged, never
-    re-consume). 409 on insufficient stock leaves the ticket open."""
-    ticket = session.exec(
-        select(ServiceTicket)
-        .where(ServiceTicket.id == ticket_id)
-        .with_for_update()
-    ).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Service ticket not found")
-    if ticket.closed_at is not None:
-        return ticket  # idempotent: already closed, do not re-consume
-
-    customer_loc = session.exec(
-        select(Location).where(Location.code == "CUSTOMER")
-    ).first()
-    ygn_loc = session.exec(
-        select(Location).where(Location.code == "YGN_WH")
-    ).first()
-    if not customer_loc or not ygn_loc:
-        raise HTTPException(status_code=500, detail="Locations not seeded")
-
-    parts = session.exec(
-        select(ServiceTicketPart).where(
-            ServiceTicketPart.service_ticket_id == ticket_id
-        )
-    ).all()
     # Consume in deterministic product order so concurrent consumption (across
     # tickets/sales) acquires batch locks in the same order and cannot deadlock.
-    for part in sorted(parts, key=lambda p: str(p.product_id)):
+    for idx, (product, qty, oid) in enumerate(
+        sorted(part_reqs, key=lambda pr: str(pr[0].id))
+    ):
         cost_lines = consume_quantity_fifo(
-            session=session,
-            product_id=part.product_id,
-            quantity_needed=part.quantity,
+            session=session, product_id=product.id, quantity_needed=qty
         )
+        assert ygn_loc is not None and customer_loc is not None
         movement = PartMovement(
-            product_id=part.product_id,
+            product_id=product.id,
             event_type=MovementType.MAINTENANCE_OUT,
-            quantity=part.quantity,
+            quantity=qty,
             from_location_id=ygn_loc.id,
             to_location_id=customer_loc.id,
             service_ticket_id=ticket.id,
             actor_user_id=actor_user_id,
-            idempotency_key=uuid.uuid5(ticket.id, f"maint:{part.id}"),
+            idempotency_key=uuid.uuid5(
+                idempotency_key, f"maint:{idx}:{product.id}"
+            ),
         )
         session.add(movement)
         session.flush()
         for cost_line in cost_lines:
             cost_line.part_movement_id = movement.id
             session.add(cost_line)
+        unit_price = product.repair_price_thb
+        if oid is not None:
+            unit_price = _apply_override_price(
+                session=session,
+                override=locked_overrides[oid],
+                target_kind=OverrideTargetKind.SERVICE_TICKET_PART,
+                product_id=product.id,
+            )
+        session.add(
+            ServiceTicketPart(
+                service_ticket_id=ticket.id,
+                product_id=product.id,
+                quantity=qty,
+                unit_price_thb=unit_price,
+                pricing_override_request_id=oid,
+            )
+        )
 
-    ticket.closed_at = get_datetime_utc()
-    if resolution is not None:
-        ticket.resolution = resolution
-    session.add(ticket)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        # session.info is NOT transactional: discard low-stock crossings recorded
+        # during the rolled-back consume so the route does not dispatch a
+        # duplicate alert (the winning request already alerts).
+        session.info["low_stock_crossed"] = set()
+        # A single-use-override unique violation is not an idempotency race —
+        # surface a clean 409 (the FOR UPDATE pre-lock normally prevents this).
+        if "pricing_override_request_id" in str(exc.orig):
+            raise HTTPException(
+                status_code=409, detail="Override already applied to a line"
+            ) from exc
+        # Otherwise: lost the idempotency race — return the winner's ticket.
+        winner = session.exec(
+            select(ServiceTicket).where(
+                ServiceTicket.idempotency_key == idempotency_key
+            )
+        ).first()
+        if winner is None:
+            raise
+        _assert_replay_actor(
+            stored_user_id=winner.created_by_user_id,
+            caller_user_id=actor_user_id,
+        )
+        return winner
     session.refresh(ticket)
     return ticket
 
@@ -2087,7 +3459,7 @@ def close_service_ticket(
 
 
 def get_project_pull(
-    *, session: Session, pull_id: Any
+    *, session: Session, pull_id: uuid.UUID
 ) -> ProjectPull | None:
     return session.get(ProjectPull, pull_id)
 
@@ -2122,6 +3494,15 @@ def list_project_pulls(
     return list(session.exec(statement).all())
 
 
+def count_project_pulls(
+    *, session: Session, state: ProjectPullState | None = None
+) -> int:
+    statement = select(func.count()).select_from(ProjectPull)
+    if state is not None:
+        statement = statement.where(ProjectPull.state == state)
+    return session.exec(statement).one()
+
+
 def create_project_pull(
     *,
     session: Session,
@@ -2151,6 +3532,7 @@ def create_project_pull(
         product = session.get(Product, line.product_id)
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
+        _require_active_product(product)
         if line.line_kind == SaleLineKind.UNIT:
             if not line.unit_serial:
                 raise HTTPException(
@@ -2400,29 +3782,65 @@ def cancel_project_pull(
 
 
 def list_notification_preferences(
-    *, session: Session, user_id: uuid.UUID
-) -> list[NotificationPreference]:
-    """Return a user's notification preferences (FR-018)."""
-    return list(
-        session.exec(
-            select(NotificationPreference)
-            .where(NotificationPreference.user_id == user_id)
-            .order_by(col(NotificationPreference.id))
+    *, session: Session, user: User
+) -> list[NotificationPreferencePublic]:
+    """Return the user's full opt-in grid: one row per (channel, eligible event).
+
+    Persisted rows are merged over a generated default of `enabled=False`, so a
+    user who has never opted in still sees every switch they could turn on.
+    Returning only persisted rows (the previous behaviour) left a fresh user
+    with an empty page and no way to create the first row, which made opt-in a
+    manual SQL step.
+
+    Synthetic rows carry `id=None` — they do not exist until the user PATCHes
+    one on. Pairs outside `eligible_events` are omitted entirely: the notify
+    producers would never deliver them, so offering the switch would promise a
+    send that silently never happens.
+    """
+    persisted = {
+        (p.channel, p.event_type): p
+        for p in session.exec(
+            select(NotificationPreference).where(
+                NotificationPreference.user_id == user.id
+            )
         ).all()
-    )
+    }
+    allowed = eligible_events(user)
+    grid: list[NotificationPreferencePublic] = []
+    # Stable ordering so the UI grid doesn't reshuffle between fetches. Keyed
+    # off CHANNEL_ADDRESS_ATTR, not the enum: a channel with no address
+    # attribute cannot be delivered to, so offering its checkbox would promise
+    # a send that never happens.
+    for channel in CHANNEL_ADDRESS_ATTR:
+        connected = channel_connected(user, channel)
+        for event in NotificationEvent:
+            if event not in allowed:
+                continue
+            row = persisted.get((channel, event))
+            grid.append(
+                NotificationPreferencePublic(
+                    id=row.id if row else None,
+                    channel=channel,
+                    event_type=event,
+                    enabled=row.enabled if row else False,
+                    channel_connected=connected,
+                )
+            )
+    return grid
 
 
 def upsert_notification_preferences(
     *,
     session: Session,
-    user_id: uuid.UUID,
+    user: User,
     updates: list[NotificationPreferenceUpdate],
-) -> list[NotificationPreference]:
+) -> list[NotificationPreferencePublic]:
     """Insert-or-update each (channel, event_type) opt-in for the user, then
-    return the user's full preference list. Idempotent."""
+    return the user's full merged grid (see `list_notification_preferences`).
+    Idempotent."""
     for upd in updates:
         stmt = select(NotificationPreference).where(
-            NotificationPreference.user_id == user_id,
+            NotificationPreference.user_id == user.id,
             NotificationPreference.channel == upd.channel,
             NotificationPreference.event_type == upd.event_type,
         )
@@ -2435,7 +3853,7 @@ def upsert_notification_preferences(
         else:
             session.add(
                 NotificationPreference(
-                    user_id=user_id,
+                    user_id=user.id,
                     channel=upd.channel,
                     event_type=upd.event_type,
                     enabled=upd.enabled,
@@ -2455,7 +3873,282 @@ def upsert_notification_preferences(
                 session.add(existing)
                 session.flush()
     session.commit()
-    return list_notification_preferences(session=session, user_id=user_id)
+    return list_notification_preferences(session=session, user=user)
+
+
+def create_telegram_connect_code(
+    *, session: Session, user_id: uuid.UUID
+) -> TelegramConnectCode:
+    """Mint a one-time, ~10-minute code for the Telegram connect deep link.
+
+    See TelegramConnectCode's docstring: this is an authentication boundary,
+    not a correlation key, so the code must be unguessable -- never a short
+    or sequential value.
+
+    token_hex gives 32 lowercase hex characters -- 128 bits of entropy (same
+    as token_urlsafe(16)) and exactly the code column's max_length=32.
+
+    Telegram's deep-link start parameter allows A-Z, a-z, 0-9, '_' and '-'
+    (https://core.telegram.org/bots/features#deep-linking), so token_urlsafe
+    would be equally valid here; hex is just unambiguous in a URL. Do NOT
+    switch to plain base64 -- its '+', '/' and '=' are outside that set.
+
+    Also reaps this user's prior codes -- see the inline comment for why that
+    is safe against a concurrent confirm.
+    """
+    # Serialize concurrent mints for the same user on their User row: without
+    # this, two overlapping connects can each miss the other's not-yet-visible
+    # code and leave two live rows. Locking the parent (not the code rows)
+    # covers the no-prior-rows case, where there is nothing else to lock.
+    session.exec(select(User).where(User.id == user_id).with_for_update()).one()
+    # Reap this user's prior codes in the same transaction, so the table stays
+    # bounded at ~1 row per user who has ever connected without introducing a
+    # scheduler (the stack has none). Consistent with the re-runnable contract
+    # above: a superseded code was already unusable the moment this call minted
+    # a fresh one. Deleting a consumed row is safe -- confirm looks codes up by
+    # (code, user_id) and returns PENDING for a miss, exactly as it already
+    # does for an expired or unknown code.
+    for stale in session.exec(
+        select(TelegramConnectCode).where(TelegramConnectCode.user_id == user_id)
+    ).all():
+        session.delete(stale)
+
+    record = TelegramConnectCode(
+        user_id=user_id,
+        code=secrets.token_hex(16),
+        expires_at=get_datetime_utc() + timedelta(minutes=10),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def confirm_telegram_connect_code(
+    *, session: Session, user: User, code: str, chat_id: str, username: str | None
+) -> TelegramConfirmOutcome:
+    """Validate and atomically consume a pending connect code for `user`,
+    binding `chat_id`/`username` on success. The caller (the confirm route)
+    is responsible for resolving `chat_id`/`username` via
+    ``notify.get_telegram_updates`` + ``parse_start_code`` first -- crud.py
+    doesn't reach into the notify service, matching this codebase's existing
+    layering (routes call both; crud stays DB-only).
+
+    ``FOR UPDATE`` makes the consumed_at check-then-set atomic against a
+    racing second confirm for the same code.
+
+    Returns PENDING for anything the caller should keep polling through (no
+    such code, wrong owner, expired, already consumed) and
+    CHAT_ALREADY_LINKED for the one terminal case, so the UI can say
+    something true instead of timing out with a generic message.
+    """
+    record = session.exec(
+        select(TelegramConnectCode)
+        .where(
+            TelegramConnectCode.code == code,
+            TelegramConnectCode.user_id == user.id,
+        )
+        .with_for_update()
+    ).first()
+    if record is None or record.consumed_at is not None:
+        return TelegramConfirmOutcome.PENDING
+    if record.expires_at < get_datetime_utc():
+        return TelegramConfirmOutcome.PENDING
+
+    # Checked up front for a clear answer in the common case; the
+    # IntegrityError below still backstops a racing bind between here and
+    # commit. Deliberately does NOT consume the code -- the user can unlink
+    # the other account and retry within the TTL.
+    incumbent = session.exec(
+        select(User).where(
+            User.telegram_chat_id == chat_id, User.id != user.id
+        )
+    ).first()
+    if incumbent is not None:
+        return TelegramConfirmOutcome.CHAT_ALREADY_LINKED
+
+    record.consumed_at = get_datetime_utc()
+    session.add(record)
+    user.telegram_chat_id = chat_id
+    user.telegram_username = username
+    session.add(user)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Lost the race: someone bound this chat between the check above and
+        # the commit. The rollback also discards consumed_at, so the code
+        # stays usable if the winner later unlinks.
+        session.rollback()
+        return TelegramConfirmOutcome.CHAT_ALREADY_LINKED
+    return TelegramConfirmOutcome.CONNECTED
+
+
+def disconnect_telegram(*, session: Session, user: User) -> None:
+    user.telegram_chat_id = None
+    user.telegram_username = None
+    session.add(user)
+    session.commit()
+
+
+def create_line_connect_code(
+    *, session: Session, user_id: uuid.UUID
+) -> LineConnectCode:
+    """Mint a one-time, ~10-minute code for the LINE connect deep link.
+
+    See LineConnectCode's docstring: the LINE webhook has no session, so this
+    code alone is the identity. token_hex gives 32 lowercase hex characters --
+    128 bits of entropy and exactly the code column's max_length=32.
+
+    Hex is the right charset here for a reason the Telegram version doesn't
+    face: this code travels through a URL query string AND is typed into a
+    chat message as literal text. [0-9a-f] is unambiguous in both. Do NOT
+    switch to token_urlsafe or base64 -- '-', '_', '+', '/' and '=' invite
+    either URL-encoding surprises or chat-client autoformatting.
+
+    Mirrors create_telegram_connect_code, including the FOR UPDATE lock and
+    the same-transaction reap.
+    """
+    # Serialize concurrent mints for the same user on their User row: without
+    # this, two overlapping connects can each miss the other's not-yet-visible
+    # code and leave two live rows. Locking the parent (not the code rows)
+    # covers the no-prior-rows case, where there is nothing else to lock.
+    session.exec(select(User).where(User.id == user_id).with_for_update()).one()
+    # Reap this user's prior codes in the same transaction, so the table stays
+    # bounded at ~1 row per user who has ever connected without introducing a
+    # scheduler (the stack has none). A superseded code was already unusable
+    # the moment this call minted a fresh one.
+    for stale in session.exec(
+        select(LineConnectCode).where(LineConnectCode.user_id == user_id)
+    ).all():
+        session.delete(stale)
+
+    record = LineConnectCode(
+        user_id=user_id,
+        code=secrets.token_hex(16),
+        expires_at=get_datetime_utc() + timedelta(minutes=10),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def confirm_line_connect_code(
+    *, session: Session, code: str, line_user_id: str
+) -> LineConfirmOutcome:
+    """Validate and atomically consume a pending connect code, binding
+    `line_user_id` to the user who minted it.
+
+    Takes NO `user` argument, unlike confirm_telegram_connect_code. That is
+    not an oversight -- it is the whole security model. The LINE webhook is
+    unauthenticated, so there is no current_user to filter on; the code is
+    looked up by value alone and whoever presents it gets bound to its owner.
+    Everything protecting this reduces to the code's 128 bits, its single use,
+    and its 10-minute TTL.
+
+    FOR UPDATE makes the consumed_at check-then-set atomic against a racing
+    second delivery of the same code -- LINE retries webhooks, so this race is
+    routine, not theoretical.
+
+    Returns PENDING for anything the caller should silently ignore (no such
+    code, expired, already consumed, orphaned owner) and USER_ALREADY_LINKED
+    for the one case worth an in-chat explanation.
+    """
+    record = session.exec(
+        select(LineConnectCode)
+        .where(LineConnectCode.code == code)
+        .with_for_update()
+    ).first()
+    if record is None or record.consumed_at is not None:
+        return LineConfirmOutcome.PENDING
+    if record.expires_at < get_datetime_utc():
+        return LineConfirmOutcome.PENDING
+
+    user = session.exec(select(User).where(User.id == record.user_id)).first()
+    if user is None:
+        return LineConfirmOutcome.PENDING
+
+    # Checked up front for a clear answer in the common case; the
+    # IntegrityError below still backstops a racing bind between here and
+    # commit. Deliberately does NOT consume the code -- the user can unlink
+    # the other account and retry within the TTL.
+    incumbent = session.exec(
+        select(User).where(
+            User.line_user_id == line_user_id, User.id != user.id
+        )
+    ).first()
+    if incumbent is not None:
+        return LineConfirmOutcome.USER_ALREADY_LINKED
+
+    record.consumed_at = get_datetime_utc()
+    session.add(record)
+    user.line_user_id = line_user_id
+    session.add(user)
+    try:
+        session.commit()
+    except IntegrityError:
+        # Lost the race: someone bound this LINE account between the check
+        # above and the commit. The rollback also discards consumed_at, so the
+        # code stays usable if the winner later unlinks.
+        session.rollback()
+        return LineConfirmOutcome.USER_ALREADY_LINKED
+    except OperationalError:
+        # Deadlock victim. This function locks the code row and then updates
+        # the User row; create_line_connect_code locks the User row and then
+        # deletes that user's code rows. Opposite order, so a user re-tapping
+        # Connect while a delayed webhook confirms the superseded code is a
+        # genuine circular wait, and Postgres kills one side.
+        #
+        # PENDING, not an exception: the caller is the unauthenticated webhook,
+        # which must return 200 or LINE eventually disables it. A deadlock is
+        # exactly the transient case LINE's own redelivery resolves, and the
+        # rollback leaves the code unconsumed so the retry can succeed.
+        session.rollback()
+        return LineConfirmOutcome.PENDING
+    return LineConfirmOutcome.CONNECTED
+
+
+def disconnect_line(*, session: Session, user: User) -> None:
+    """Clear the binding only. Preferences and notificationlog rows survive --
+    the log is append-only and the preferences are the user's settings, not a
+    property of the binding."""
+    user.line_user_id = None
+    session.add(user)
+    session.commit()
+
+
+def clear_line_user(*, session: Session, line_user_id: str) -> None:
+    """Unbind by LINE user id rather than by POS user -- the caller is the
+    `unfollow` webhook branch, which knows only the LINE side.
+
+    A no-op for an unknown id: unfollow fires for people who never connected.
+    """
+    user = session.exec(
+        select(User).where(User.line_user_id == line_user_id)
+    ).first()
+    if user is None:
+        return
+    user.line_user_id = None
+    session.add(user)
+    session.commit()
+
+
+def get_latest_telegram_notification_log(
+    *, session: Session, user_id: uuid.UUID
+) -> NotificationLog | None:
+    """The most recent Telegram send attempt logged for `user_id`, or None if
+    they have never had one. Used to detect a rotted binding (bot blocked,
+    chat deleted): only the LATEST attempt matters, not "any failure ever" --
+    a later success means it recovered."""
+    return session.exec(
+        select(NotificationLog)
+        .where(
+            NotificationLog.target_user_id == user_id,
+            NotificationLog.channel == NotificationChannel.TELEGRAM,
+        )
+        .order_by(col(NotificationLog.created_at).desc())
+        .limit(1)
+    ).first()
 
 
 # Dummy hash to use for timing attack prevention when user is not found
@@ -2491,22 +4184,50 @@ def _q(value: Decimal | int) -> Decimal:
     return Decimal(value).quantize(_CENT, rounding=ROUND_HALF_UP)
 
 
-def channel_margin_report(
-    *, session: Session, year: int, month: int
-) -> ChannelMarginReport:
-    """Monthly revenue / COGS / margin by derived channel (SALE, MAINTENANCE,
-    PROJECT), read-only (FR-013, spec §8). Channel is derived from each source
-    record's own timestamp (sale.sold_at / service_ticket.closed_at /
-    project_pull.fulfilled_at) falling in [month_start, next_month_start) UTC.
-    COGS is the full snapshot: SALE uses sale.total_cogs_thb (already includes
-    serialized-unit + part cost); PROJECT adds pulled unit.purchase_cost_thb to
-    the part FIFO cost. All sums are set-based; amounts quantized to cents."""
+def _month_window(year: int, month: int) -> tuple[datetime, datetime]:
+    """[start, next-month-start) in UTC for a reporting month."""
     start = datetime(year, month, 1, tzinfo=timezone.utc)
     if month == 12:
         end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
     else:
         end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    return start, end
 
+
+# Synthetic channel-row key for returns. Deliberately NOT a Channel enum member:
+# Channel drives the report's channel FILTER, and "returns" is an event on the
+# SALE channel, not a fourth channel to slice by.
+_SALE_RETURN_KEY = "SALE_RETURN"
+_SALE_RETURN_LABEL = "SALE RETURNS"
+
+
+def _sale_return_totals(
+    session: Session, start: datetime, end: datetime
+) -> tuple[Decimal, Decimal]:
+    """(refund, cogs_restored) for returns RECORDED in the window. Keyed on
+    returned_at, never sold_at — that is what keeps past months immutable."""
+    refund, cogs = session.exec(
+        select(
+            func.coalesce(func.sum(SaleReturn.total_refund_thb), Decimal("0")),
+            func.coalesce(
+                func.sum(SaleReturn.total_cogs_restored_thb), Decimal("0")
+            ),
+        ).where(
+            col(SaleReturn.returned_at) >= start, col(SaleReturn.returned_at) < end
+        )
+    ).one()
+    return refund, cogs
+
+
+def _channel_rows(
+    session: Session,
+    start: datetime,
+    end: datetime,
+    channel: Channel | None,
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per channel (SALE, MAINTENANCE, PROJECT), fixed order.
+    A channel filter narrows to that single channel; otherwise all three are
+    returned even when zero (parity with the legacy report)."""
     # --- SALE: sales sold_at in window. ---
     sale_rev, sale_cogs = session.exec(
         select(
@@ -2566,22 +4287,472 @@ def channel_margin_report(
         )
     ).one()
 
+    totals = {
+        Channel.SALE: (_q(sale_rev), _q(sale_cogs)),
+        Channel.MAINTENANCE: (_q(maint_rev), _q(maint_cogs)),
+        Channel.PROJECT: (_q(0), _q(proj_part_cogs + proj_unit_cogs)),
+    }
+    wanted = [channel] if channel is not None else list(totals)
     rows = [
-        (Channel.SALE, _q(sale_rev), _q(sale_cogs)),
-        (Channel.MAINTENANCE, _q(maint_rev), _q(maint_cogs)),
-        (Channel.PROJECT, _q(0), _q(proj_part_cogs + proj_unit_cogs)),
-    ]
-    channels = [
-        ChannelMarginRow(
-            channel=ch, revenue_thb=rev, cogs_thb=cogs, margin_thb=rev - cogs
+        MarginBreakdownRow(
+            key=ch.value,
+            label=ch.value,
+            revenue_thb=rev,
+            cogs_thb=cogs,
+            margin_thb=rev - cogs,
         )
-        for ch, rev, cogs in rows
+        for ch in wanted
+        for rev, cogs in [totals[ch]]
     ]
-    total_rev = sum((r.revenue_thb for r in channels), Decimal("0.00"))
-    total_cogs = sum((r.cogs_thb for r in channels), Decimal("0.00"))
-    return ChannelMarginReport(
+    # Returns are an event on the SALE channel, so they appear whenever SALE
+    # does. Omitted entirely in a month with no returns — unlike the three
+    # channels, a zero row here is noise, not parity.
+    if channel in (None, Channel.SALE):
+        refund, restored = _sale_return_totals(session, start, end)
+        if refund or restored:
+            rev, cogs = _q(-refund), _q(-restored)
+            rows.append(
+                MarginBreakdownRow(
+                    key=_SALE_RETURN_KEY,
+                    label=_SALE_RETURN_LABEL,
+                    revenue_thb=rev,
+                    cogs_thb=cogs,
+                    margin_thb=rev - cogs,
+                )
+            )
+    return rows
+
+
+def _merge(
+    acc: dict[uuid.UUID, list[Decimal]], key: uuid.UUID, rev: Decimal, cogs: Decimal
+) -> None:
+    slot = acc.setdefault(key, [Decimal("0"), Decimal("0")])
+    slot[0] += rev
+    slot[1] += cogs
+
+
+def _product_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per product across the requested channel(s). A SALE line
+    for a SERIALIZED product carries ``unit_id`` not ``product_id``, so the
+    product is recovered via ``Unit``."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.SALE):
+        # SALE revenue: no rounding drift, product = COALESCE(SaleLine.product_id,
+        # Unit.product_id).
+        pid = func.coalesce(SaleLine.product_id, Unit.product_id)
+        for product_id, rev in session.exec(
+            select(
+                pid,
+                func.coalesce(
+                    func.sum(SaleLine.quantity * SaleLine.unit_price_thb), Decimal("0")
+                ),
+            )
+            .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
+            .join(Unit, col(SaleLine.unit_id) == col(Unit.id), isouter=True)
+            .where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
+            .group_by(pid)
+        ).all():
+            _merge(acc, product_id, rev, Decimal("0"))
+        # SALE COGS: exact sources (mirrors MAINTENANCE/PROJECT), not the rounded
+        # SaleLine.unit_cost_thb snapshot -- see create_sale's per-unit-average
+        # rounding comment (crud.py ~2244-2246).
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(Sale, col(PartMovement.sale_id) == col(Sale.id))
+            .where(
+                PartMovement.event_type == MovementType.SOLD,
+                col(Sale.sold_at) >= start,
+                col(Sale.sold_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+        for product_id, cogs in session.exec(
+            select(
+                Unit.product_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(Sale, col(UnitMovement.sale_id) == col(Sale.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.SOLD,
+                col(Sale.sold_at) >= start,
+                col(Sale.sold_at) < end,
+            )
+            .group_by(col(Unit.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+        # Returns net into the product's row for the RETURN month (no separate
+        # returns row at this grain). A UNIT line carries unit_id not product_id,
+        # so the product is recovered through Unit — same COALESCE as above.
+        pid_r = func.coalesce(SaleLine.product_id, Unit.product_id)
+        for product_id, refund, restored in session.exec(
+            select(
+                pid_r,
+                func.coalesce(
+                    func.sum(
+                        SaleReturnLine.quantity * SaleReturnLine.unit_price_thb
+                    ),
+                    Decimal("0"),
+                ),
+                func.coalesce(
+                    func.sum(SaleReturnLine.cogs_restored_thb), Decimal("0")
+                ),
+            )
+            .join(SaleLine, col(SaleReturnLine.sale_line_id) == col(SaleLine.id))
+            .join(
+                SaleReturn, col(SaleReturnLine.sale_return_id) == col(SaleReturn.id)
+            )
+            .join(Unit, col(SaleLine.unit_id) == col(Unit.id), isouter=True)
+            .where(
+                col(SaleReturn.returned_at) >= start,
+                col(SaleReturn.returned_at) < end,
+            )
+            .group_by(pid_r)
+        ).all():
+            _merge(acc, product_id, -refund, -restored)
+
+    if channel in (None, Channel.MAINTENANCE):
+        # revenue by ServiceTicketPart.product_id
+        for product_id, rev in session.exec(
+            select(
+                ServiceTicketPart.product_id,
+                func.coalesce(
+                    func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                    Decimal("0"),
+                ),
+            )
+            .join(
+                ServiceTicket,
+                col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
+            .group_by(col(ServiceTicketPart.product_id))
+        ).all():
+            _merge(acc, product_id, rev, Decimal("0"))
+        # COGS by PartMovement.product_id (MAINTENANCE_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(
+                ServiceTicket,
+                col(PartMovement.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(
+                PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+                col(ServiceTicket.closed_at) >= start,
+                col(ServiceTicket.closed_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+
+    if channel in (None, Channel.PROJECT):
+        # part COGS by PartMovement.product_id (PROJECT_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                PartMovement.product_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(PartMovement.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+        # unit COGS by Unit.product_id (PROJECT_OUT)
+        for product_id, cogs in session.exec(
+            select(
+                Unit.product_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(Unit.product_id))
+        ).all():
+            _merge(acc, product_id, Decimal("0"), cogs)
+
+    labels = _product_labels(session, list(acc))
+    return _sorted_rows(
+        (str(pid), labels[pid], _q(rev), _q(cogs)) for pid, (rev, cogs) in acc.items()
+    )
+
+
+def _product_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        p.id: f"{p.sku} — {p.model_name}"
+        for p in session.exec(select(Product).where(col(Product.id).in_(ids))).all()
+    }
+
+
+def _customer_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per customer across the requested channel(s). Every SALE,
+    ServiceTicket, and ProjectPull carries a non-null customer_id, so there is
+    no walk-in/None bucket."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.SALE):
+        # Sale-level authoritative totals: both revenue and COGS are exact
+        # here (no per-line rounding drift), unlike the PRODUCT grouping's
+        # SaleLine-based reconstruction.
+        for cust_id, rev, cogs in session.exec(
+            select(
+                Sale.customer_id,
+                func.coalesce(func.sum(Sale.total_thb), Decimal("0")),
+                func.coalesce(func.sum(Sale.total_cogs_thb), Decimal("0")),
+            )
+            .where(col(Sale.sold_at) >= start, col(Sale.sold_at) < end)
+            .group_by(col(Sale.customer_id))
+        ).all():
+            _merge(acc, cust_id, rev, cogs)
+        # Returns net into the customer's row for the RETURN month. Uses the
+        # SaleReturn header totals (exact, and identical to the sum of its lines
+        # used by the PRODUCT grouping — so the two groupings reconcile).
+        for cust_id, refund, restored in session.exec(
+            select(
+                Sale.customer_id,
+                func.coalesce(func.sum(SaleReturn.total_refund_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(SaleReturn.total_cogs_restored_thb), Decimal("0")
+                ),
+            )
+            .join(Sale, col(SaleReturn.sale_id) == col(Sale.id))
+            .where(
+                col(SaleReturn.returned_at) >= start,
+                col(SaleReturn.returned_at) < end,
+            )
+            .group_by(col(Sale.customer_id))
+        ).all():
+            _merge(acc, cust_id, -refund, -restored)
+
+    if channel in (None, Channel.MAINTENANCE):
+        for cust_id, rev in session.exec(
+            select(
+                ServiceTicket.customer_id,
+                func.coalesce(
+                    func.sum(ServiceTicketPart.quantity * ServiceTicketPart.unit_price_thb),
+                    Decimal("0"),
+                ),
+            )
+            .join(
+                ServiceTicketPart,
+                col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
+            )
+            .where(col(ServiceTicket.closed_at) >= start, col(ServiceTicket.closed_at) < end)
+            .group_by(col(ServiceTicket.customer_id))
+        ).all():
+            _merge(acc, cust_id, rev, Decimal("0"))
+        for cust_id, cogs in session.exec(
+            select(
+                ServiceTicket.customer_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ServiceTicket, col(PartMovement.service_ticket_id) == col(ServiceTicket.id))
+            .where(
+                PartMovement.event_type == MovementType.MAINTENANCE_OUT,
+                col(ServiceTicket.closed_at) >= start,
+                col(ServiceTicket.closed_at) < end,
+            )
+            .group_by(col(ServiceTicket.customer_id))
+        ).all():
+            _merge(acc, cust_id, Decimal("0"), cogs)
+
+    if channel in (None, Channel.PROJECT):
+        for cust_id, cogs in session.exec(
+            select(
+                ProjectPull.customer_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.customer_id))
+        ).all():
+            _merge(acc, cust_id, Decimal("0"), cogs)
+        for cust_id, cogs in session.exec(
+            select(
+                ProjectPull.customer_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.customer_id))
+        ).all():
+            _merge(acc, cust_id, Decimal("0"), cogs)
+
+    labels = _customer_labels(session, list(acc))
+    return _sorted_rows(
+        (str(cid), labels[cid], _q(rev), _q(cogs)) for cid, (rev, cogs) in acc.items()
+    )
+
+
+def _customer_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        c.id: c.name
+        for c in session.exec(select(Customer).where(col(Customer.id).in_(ids))).all()
+    }
+
+
+def _project_labels(session: Session, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not ids:
+        return {}
+    return {
+        p.id: f"{p.code} — {p.name}"
+        for p in session.exec(select(Project).where(col(Project.id).in_(ids))).all()
+    }
+
+
+def _project_rows(
+    session: Session, start: datetime, end: datetime, channel: Channel | None
+) -> list[MarginBreakdownRow]:
+    """Revenue/COGS per project (cost-only, mirroring the PROJECT channel).
+    Only PROJECT_OUT movements carry a project, so SALE + MAINTENANCE money
+    has no project home; when ``channel`` is unscoped, that remainder is
+    rolled into a single reconciling ``(not project work)`` bucket so totals
+    still match the channel view."""
+    acc: dict[uuid.UUID, list[Decimal]] = {}
+
+    if channel in (None, Channel.PROJECT):
+        for proj_id, cogs in session.exec(
+            select(
+                ProjectPull.project_id,
+                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            )
+            .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
+            .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+            .where(
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.project_id))
+        ).all():
+            _merge(acc, proj_id, Decimal("0"), cogs)
+        for proj_id, cogs in session.exec(
+            select(
+                ProjectPull.project_id,
+                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            )
+            .select_from(UnitMovement)
+            .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+            .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+            .where(
+                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(ProjectPull.fulfilled_at) >= start,
+                col(ProjectPull.fulfilled_at) < end,
+            )
+            .group_by(col(ProjectPull.project_id))
+        ).all():
+            _merge(acc, proj_id, Decimal("0"), cogs)
+
+    labels = _project_labels(session, list(acc))
+    rows = list(
+        _sorted_rows(
+            (str(pid), labels[pid], _q(rev), _q(cogs)) for pid, (rev, cogs) in acc.items()
+        )
+    )
+
+    if channel is None:
+        # SALE + MAINTENANCE have no project -> single reconciling bucket.
+        remainder = [
+            r
+            for r in _channel_rows(session, start, end, None)
+            if r.key in (Channel.SALE.value, Channel.MAINTENANCE.value)
+        ]
+        rev = sum((r.revenue_thb for r in remainder), Decimal("0.00"))
+        cogs = sum((r.cogs_thb for r in remainder), Decimal("0.00"))
+        if rev or cogs:
+            rows.append(
+                MarginBreakdownRow(
+                    key="",
+                    label="(not project work)",
+                    revenue_thb=_q(rev),
+                    cogs_thb=_q(cogs),
+                    margin_thb=_q(rev - cogs),
+                )
+            )
+    return rows
+
+
+def _sorted_rows(
+    triples: Iterable[tuple[str, str, Decimal, Decimal]],
+) -> list[MarginBreakdownRow]:
+    rows = [
+        MarginBreakdownRow(
+            key=key, label=label, revenue_thb=rev, cogs_thb=cogs, margin_thb=rev - cogs
+        )
+        for key, label, rev, cogs in triples
+    ]
+    rows.sort(key=lambda r: (-r.revenue_thb, -r.margin_thb, r.label))
+    return rows
+
+
+def margin_report(
+    *,
+    session: Session,
+    year: int,
+    month: int,
+    group_by: MarginDimension = MarginDimension.CHANNEL,
+    channel: Channel | None = None,
+) -> MarginBreakdownReport:
+    """Monthly revenue/COGS/margin, grouped by ``group_by`` and optionally
+    scoped to one ``channel`` (FR-013 drill-down, spec §8). Read-only; all sums
+    set-based and cent-quantized. For any fixed (month, channel) the row sums
+    reconcile across every grouping."""
+    start, end = _month_window(year, month)
+    if group_by == MarginDimension.CHANNEL:
+        rows = _channel_rows(session, start, end, channel)
+    elif group_by == MarginDimension.PRODUCT:
+        rows = _product_rows(session, start, end, channel)
+    elif group_by == MarginDimension.CUSTOMER:
+        rows = _customer_rows(session, start, end, channel)
+    else:
+        rows = _project_rows(session, start, end, channel)
+    total_rev = sum((r.revenue_thb for r in rows), Decimal("0.00"))
+    total_cogs = sum((r.cogs_thb for r in rows), Decimal("0.00"))
+    return MarginBreakdownReport(
         month=f"{year:04d}-{month:02d}",
-        channels=channels,
+        group_by=group_by,
+        channel=channel,
+        rows=rows,
         total_revenue_thb=total_rev,
         total_cogs_thb=total_cogs,
         total_margin_thb=total_rev - total_cogs,
@@ -2596,7 +4767,7 @@ def get_customer_dashboard(
 ) -> dict[str, Any]:
     """Admin-superset dashboard for one customer: transactions, projects, and
     lifetime SALE / MAINTENANCE revenue·COGS·margin + PROJECT COGS. Mirrors the
-    join shapes of channel_margin_report() but scoped by customer (no date
+    join shapes of margin_report() but scoped by customer (no date
     window). The route picks the staff or admin schema by role; redacted fields
     are physically absent from the staff JSON."""
     customer = session.get(Customer, customer_id)
@@ -2766,13 +4937,128 @@ def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decima
     return _q(part_cogs + unit_cogs)
 
 
+def _project_consumed_items(
+    *, session: Session, project_id: uuid.UUID
+) -> list[ProjectConsumptionRowPublic]:
+    """Every PROJECT_OUT movement against this project, newest first, with the
+    FIFO batch draws behind each PART row (FR-020 batch attribution).
+
+    Two legs because consumption spans both ledgers: QUANTITY parts draw from
+    cost_lines (possibly several batches per movement), while a SERIALIZED unit
+    carries its own purchase_cost_thb and has no batch to attribute.
+
+    Bulk-loaded throughout (mirrors _build_consumption_events): one query per
+    ledger plus one for the draws and one for the batch numbers — never N+1.
+
+    Deliberately NOT the source of the dashboard's consumed_cost_thb: that stays
+    a separate aggregate (_project_consumed_cost) so the Budget card is complete
+    and correct independently of anything that happens to this list."""
+    rows: list[ProjectConsumptionRowPublic] = []
+
+    # --- PART leg: movement -> cost_line -> batch --------------------------
+    part_movements = session.exec(
+        select(PartMovement)
+        .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
+        .where(
+            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id) == project_id,
+        )
+    ).all()
+
+    draws_by_movement: dict[uuid.UUID, list[SkuConsumptionDrawAdminPublic]] = {}
+    if part_movements:
+        # Oldest batch first — the order FIFO actually consumed them in.
+        cost_lines = session.exec(
+            select(CostLine, PartBatch.batch_no)
+            .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
+            .where(col(CostLine.part_movement_id).in_([m.id for m in part_movements]))
+            .order_by(col(PartBatch.received_at), col(PartBatch.id))
+        ).all()
+        for cost_line, batch_no in cost_lines:
+            draws_by_movement.setdefault(cost_line.part_movement_id, []).append(
+                SkuConsumptionDrawAdminPublic(
+                    batch_no=batch_no,
+                    quantity=cost_line.quantity,
+                    unit_cost_thb=cost_line.unit_cost_thb,
+                    total_cost_thb=cost_line.total_cost_thb,
+                )
+            )
+
+    part_products = _products_by_id(session, {m.product_id for m in part_movements})
+    for movement in part_movements:
+        product = part_products.get(movement.product_id)
+        draws = draws_by_movement.get(movement.id, [])
+        rows.append(
+            ProjectConsumptionRowPublic(
+                line_kind=SaleLineKind.PART,
+                product_id=movement.product_id,
+                product_sku=(product.sku if product else "—"),
+                model_name=(product.model_name if product else "—"),
+                unit_serial=None,
+                quantity=movement.quantity,
+                occurred_at=movement.occurred_at,
+                # PROJECT_OUT always carries its pull; the guard satisfies mypy.
+                project_pull_id=cast(uuid.UUID, movement.project_pull_id),
+                total_cost_thb=_q(
+                    sum((d.total_cost_thb for d in draws), Decimal("0"))
+                ),
+                draws=draws,
+            )
+        )
+
+    # --- UNIT leg: the unit's own purchase cost, no batch ------------------
+    unit_rows = session.exec(
+        select(UnitMovement, Unit)
+        .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(ProjectPull.project_id) == project_id,
+        )
+    ).all()
+
+    unit_products = _products_by_id(session, {u.product_id for _, u in unit_rows})
+    for unit_movement, unit in unit_rows:
+        unit_product = unit_products.get(unit.product_id)
+        rows.append(
+            ProjectConsumptionRowPublic(
+                line_kind=SaleLineKind.UNIT,
+                product_id=unit.product_id,
+                product_sku=(unit_product.sku if unit_product else "—"),
+                model_name=(unit_product.model_name if unit_product else "—"),
+                unit_serial=unit.castranova_barcode,
+                quantity=1,
+                occurred_at=unit_movement.occurred_at,
+                project_pull_id=cast(uuid.UUID, unit_movement.project_pull_id),
+                total_cost_thb=_q(unit.purchase_cost_thb),
+                draws=[],
+            )
+        )
+
+    rows.sort(key=lambda r: r.occurred_at, reverse=True)
+    return rows
+
+
+def _products_by_id(
+    session: Session, product_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, Product]:
+    """Bulk product lookup for the consumed-items rows (SKU + model name)."""
+    if not product_ids:
+        return {}
+    products = session.exec(
+        select(Product).where(col(Product.id).in_(product_ids))
+    ).all()
+    return {p.id: p for p in products}
+
+
 def get_project_dashboard(
     *, session: Session, project_id: uuid.UUID
 ) -> dict[str, Any]:
     """Admin-superset dashboard for one project: its pull transactions plus
-    budget and consumed cost (reusing _project_consumed_cost). The route picks
-    the staff or admin schema by role; the budget/consumed_cost fields are
-    physically absent from the staff JSON."""
+    budget, consumed cost (reusing _project_consumed_cost) and the consumed-items
+    list with batch attribution. The route picks the staff or admin schema by
+    role; budget/consumed_cost/consumed_items are physically absent from the
+    staff JSON."""
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -2788,6 +5074,9 @@ def get_project_dashboard(
         "pulls": pull_rows,
         "budget_thb": project.budget_thb,
         "consumed_cost_thb": _project_consumed_cost(
+            session=session, project_id=project_id
+        ),
+        "consumed_items": _project_consumed_items(
             session=session, project_id=project_id
         ),
     }
@@ -2836,6 +5125,7 @@ def list_audit(
     actor_user_id: uuid.UUID | None = None,
     product_id: uuid.UUID | None = None,
     unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[AuditEntryPublic]:
@@ -2844,14 +5134,25 @@ def list_audit(
 
     Filter semantics: ``product_id`` only ever matches PART rows and ``unit_id``
     only ever matches UNIT rows, so supplying one restricts the result to that
-    ledger (supplying both yields nothing, since no row is in both). The shared
-    filters (event_type, [from_date, to_date), actor_user_id) apply to both.
+    ledger (supplying both yields nothing, since no row is in both). ``sku``
+    resolves to a product and spans whichever ledger it uses (a product is one
+    tracking mode, so exactly one ledger yields rows); an unknown SKU returns no
+    rows. The shared filters (event_type, [from_date, to_date), actor_user_id)
+    apply to both.
 
     Implementation: each ledger is queried filtered + ordered DESC and bounded
     to ``skip + limit`` rows, the two bounded sets are merge-sorted in Python,
     then sliced — never an unbounded fetch.
     """
     bound = skip + limit
+
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return []  # unknown SKU matches nothing
 
     audit_unit = product_id is None
     audit_part = unit_id is None
@@ -2870,6 +5171,14 @@ def list_audit(
             u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
         if unit_id is not None:
             u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
         u_stmt = u_stmt.order_by(
             col(UnitMovement.occurred_at).desc(), col(UnitMovement.id).desc()
         ).limit(bound)
@@ -2904,6 +5213,10 @@ def list_audit(
             p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
         if product_id is not None:
             p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
         p_stmt = p_stmt.order_by(
             col(PartMovement.occurred_at).desc(), col(PartMovement.id).desc()
         ).limit(bound)
@@ -2927,7 +5240,216 @@ def list_audit(
         )
 
     rows.sort(key=lambda e: (e.occurred_at, e.id), reverse=True)
-    return rows[skip : skip + limit]
+    page = rows[skip : skip + limit]
+    return _hydrate_audit(session=session, rows=page)
+
+
+def count_audit(
+    *,
+    session: Session,
+    event_type: MovementType | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    product_id: uuid.UUID | None = None,
+    unit_id: uuid.UUID | None = None,
+    sku: str | None = None,
+) -> int:
+    """Total row count for the same filter set as list_audit, across both ledgers,
+    for the pagination envelope (GET /audit). Mirrors list_audit's WHERE-clause
+    construction exactly, so the count and the page it describes can never
+    disagree about what "matches" — a deliberate, small duplication rather than
+    a shared filter-builder abstraction, which would be a larger restructure of
+    the read path than this fix warrants."""
+    product_id_from_sku: uuid.UUID | None = None
+    if sku is not None:
+        product_id_from_sku = session.exec(
+            select(col(Product.id)).where(col(Product.sku) == sku)
+        ).first()
+        if product_id_from_sku is None:
+            return 0
+
+    audit_unit = product_id is None
+    audit_part = unit_id is None
+
+    total = 0
+
+    if audit_unit:
+        u_stmt = select(func.count()).select_from(UnitMovement)
+        if event_type is not None:
+            u_stmt = u_stmt.where(UnitMovement.event_type == event_type)
+        if from_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            u_stmt = u_stmt.where(col(UnitMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.actor_user_id == actor_user_id)
+        if unit_id is not None:
+            u_stmt = u_stmt.where(UnitMovement.unit_id == unit_id)
+        if sku is not None:
+            u_stmt = u_stmt.where(
+                col(UnitMovement.unit_id).in_(
+                    select(col(Unit.id)).where(
+                        col(Unit.product_id) == product_id_from_sku
+                    )
+                )
+            )
+        total += session.exec(u_stmt).one()
+
+    if audit_part:
+        p_stmt = select(func.count()).select_from(PartMovement)
+        if event_type is not None:
+            p_stmt = p_stmt.where(PartMovement.event_type == event_type)
+        if from_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) >= from_date)
+        if to_date is not None:
+            p_stmt = p_stmt.where(col(PartMovement.occurred_at) < to_date)
+        if actor_user_id is not None:
+            p_stmt = p_stmt.where(PartMovement.actor_user_id == actor_user_id)
+        if product_id is not None:
+            p_stmt = p_stmt.where(PartMovement.product_id == product_id)
+        if sku is not None:
+            p_stmt = p_stmt.where(
+                col(PartMovement.product_id) == product_id_from_sku
+            )
+        total += session.exec(p_stmt).one()
+
+    return total
+
+
+def _hydrate_audit(
+    *, session: Session, rows: list[AuditEntryPublic]
+) -> list[AuditEntryPublic]:
+    """Populate the optional display fields on a page of audit rows via batched
+    lookups (no N+1). Read-only; runs only on the already-sliced page so the
+    ordering and filters of list_audit are untouched. Customer resolves through
+    the single source (sale/ticket/pull); cost/money is never added."""
+    if not rows:
+        return rows
+
+    unit_ids: set[uuid.UUID] = set()
+    product_ids: set[uuid.UUID] = set()
+    actor_ids: set[uuid.UUID] = set()
+    sale_ids: set[uuid.UUID] = set()
+    ticket_ids: set[uuid.UUID] = set()
+    pull_ids: set[uuid.UUID] = set()
+    for r in rows:
+        actor_ids.add(r.actor_user_id)
+        if r.unit_id is not None:
+            unit_ids.add(r.unit_id)
+        if r.product_id is not None:
+            product_ids.add(r.product_id)
+        if r.sale_id is not None:
+            sale_ids.add(r.sale_id)
+        if r.service_ticket_id is not None:
+            ticket_ids.add(r.service_ticket_id)
+        if r.project_pull_id is not None:
+            pull_ids.add(r.project_pull_id)
+
+    units: dict[uuid.UUID, Unit] = {
+        u.id: u
+        for u in (
+            session.exec(select(Unit).where(col(Unit.id).in_(unit_ids))).all()
+            if unit_ids
+            else []
+        )
+    }
+    # UNIT rows carry their product via the unit; PART rows carry it directly.
+    for u in units.values():
+        product_ids.add(u.product_id)
+    products: dict[uuid.UUID, Product] = {
+        p.id: p
+        for p in (
+            session.exec(select(Product).where(col(Product.id).in_(product_ids))).all()
+            if product_ids
+            else []
+        )
+    }
+    actors: dict[uuid.UUID, User] = {
+        u.id: u
+        for u in (
+            session.exec(select(User).where(col(User.id).in_(actor_ids))).all()
+            if actor_ids
+            else []
+        )
+    }
+    sales: dict[uuid.UUID, Sale] = {
+        s.id: s
+        for s in (
+            session.exec(select(Sale).where(col(Sale.id).in_(sale_ids))).all()
+            if sale_ids
+            else []
+        )
+    }
+    tickets: dict[uuid.UUID, ServiceTicket] = {
+        t.id: t
+        for t in (
+            session.exec(
+                select(ServiceTicket).where(col(ServiceTicket.id).in_(ticket_ids))
+            ).all()
+            if ticket_ids
+            else []
+        )
+    }
+    pulls: dict[uuid.UUID, ProjectPull] = {
+        p.id: p
+        for p in (
+            session.exec(
+                select(ProjectPull).where(col(ProjectPull.id).in_(pull_ids))
+            ).all()
+            if pull_ids
+            else []
+        )
+    }
+    cust_ids: set[uuid.UUID] = set()
+    for s in sales.values():
+        cust_ids.add(s.customer_id)
+    for t in tickets.values():
+        cust_ids.add(t.customer_id)
+    for pl in pulls.values():
+        cust_ids.add(pl.customer_id)
+    customers: dict[uuid.UUID, str] = {
+        c.id: c.name
+        for c in (
+            session.exec(select(Customer).where(col(Customer.id).in_(cust_ids))).all()
+            if cust_ids
+            else []
+        )
+    }
+
+    for r in rows:
+        actor = actors.get(r.actor_user_id)
+        if actor is not None:
+            r.actor_full_name = actor.full_name or actor.email
+        if r.unit_id is not None:
+            unit = units.get(r.unit_id)
+            if unit is not None:
+                r.unit_castranova_barcode = unit.castranova_barcode
+                r.unit_supplier_serial = unit.supplier_serial
+                prod = products.get(unit.product_id)
+                if prod is not None:
+                    r.product_model_name = prod.model_name
+                    r.product_sku = prod.sku
+        elif r.product_id is not None:
+            prod = products.get(r.product_id)
+            if prod is not None:
+                r.product_model_name = prod.model_name
+                r.product_sku = prod.sku
+        # Resolve customer via the single source (sale/ticket/pull), if any.
+        if r.sale_id is not None:
+            sale = sales.get(r.sale_id)
+            if sale is not None:
+                r.customer_name = customers.get(sale.customer_id)
+        elif r.service_ticket_id is not None:
+            ticket = tickets.get(r.service_ticket_id)
+            if ticket is not None:
+                r.customer_name = customers.get(ticket.customer_id)
+        elif r.project_pull_id is not None:
+            pull = pulls.get(r.project_pull_id)
+            if pull is not None:
+                r.customer_name = customers.get(pull.customer_id)
+
+    return rows
 
 
 # --- Stock-on-hand dashboard (FR-012) -----------------------------------------
@@ -2936,9 +5458,12 @@ def list_audit(
 def stock_on_hand(
     *,
     session: Session,
+    q: str | None = None,
+    brand: str | None = None,
     category: str | None = None,
     supplier_id: uuid.UUID | None = None,
-    customer_id: uuid.UUID | None = None,
+    skip: int = 0,
+    limit: int = 100,
 ) -> StockOnHandResponse:
     """Server-side stock-on-hand per active product in one annotation pass.
 
@@ -2974,41 +5499,83 @@ def stock_on_hand(
         (col(Product.tracking_mode) == TrackingMode.SERIALIZED, unit_subq),
         else_=qty_subq,
     )
+    clauses = _product_filter_clauses(
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=None,
+        is_active=True,
+    )
+    if supplier_id is not None:
+        qty_exists = (
+            select(PartBatch.id)
+            .where(
+                col(PartBatch.product_id) == col(Product.id),
+                col(PartBatch.supplier_id) == supplier_id,
+                col(PartBatch.remaining_qty) > 0,
+            )
+            .correlate(Product)
+            .exists()
+        )
+        unit_exists = (
+            select(Unit.id)
+            .where(
+                col(Unit.product_id) == col(Product.id),
+                col(Unit.supplier_id) == supplier_id,
+                col(Unit.current_state) == UnitState.IN_STOCK,
+            )
+            .correlate(Product)
+            .exists()
+        )
+        clauses.append(
+            case(
+                (
+                    col(Product.tracking_mode) == TrackingMode.SERIALIZED,
+                    unit_exists,
+                ),
+                else_=qty_exists,
+            )
+        )
+
+    count_stmt = select(func.count()).select_from(Product)
+    for clause in clauses:
+        count_stmt = count_stmt.where(clause)
+    count = session.exec(count_stmt).one()
+
     stmt = select(  # type: ignore[call-overload]
         Product.id,
         Product.sku,
         Product.model_name,
+        Product.brand,
         Product.category,
         Product.tracking_mode,
         on_hand.label("quantity_on_hand"),
-    ).where(col(Product.is_active).is_(True))
-    if category is not None:
-        stmt = stmt.where(col(Product.category) == category)
-    stmt = stmt.order_by(col(Product.sku))
+    )
+    for clause in clauses:
+        stmt = stmt.where(clause)
+    stmt = stmt.order_by(col(Product.sku)).offset(skip).limit(limit)
     rows = [
         StockOnHandRow(
             product_id=r[0],
             sku=r[1],
             model_name=r[2],
-            category=r[3],
-            tracking_mode=r[4],
-            quantity_on_hand=int(r[5] or 0),
+            brand=r[3],
+            category=r[4],
+            tracking_mode=r[5],
+            quantity_on_hand=int(r[6] or 0),
         )
         for r in session.exec(stmt).all()
     ]
-    if customer_id is not None:
-        rows = _filter_rows_by_customer(
-            session=session, rows=rows, customer_id=customer_id
-        )
-    return StockOnHandResponse(rows=rows)
+    return StockOnHandResponse(rows=rows, count=count)
 
 
 def stock_on_hand_batches(
-    *, session: Session, product_id: uuid.UUID
+    *, session: Session, product_id: uuid.UUID, include_supplier: bool
 ) -> list[BatchDrillRow]:
     """Active (remaining_qty > 0) batches for a product, oldest first (FIFO order)."""
     batches = session.exec(
-        select(PartBatch)
+        select(PartBatch, Supplier.name)
+        .join(Supplier, col(PartBatch.supplier_id) == col(Supplier.id), isouter=True)
         .where(
             col(PartBatch.product_id) == product_id,
             PartBatch.remaining_qty > 0,
@@ -3017,20 +5584,22 @@ def stock_on_hand_batches(
     ).all()
     return [
         BatchDrillRow(
-            batch_no=b.batch_no,
-            remaining_qty=b.remaining_qty,
-            received_at=b.received_at,
+            batch_no=batch.batch_no,
+            remaining_qty=batch.remaining_qty,
+            received_at=batch.received_at,
+            supplier=supplier_name if include_supplier else None,
         )
-        for b in batches
+        for batch, supplier_name in batches
     ]
 
 
 def stock_on_hand_units(
-    *, session: Session, product_id: uuid.UUID
+    *, session: Session, product_id: uuid.UUID, include_supplier: bool
 ) -> list[UnitDrillRow]:
     """In-stock serialized units for a product, oldest first (received order)."""
     units = session.exec(
-        select(Unit)
+        select(Unit, Supplier.name)
+        .join(Supplier, col(Unit.supplier_id) == col(Supplier.id))
         .where(
             col(Unit.product_id) == product_id,
             col(Unit.current_state) == UnitState.IN_STOCK,
@@ -3039,38 +5608,12 @@ def stock_on_hand_units(
     ).all()
     return [
         UnitDrillRow(
-            id=u.id,
-            castranova_barcode=u.castranova_barcode,
-            supplier_serial=u.supplier_serial,
-            current_state=u.current_state,
-            received_at=u.received_at,
+            id=unit.id,
+            castranova_barcode=unit.castranova_barcode,
+            supplier_serial=unit.supplier_serial,
+            current_state=unit.current_state,
+            received_at=unit.received_at,
+            supplier=supplier_name if include_supplier else None,
         )
-        for u in units
+        for unit, supplier_name in units
     ]
-
-
-def _filter_rows_by_customer(
-    *,
-    session: Session,
-    rows: list[StockOnHandRow],
-    customer_id: uuid.UUID,
-) -> list[StockOnHandRow]:
-    """Restrict rows to products the customer has ever bought or had serviced."""
-    sold = session.exec(
-        select(SaleLine.product_id)
-        .join(Sale, col(SaleLine.sale_id) == col(Sale.id))
-        .where(
-            col(Sale.customer_id) == customer_id,
-            col(SaleLine.product_id).is_not(None),
-        )
-    ).all()
-    serviced = session.exec(
-        select(ServiceTicketPart.product_id)
-        .join(
-            ServiceTicket,
-            col(ServiceTicketPart.service_ticket_id) == col(ServiceTicket.id),
-        )
-        .where(col(ServiceTicket.customer_id) == customer_id)
-    ).all()
-    allowed = {pid for pid in [*sold, *serviced] if pid is not None}
-    return [row for row in rows if row.product_id in allowed]

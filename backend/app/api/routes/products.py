@@ -1,32 +1,126 @@
+import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app import crud
-from app.api.deps import AdminUser, SessionDep, get_admin, get_current_user
+from app.api.deps import (
+    AdminUser,
+    SessionDep,
+    get_admin,
+    get_current_active_superuser,
+    get_current_user,
+)
 from app.models import (
     MinStockLevelUpdate,
     PriceChangePublic,
     ProductCreate,
+    ProductOption,
     ProductPublic,
+    ProductPurchaseCost,
+    ProductsPublic,
     ProductUpdate,
     TrackingMode,
+    User,
 )
 from app.services.barcode import render_label_sheet
 
 router = APIRouter(prefix="/products", tags=["products"])
 
+logger = logging.getLogger(__name__)
+
+
+def _public(product: object, *, is_fresh: bool) -> ProductPublic:
+    """Serialize a Product ORM row to ProductPublic, stamping the computed
+    is_fresh flag (whether the SKU is still editable)."""
+    data = ProductPublic.model_validate(product, from_attributes=True)
+    data.is_fresh = is_fresh
+    return data
+
 
 @router.get(
-    "/", response_model=list[ProductPublic], dependencies=[Depends(get_current_user)]
+    "/", response_model=ProductsPublic, dependencies=[Depends(get_current_user)]
 )
 def read_products(
     session: SessionDep,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=255,
+            description="Case-insensitive substring match on SKU or model name",
+        ),
+    ] = None,
+    brand: Annotated[
+        str | None,
+        Query(max_length=255, description="Case-insensitive substring match on brand"),
+    ] = None,
+    category: Annotated[
+        str | None,
+        Query(
+            max_length=128, description="Case-insensitive substring match on category"
+        ),
+    ] = None,
+    tracking_mode: TrackingMode | None = None,
+    is_active: Annotated[
+        bool | None, Query(description="Filter by active/inactive status")
+    ] = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[ProductPublic]:
-    return crud.list_products(session=session, skip=skip, limit=limit)  # type: ignore[return-value]
+) -> ProductsPublic:
+    products = crud.list_products(
+        session=session,
+        q=q,
+        brand=brand,
+        category=category,
+        tracking_mode=tracking_mode,
+        is_active=is_active,
+        skip=skip,
+        limit=limit,
+    )
+    fresh = crud.products_fresh_ids(
+        session=session, product_ids=[p.id for p in products]
+    )
+    return ProductsPublic(
+        data=[_public(p, is_fresh=p.id in fresh) for p in products],
+        count=crud.count_products(
+            session=session,
+            q=q,
+            brand=brand,
+            category=category,
+            tracking_mode=tracking_mode,
+            is_active=is_active,
+        ),
+    )
+
+
+@router.get(
+    "/purchase-costs",
+    response_model=list[ProductPurchaseCost],
+    dependencies=[Depends(get_admin)],
+)
+def read_purchase_costs(session: SessionDep) -> list[ProductPurchaseCost]:
+    """Latest purchase cost per product (admin-only COGS). One entry per product
+    that has at least one receipt."""
+    costs = crud.latest_purchase_costs(session=session)
+    return [
+        ProductPurchaseCost(product_id=pid, latest_purchase_cost_thb=cost)
+        for pid, cost in costs.items()
+    ]
+
+
+@router.get(
+    "/options",
+    response_model=list[ProductOption],
+    dependencies=[Depends(get_current_user)],
+)
+def read_options(session: SessionDep, active_only: bool = False) -> list[ProductOption]:
+    """Every product as a lightweight picker/lookup projection, ordered by SKU
+    (FR-019 audit filter; sale/receive/tickets/pulls/pricing-overrides product
+    selection). Deliberately unpaginated: no client parameter can amplify the
+    response size, and it is far lighter than the full ProductPublic (no specs
+    JSONB, no brand/category/timestamps)."""
+    return crud.list_product_options(session=session, active_only=active_only)
 
 
 # Shared-team access (mirrors the serialized unit-label endpoint): any
@@ -59,7 +153,9 @@ def read_sku_label(
 
 @router.post("/", response_model=ProductPublic, dependencies=[Depends(get_admin)])
 def create_product(*, session: SessionDep, product_in: ProductCreate) -> ProductPublic:
-    return crud.create_product(session=session, product_in=product_in)  # type: ignore[return-value]
+    product = crud.create_product(session=session, product_in=product_in)
+    # A brand-new product has no stock/transactions, so it is always fresh.
+    return _public(product, is_fresh=True)
 
 
 @router.patch("/{product_id}", response_model=ProductPublic)
@@ -73,11 +169,15 @@ def update_product(
     db_product = crud.get_product(session=session, product_id=product_id)
     if not db_product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return crud.update_product(  # type: ignore[return-value]
+    product = crud.update_product(
         session=session,
         db_product=db_product,
         product_in=product_in,
         changed_by_user_id=current_user.id,
+    )
+    return _public(
+        product,
+        is_fresh=crud.is_product_fresh(session=session, product_id=product.id),
     )
 
 
@@ -92,11 +192,57 @@ def set_min_stock_level(
     product_id: uuid.UUID,
     payload: MinStockLevelUpdate,
 ) -> ProductPublic:
-    return crud.set_min_stock_level(  # type: ignore[return-value]
+    product = crud.set_min_stock_level(
         session=session,
         product_id=product_id,
         min_stock_level=payload.min_stock_level,
     )
+    return _public(
+        product,
+        is_fresh=crud.is_product_fresh(session=session, product_id=product.id),
+    )
+
+
+@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(
+    *,
+    session: SessionDep,
+    current_user: Annotated[User, Depends(get_current_active_superuser)],
+    product_id: uuid.UUID,
+) -> Response:
+    """Superuser-only hard delete, allowed only while the product has never
+    entered the stock system (the same condition that keeps its SKU editable).
+    Anything with stock or sales stays, and is retired via is_active instead.
+    The freshness re-check here is authoritative; the is_fresh flag sent to
+    clients is a rendering hint."""
+    db_product = crud.get_product(session=session, product_id=product_id)
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if not crud.is_product_fresh(session=session, product_id=product_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Product has stock history and cannot be deleted",
+        )
+    if crud.product_has_price_history(session=session, product_id=product_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Product has price history and cannot be deleted. "
+                "Set it to inactive instead."
+            ),
+        )
+    # The only durable trace this action leaves. The ledger-derived audit trail
+    # cannot cover it: a deletable product has no movements by definition, and
+    # the row that would carry created_by/updated_at is what is being removed.
+    logger.info(
+        "product_deleted product_id=%s sku=%s model_name=%s by_user_id=%s",
+        db_product.id,
+        db_product.sku,
+        db_product.model_name,
+        current_user.id,
+    )
+    crud.delete_product(session=session, db_product=db_product)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
@@ -109,4 +255,4 @@ def read_price_history(
 ) -> list[PriceChangePublic]:
     if not crud.get_product(session=session, product_id=product_id):
         raise HTTPException(status_code=404, detail="Product not found")
-    return crud.list_price_history(session=session, product_id=product_id)  # type: ignore[return-value]
+    return crud.list_price_history(session=session, product_id=product_id)

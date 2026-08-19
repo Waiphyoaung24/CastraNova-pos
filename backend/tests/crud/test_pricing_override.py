@@ -271,6 +271,49 @@ def test_override_exceptions_report_shape(db: Session) -> None:
     assert report.rejected >= 1
 
 
+def test_override_exceptions_report_orders_by_deviation_then_created_at(
+    db: Session,
+) -> None:
+    # FR-010: the report lists overrides sorted by deviation size (largest
+    # first). Ties break by created_at ascending, then id for total order.
+    from datetime import datetime, timedelta, timezone
+
+    actor = _admin(db)
+    pid = _product(db, retail="1000.00")
+    now = datetime.now(timezone.utc)
+    base = datetime(now.year, now.month, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+    def _row(dev: str, created: datetime) -> PricingOverrideRequest:
+        row = PricingOverrideRequest(
+            target_kind=OverrideTargetKind.SALE_LINE,
+            product_id=pid,
+            default_price_thb=Decimal("1000.00"),
+            requested_price_thb=Decimal("900.00"),
+            deviation_pct=Decimal(dev),
+            reason="x",
+            state=OverrideState.PENDING,
+            created_by_user_id=actor,
+            created_at=created,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    a = _row("10.0000", base + timedelta(hours=1))
+    b = _row("30.0000", base + timedelta(hours=2))
+    c = _row("30.0000", base)  # ties b on deviation, but created earlier
+    d = _row("5.0000", base + timedelta(hours=3))
+
+    report = crud.override_exceptions_report(
+        session=db, year=now.year, month=now.month
+    )
+    mine = {a.id, b.id, c.id, d.id}
+    ordered = [r.id for r in report.rows if r.id in mine]
+    # deviation DESC (30 > 10 > 5); within the 30% tie, created_at ASC (c < b)
+    assert ordered == [c.id, b.id, a.id, d.id]
+
+
 def test_create_override_tiny_default_does_not_overflow(db: Session) -> None:
     # Regression (review C-1): a tiny default + large requested price must not
     # overflow Numeric(7,4); deviation is capped and the request goes PENDING.

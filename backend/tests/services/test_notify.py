@@ -1,9 +1,12 @@
-"""Service tests for LINE + Viber push notifications (FR-018, Task 2.7).
+"""Service tests for LINE + Telegram push notifications (FR-018, Task 2.7).
 
 The single network seam ``app.services.notify._post`` is monkeypatched so no
 real HTTP happens; tenacity's sleep is stubbed so retry tests run instantly.
 """
 
+import logging
+import threading
+import time
 import uuid
 from typing import Any
 
@@ -12,7 +15,9 @@ import pytest
 from sqlmodel import Session
 
 from app.core.config import settings
+from app.core.logging import configure_logging
 from app.models import (
+    CHANNEL_ADDRESS_ATTR,
     NotificationChannel,
     NotificationEvent,
     NotificationLog,
@@ -23,9 +28,10 @@ from app.models import (
     UserRole,
 )
 from app.services import notify
+from tests.utils.utils import assert_no_financial_keys
 
 LINE_TOKEN = "line-secret-token-xyz"
-VIBER_TOKEN = "viber-secret-token-xyz"
+TELEGRAM_TOKEN = "telegram-secret-token-xyz"
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +42,7 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "LINE_CHANNEL_ACCESS_TOKEN", LINE_TOKEN)
-    monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", VIBER_TOKEN)
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", TELEGRAM_TOKEN)
 
 
 def _resp(status_code: int, json_body: dict[str, Any] | None = None) -> httpx.Response:
@@ -57,12 +63,28 @@ def _recording_post(sent: list[Any]) -> Any:
     return fake_post
 
 
+class _Auto:
+    """Sentinel type distinguishing "caller didn't specify" (generate a
+    fresh, unique value) from an explicit telegram_chat_id=None (no address
+    at all, used by the not-enrolled test at line ~558). A fixed literal
+    default would collide with User.telegram_chat_id's UNIQUE constraint
+    (m031) the moment two tests in the same run both left it unset -- the
+    shared `db` fixture is session-scoped and never rolls back a successful
+    commit between tests."""
+
+
+_AUTO_CHAT_ID = _Auto()
+# line_user_id became UNIQUE in m039, exactly like telegram_chat_id in m031,
+# so a shared default literal now collides across users.
+_AUTO_LINE_ID = _Auto()
+
+
 def _make_user(
     db: Session,
     *,
     role: UserRole = UserRole.BKK_ADMIN,
-    line_user_id: str | None = "L-recipient",
-    viber_user_id: str | None = "V-recipient",
+    line_user_id: str | None | _Auto = _AUTO_LINE_ID,
+    telegram_chat_id: str | None | _Auto = _AUTO_CHAT_ID,
 ) -> User:
     from app import crud
     from tests.utils.utils import random_email, random_lower_string
@@ -73,8 +95,12 @@ def _make_user(
             email=random_email(), password=random_lower_string(), role=role
         ),
     )
+    if isinstance(telegram_chat_id, _Auto):
+        telegram_chat_id = f"T-{uuid.uuid4().hex[:10]}"
+    if isinstance(line_user_id, _Auto):
+        line_user_id = f"L-{uuid.uuid4().hex[:10]}"
     user.line_user_id = line_user_id
-    user.viber_user_id = viber_user_id
+    user.telegram_chat_id = telegram_chat_id
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -103,7 +129,9 @@ def _opt_in(
 def test_send_line_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
         return _resp(200)
 
@@ -147,36 +175,332 @@ def test_send_line_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     assert attempts["n"] == 1
 
 
-def test_send_viber_status_zero_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_send_telegram_success_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_post(url: str, *, headers: dict[str, str], json: dict[str, Any]) -> httpx.Response:
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
         calls.append({"url": url, "headers": headers, "json": json})
-        return _resp(200, {"status": 0})
+        return _resp(200, {"ok": True})
 
     monkeypatch.setattr(notify, "_post", fake_post)
-    notify.send_viber(to="V-abc", text="hello")
+    notify.send_telegram(to="123456789", text="hi")
+
     assert len(calls) == 1
-    assert calls[0]["headers"]["X-Viber-Auth-Token"] == VIBER_TOKEN
-    assert calls[0]["json"] == {"receiver": "V-abc", "type": "text", "text": "hello"}
+    # Telegram carries the bot token in the URL path, not a header.
+    assert calls[0]["url"] == (
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    )
+    assert calls[0]["json"] == {"chat_id": "123456789", "text": "hi"}
 
 
-def test_send_viber_nonzero_status_permanent_no_retry(
+def test_send_telegram_5xx_raises_retryable_single_raw_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     attempts = {"n": 0}
 
     def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
         attempts["n"] += 1
-        return _resp(200, {"status": 3, "status_message": "bad"})
+        return _resp(503)
 
     monkeypatch.setattr(notify, "_post", fake_post)
-    with pytest.raises(notify.PermanentNotifyError):
-        notify.send_viber(to="V-abc", text="hello")
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
     assert attempts["n"] == 1
 
 
-# --- orchestrator: notify() ---------------------------------------------------
+def test_send_telegram_429_is_retryable_not_permanent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Telegram signals rate limiting with HTTP 429 + retry_after. The generic
+    _classify treats every 4xx as permanent, which would silently drop a merely
+    throttled message — 429 must be retryable."""
+    attempts = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        attempts["n"] += 1
+        return _resp(429, {"ok": False, "parameters": {"retry_after": 1}})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
+    assert attempts["n"] == 1
+
+
+def test_send_telegram_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    # e.g. 403 "bot was blocked by the user" — never worth retrying.
+    attempts = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        attempts["n"] += 1
+        return _resp(403, {"ok": False, "description": "bot was blocked"})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
+    assert attempts["n"] == 1
+
+
+def test_send_telegram_transport_error_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(notify, "_post", boom)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.send_telegram(to="123456789", text="hi")
+
+
+def test_configure_logging_suppresses_telegram_token_in_httpx_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Regression for C-2: httpx's own logger otherwise emits the full
+    request URL — bot token and all — at INFO on every real send. This drives
+    a real httpx.Client.send (via a MockTransport, no real network) so
+    httpx's actual "HTTP Request: ..." log line fires, and asserts
+    configure_logging() keeps the token out of every captured record."""
+    configure_logging()
+    caplog.set_level(logging.DEBUG)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    transport = httpx.MockTransport(handler)
+
+    def fake_httpx_post(url: str, **kwargs: Any) -> httpx.Response:
+        trust_env = kwargs.pop("trust_env", True)
+        with httpx.Client(transport=transport, trust_env=trust_env) as client:
+            return client.post(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "post", fake_httpx_post)
+    notify.send_telegram(to="123456789", text="hi")
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any(TELEGRAM_TOKEN in m for m in messages)
+
+
+def test_get_telegram_updates_returns_result_and_requests_the_newest_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(
+        url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> httpx.Response:
+        calls.append({"url": url, "headers": headers, "json": json})
+        return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    result = notify.get_telegram_updates()
+
+    assert result == [{"update_id": 1}]
+    assert calls[0]["url"] == f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    # A negative offset reads the newest window without acknowledging
+    # anything (no poller, no offset state) -- see _GET_UPDATES_WINDOW.
+    assert calls[0]["json"] == {"offset": -notify._GET_UPDATES_WINDOW}
+
+
+def test_get_telegram_updates_5xx_raises_retryable_single_raw_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        attempts["n"] += 1
+        return _resp(503)
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates()
+    assert attempts["n"] == 1
+
+
+def test_get_telegram_updates_429_is_retryable_not_permanent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        return _resp(429, {"ok": False, "parameters": {"retry_after": 1}})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates()
+
+
+def test_get_telegram_updates_4xx_no_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        return _resp(401, {"ok": False, "description": "Unauthorized"})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.get_telegram_updates()
+
+
+def test_get_telegram_updates_transport_error_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(notify, "_post", boom)
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates()
+
+
+def test_get_telegram_updates_unset_token_raises_permanent_no_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", None)
+    calls: list[Any] = []
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: calls.append(1))
+    with pytest.raises(notify.PermanentNotifyError):
+        notify.get_telegram_updates()
+    assert calls == []
+
+
+def test_get_telegram_updates_never_logs_the_token_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(500))
+    try:
+        notify.get_telegram_updates()
+    except notify.RetryableNotifyError as exc:
+        assert TELEGRAM_TOKEN not in str(exc)
+    else:
+        pytest.fail("expected RetryableNotifyError")
+
+
+def test_cached_updates_collapse_repeat_calls_within_the_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        calls["n"] += 1
+        return _resp(200, {"ok": True, "result": [{"update_id": 1}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    first = notify.get_telegram_updates_cached()
+    second = notify.get_telegram_updates_cached()
+
+    assert calls["n"] == 1
+    assert first == second == [{"update_id": 1}]
+
+
+def test_cached_updates_refetch_after_the_ttl_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        calls["n"] += 1
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr("app.services.notify.time.monotonic", lambda: clock["t"])
+
+    notify.get_telegram_updates_cached()
+    clock["t"] += notify.TELEGRAM_UPDATES_CACHE_TTL_SECONDS + 0.1
+    notify.get_telegram_updates_cached()
+
+    assert calls["n"] == 2
+
+
+def test_a_failed_fetch_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Caching a transient failure would freeze it for the whole TTL and stall
+    a legitimate connect."""
+    calls = {"n": 0}
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _resp(503)
+        return _resp(200, {"ok": True, "result": [{"update_id": 7}]})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    with pytest.raises(notify.RetryableNotifyError):
+        notify.get_telegram_updates_cached()
+
+    assert notify.get_telegram_updates_cached() == [{"update_id": 7}]
+    assert calls["n"] == 2
+
+
+def test_concurrent_threads_collapse_to_one_outbound_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """confirm_telegram is a sync def, so FastAPI runs it in a threadpool --
+    several threads per worker race the same cache slot."""
+    calls = {"n": 0}
+    count_lock = threading.Lock()
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        with count_lock:
+            calls["n"] += 1
+        time.sleep(0.05)  # widen the race window
+        return _resp(200, {"ok": True, "result": []})
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    notify.reset_telegram_updates_cache()
+
+    threads = [
+        threading.Thread(target=notify.get_telegram_updates_cached) for _ in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert calls["n"] == 1
+
+
+def test_parse_start_code_extracts_chat_id_username_and_code() -> None:
+    update = {
+        "update_id": 123456,
+        "message": {
+            "chat": {"id": 847392015, "username": "winthiha", "type": "private"},
+            "text": "/start A7X2K9examplecode",
+        },
+    }
+    assert notify.parse_start_code(update) == (
+        "847392015",
+        "winthiha",
+        "A7X2K9examplecode",
+    )
+
+
+def test_parse_start_code_handles_missing_username() -> None:
+    update = {"message": {"chat": {"id": 1}, "text": "/start CODE123"}}
+    assert notify.parse_start_code(update) == ("1", None, "CODE123")
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"update_id": 1},  # no message at all
+        {"message": {"chat": {"id": 1}, "text": "just chatting"}},  # not /start
+        {"message": {"chat": {"id": 1}, "text": "/start"}},  # no code after it
+        {"message": {"text": "/start CODE"}},  # no chat
+        {"message": {"chat": {}, "text": "/start CODE"}},  # chat has no id
+    ],
+)
+def test_parse_start_code_ignores_unrelated_messages(update: dict[str, Any]) -> None:
+    assert notify.parse_start_code(update) is None
+
+
+def test_notify_fans_out_only_to_addressable_channels() -> None:
+    """_CHANNELS must match CHANNEL_ADDRESS_ATTR: a channel in one but not the
+    other either sends to an address the grid never offered, or is offered a
+    checkbox that can never deliver."""
+    assert set(notify._CHANNELS) == set(CHANNEL_ADDRESS_ATTR)
+    assert NotificationChannel.VIBER not in notify._CHANNELS
 
 
 def test_notify_line_success_one_sent_log(
@@ -192,9 +516,7 @@ def test_notify_line_success_one_sent_log(
         recipients=[user],
         payload={"k": "v"},
     )
-    line_logs = [
-        log for log in logs if log.channel == NotificationChannel.LINE
-    ]
+    line_logs = [log for log in logs if log.channel == NotificationChannel.LINE]
     assert len(line_logs) == 1
     log = line_logs[0]
     assert log.status == NotificationStatus.SENT
@@ -241,8 +563,10 @@ def test_notify_opt_out_no_send_no_log(
     sent: list[Any] = []
     monkeypatch.setattr(notify, "_post", _recording_post(sent))
     user = _make_user(db)
-    # explicit disabled LINE pref + no VIBER pref at all
-    _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT, enabled=False)
+    # explicit disabled LINE pref + no TELEGRAM pref at all
+    _opt_in(
+        db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT, enabled=False
+    )
 
     logs = notify.notify(
         session=db,
@@ -280,12 +604,10 @@ def test_notify_opted_in_but_no_address_failed_not_enrolled(
 def test_notify_one_log_per_attempted_recipient_channel(
     db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        notify, "_post", lambda *a, **k: _resp(200, {"status": 0})
-    )
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200, {"status": 0}))
     user = _make_user(db)
     _opt_in(db, user, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
-    _opt_in(db, user, NotificationChannel.VIBER, NotificationEvent.PULL_SHORT)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
 
     logs = notify.notify(
         session=db,
@@ -294,7 +616,7 @@ def test_notify_one_log_per_attempted_recipient_channel(
         payload={},
     )
     channels = sorted(log.channel.value for log in logs)
-    assert channels == ["LINE", "VIBER"]
+    assert channels == ["LINE", "TELEGRAM"]
     assert all(log.status == NotificationStatus.SENT for log in logs)
 
 
@@ -394,14 +716,89 @@ def test_send_line_unset_token_raises_permanent_no_call(
     assert sent == []  # fail-fast: no outbound call
 
 
-def test_send_viber_unset_token_raises_permanent_no_call(
+def test_send_telegram_unset_token_raises_permanent_no_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sent: list[Any] = []
     monkeypatch.setattr(notify, "_post", _recording_post(sent))
-    monkeypatch.setattr(settings, "VIBER_AUTH_TOKEN", None)
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", "")
     with pytest.raises(notify.PermanentNotifyError):
-        notify.send_viber(to="V-abc", text="hi")
+        notify.send_telegram(to="123456789", text="hi")
+    # fail-fast: an empty token would otherwise build a bot//sendMessage URL
+    assert sent == []
+
+
+# --- orchestrator: Telegram ---------------------------------------------------
+
+
+def test_notify_telegram_success_one_sent_log(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200, {"ok": True}))
+    user = _make_user(db)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
+
+    logs = notify.notify(
+        session=db,
+        event_type=NotificationEvent.PULL_SHORT,
+        recipients=[user],
+        payload={"k": "v"},
+    )
+    tg_logs = [log for log in logs if log.channel == NotificationChannel.TELEGRAM]
+    assert len(tg_logs) == 1
+    assert tg_logs[0].status == NotificationStatus.SENT
+    assert tg_logs[0].attempts == 1
+    assert tg_logs[0].target_user_id == user.id
+
+
+def test_notify_telegram_5xx_retries_and_never_logs_the_token(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bot token rides in the URL, so a failure path must not echo it into
+    last_error (which is stored and shown to admins)."""
+    sent: list[Any] = []
+
+    def fake_post(*_args: Any, **_kwargs: Any) -> httpx.Response:
+        sent.append(1)
+        return _resp(503)
+
+    monkeypatch.setattr(notify, "_post", fake_post)
+    user = _make_user(db)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
+
+    logs = notify.notify(
+        session=db,
+        event_type=NotificationEvent.PULL_SHORT,
+        recipients=[user],
+        payload={},
+    )
+    tg_logs = [log for log in logs if log.channel == NotificationChannel.TELEGRAM]
+    assert len(tg_logs) == 1
+    assert tg_logs[0].status == NotificationStatus.FAILED
+    assert tg_logs[0].attempts == 4  # 4 attempts / 3 retries
+    assert len(sent) == 4
+    assert TELEGRAM_TOKEN not in (tg_logs[0].last_error or "")
+
+
+def test_notify_telegram_opted_in_but_no_chat_id_failed_not_enrolled(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[Any] = []
+    monkeypatch.setattr(notify, "_post", _recording_post(sent))
+    user = _make_user(db, telegram_chat_id=None)
+    _opt_in(db, user, NotificationChannel.TELEGRAM, NotificationEvent.PULL_SHORT)
+
+    logs = notify.notify(
+        session=db,
+        event_type=NotificationEvent.PULL_SHORT,
+        recipients=[user],
+        payload={},
+    )
+    tg_logs = [log for log in logs if log.channel == NotificationChannel.TELEGRAM]
+    assert len(tg_logs) == 1
+    assert tg_logs[0].status == NotificationStatus.FAILED
+    assert tg_logs[0].attempts == 0
+    assert "not enrolled" in (tg_logs[0].last_error or "")
     assert sent == []
 
 
@@ -431,9 +828,7 @@ def test_notify_pull_short_targets_bkk_admins_with_pref(
     staff = _make_user(db, role=UserRole.YGN_STAFF)
     _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.PULL_SHORT)
 
-    customer = crud.create_customer(
-        session=db, customer_in=CustomerCreate(name="C")
-    )
+    customer = crud.create_customer(session=db, customer_in=CustomerCreate(name="C"))
     project = crud.create_project(
         session=db,
         project_in=ProjectCreate(
@@ -478,3 +873,434 @@ def test_notify_pull_short_targets_bkk_admins_with_pref(
     sample = next(log for log in logs if log.target_user_id == admin.id)
     assert sample.payload["short_line_count"] == 1
     assert sample.payload["pull_id"] == str(pull.id)
+    assert sample.payload["project_name"] == project.name
+    assert sample.payload["project_code"] == project.code
+
+
+# --- notify_pull_fulfilled helper (FR-018) ------------------------------------
+
+
+def test_notify_pull_fulfilled_targets_bkk_admins_with_pref(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import crud
+    from app.models import (
+        CustomerCreate,
+        ProjectCreate,
+        ProjectPull,
+        ProjectPullState,
+    )
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.PULL_FULFILLED)
+    # a staff user opted in must NOT receive (role gate)
+    staff = _make_user(db, role=UserRole.YGN_STAFF)
+    _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.PULL_FULFILLED)
+
+    customer = crud.create_customer(session=db, customer_in=CustomerCreate(name="C"))
+    project = crud.create_project(
+        session=db,
+        project_in=ProjectCreate(
+            code=f"P-{uuid.uuid4().hex[:8]}", name="P", customer_id=customer.id
+        ),
+    )
+    pull = ProjectPull(
+        project_id=project.id,
+        customer_id=customer.id,
+        state=ProjectPullState.FULFILLED,
+        created_by_user_id=admin.id,
+    )
+    db.add(pull)
+    db.commit()
+    db.refresh(pull)
+
+    logs = notify.notify_pull_fulfilled(session=db, pull=pull)
+    targets = {log.target_user_id for log in logs}
+    assert admin.id in targets
+    assert staff.id not in targets
+    assert all(log.event_type == NotificationEvent.PULL_FULFILLED for log in logs)
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["pull_id"] == str(pull.id)
+    assert sample.payload["project_name"] == project.name
+    assert sample.payload["project_code"] == project.code
+    # FR-018 requires the FULFILLED push carry NO financial fields.
+    assert_no_financial_keys(sample.payload)
+
+
+# --- payload names (2026-07-22 friendlier messages) ---------------------------
+
+
+def test_notify_low_stock_payload_carries_model_name(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import crud
+    from app.models import ProductCreate, TrackingMode
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.LOW_STOCK)
+
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"NS-{uuid.uuid4().hex[:8]}",
+            model_name="12mm Copper Elbow",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="10.00",
+            repair_price_thb="2.00",
+            default_min_stock_level=10,
+        ),
+    )
+
+    logs = notify.notify_low_stock(session=db, product_ids=[product.id])
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["model_name"] == "12mm Copper Elbow"
+    assert sample.payload["sku"] == product.sku
+    assert_no_financial_keys(sample.payload)
+
+
+def test_notify_override_pending_payload_carries_model_name(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decimal import Decimal
+
+    from app import crud
+    from app.models import (
+        OverrideState,
+        OverrideTargetKind,
+        PricingOverrideRequest,
+        ProductCreate,
+        TrackingMode,
+    )
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.OVERRIDE_PENDING)
+
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"NS-{uuid.uuid4().hex[:8]}",
+            model_name="12mm Copper Elbow",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb="10.00",
+            repair_price_thb="2.00",
+        ),
+    )
+    override = PricingOverrideRequest(
+        target_kind=OverrideTargetKind.SALE_LINE,
+        product_id=product.id,
+        default_price_thb=Decimal("10.00"),
+        requested_price_thb=Decimal("8.75"),
+        deviation_pct=Decimal("12.5"),
+        reason="customer discount",
+        state=OverrideState.PENDING,
+        created_by_user_id=admin.id,
+    )
+    db.add(override)
+    db.commit()
+    db.refresh(override)
+
+    logs = notify.notify_override_pending(session=db, override=override)
+    sample = next(log for log in logs if log.target_user_id == admin.id)
+    assert sample.payload["model_name"] == "12mm Copper Elbow"
+    assert sample.payload["sku"] == product.sku
+    assert_no_financial_keys(sample.payload)
+
+
+# --- message copy (2026-07-22 friendlier messages) ----------------------------
+
+
+def test_render_text_pull_short_is_labeled_lines() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.PULL_SHORT,
+        payload={
+            "pull_id": "the-pull-id",
+            "project_id": "the-project-id",
+            "project_name": "Riverside Tower",
+            "project_code": "PRJ-001",
+            "short_line_count": 2,
+        },
+    )
+    assert text == (
+        "⚠️ Project pull came up short\n"
+        "Project: Riverside Tower (PRJ-001)\n"
+        "Lines short: 2"
+    )
+    # ids are payload-only now
+    assert "the-pull-id" not in text
+
+
+def test_render_text_pull_fulfilled_names_the_project() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.PULL_FULFILLED,
+        payload={
+            "pull_id": "the-pull-id",
+            "project_id": "the-project-id",
+            "project_name": "Riverside Tower",
+            "project_code": "PRJ-001",
+        },
+    )
+    assert text == "✅ Project pull fulfilled\nProject: Riverside Tower (PRJ-001)"
+    assert "the-pull-id" not in text
+
+
+def test_render_text_low_stock_names_the_product() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.LOW_STOCK,
+        payload={
+            "product_id": "the-product-id",
+            "sku": "SKU-1234",
+            "model_name": "12mm Copper Elbow",
+            "on_hand": 3,
+            "min_stock_level": 10,
+        },
+    )
+    assert text == (
+        "📉 Low stock\nItem: 12mm Copper Elbow (SKU-1234)\nOn hand: 3 (minimum 10)"
+    )
+
+
+def test_render_text_override_pending_names_the_product() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.OVERRIDE_PENDING,
+        payload={
+            "override_id": "the-override-id",
+            "sku": "SKU-1234",
+            "model_name": "12mm Copper Elbow",
+            "deviation_pct": "12.5",
+        },
+    )
+    assert text == (
+        "🔔 Pricing override needs approval\n"
+        "Item: 12mm Copper Elbow (SKU-1234)\n"
+        "Deviation: 12.5%"
+    )
+    assert "the-override-id" not in text
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            NotificationEvent.PULL_SHORT,
+            {"project_id": "the-project-id", "short_line_count": 2},
+        ),
+        (NotificationEvent.PULL_FULFILLED, {"project_id": "the-project-id"}),
+        (
+            NotificationEvent.LOW_STOCK,
+            {"product_id": "the-product-id", "on_hand": 3, "min_stock_level": 10},
+        ),
+        (
+            NotificationEvent.OVERRIDE_PENDING,
+            {"override_id": "the-override-id", "deviation_pct": "12.5"},
+        ),
+    ],
+)
+def test_render_text_falls_back_to_id_when_row_is_gone(
+    event_type: NotificationEvent, payload: dict[str, object]
+) -> None:
+    """A deleted Project/Product leaves the name keys absent. The label must
+    degrade to the id and must never render the string "None"."""
+    text = notify._render_text(event_type=event_type, payload=payload)
+    assert "None" not in text
+    assert "unknown" not in text
+    fallback = (
+        payload.get("project_id")
+        or payload.get("product_id")
+        or payload.get("override_id")
+    )
+    assert str(fallback) in text
+
+
+def test_render_text_never_renders_none_for_missing_quantities() -> None:
+    """Every key absent — the last line of defence against "None" reaching a
+    user's phone."""
+    for event_type in (
+        NotificationEvent.PULL_SHORT,
+        NotificationEvent.PULL_FULFILLED,
+        NotificationEvent.LOW_STOCK,
+        NotificationEvent.OVERRIDE_PENDING,
+    ):
+        text = notify._render_text(event_type=event_type, payload={})
+        assert "None" not in text
+
+
+def test_render_text_still_rejects_an_unknown_event() -> None:
+    """Every new event must add an explicit, safe template — never a raw dump."""
+    with pytest.raises(NotImplementedError):
+        notify._render_text(
+            event_type="not-an-event",  # type: ignore[arg-type]
+            payload={"retail_price_thb": "999.00"},
+        )
+
+
+def test_render_sync_review_pending_plural() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.SYNC_REVIEW_PENDING,
+        payload={"total": 3, "stale": 1, "conflict": 2},
+    )
+    assert text == "⚠️ 3 offline actions need review\n2 conflicts, 1 stale"
+
+
+def test_render_sync_review_pending_singular() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.SYNC_REVIEW_PENDING,
+        payload={"total": 1, "stale": 0, "conflict": 1},
+    )
+    assert text == "⚠️ 1 offline action needs review\n1 conflict"
+
+
+def test_render_sync_review_pending_omits_zero_reason() -> None:
+    text = notify._render_text(
+        event_type=NotificationEvent.SYNC_REVIEW_PENDING,
+        payload={"total": 2, "stale": 2, "conflict": 0},
+    )
+    assert "conflict" not in text
+    assert text.endswith("2 stale")
+
+
+# --- sync-review producer -----------------------------------------------------
+
+
+def _ingest_pending(db: Session, reason: Any, submitted_by: uuid.UUID) -> None:
+    """Put one PENDING row in the queue. `submitted_by` must be a real user id
+    — the column carries an FK to user.id."""
+    from app import crud
+    from app.models import SyncReviewItemCreate
+
+    crud.create_sync_review_item(
+        session=db,
+        data=SyncReviewItemCreate(
+            idempotency_key=uuid.uuid4(),
+            mutation_kind="sale",
+            payload={"total_thb": "1200.00"},
+            reason=reason,
+        ),
+        submitted_by_user_id=submitted_by,
+    )
+
+
+def test_notify_sync_review_targets_admins_not_staff(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+    staff = _make_user(db, role=UserRole.YGN_STAFF)
+    _opt_in(db, staff, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.CONFLICT, admin.id)
+    logs = notify.notify_sync_review_pending(session=db)
+
+    targets = {log.target_user_id for log in logs}
+    assert admin.id in targets
+    assert staff.id not in targets
+
+
+def test_notify_sync_review_suppressed_inside_cooldown(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    first = notify.notify_sync_review_pending(session=db)
+    assert any(log.target_user_id == admin.id for log in first)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    second = notify.notify_sync_review_pending(session=db)
+    assert not any(log.target_user_id == admin.id for log in second)
+
+
+def test_notify_sync_review_sends_again_after_cooldown(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    notify.notify_sync_review_pending(session=db)
+
+    # Shrink the window rather than sleeping or back-dating a log row.
+    monkeypatch.setattr(notify, "SYNC_REVIEW_COOLDOWN_SECONDS", 0)
+    again = notify.notify_sync_review_pending(session=db)
+    assert any(log.target_user_id == admin.id for log in again)
+
+
+def test_notify_sync_review_cooldown_is_per_recipient(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    first_admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(
+        db, first_admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING
+    )
+
+    _ingest_pending(db, SyncReviewReason.CONFLICT, first_admin.id)
+    notify.notify_sync_review_pending(session=db)
+
+    # A second admin enrolls mid-burst — must still be reachable.
+    late_admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(
+        db, late_admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING
+    )
+
+    logs = notify.notify_sync_review_pending(session=db)
+    targets = {log.target_user_id for log in logs}
+    assert late_admin.id in targets
+    assert first_admin.id not in targets
+
+
+def test_notify_sync_review_failed_send_starts_cooldown(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A not-enrolled admin logs FAILED; that row must suppress the next
+    attempt, or every ingest writes another FAILED row forever (spec 3.3)."""
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(
+        db,
+        role=UserRole.BKK_ADMIN,
+        line_user_id=None,
+        telegram_chat_id=None,
+    )
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.STALE, admin.id)
+    first = notify.notify_sync_review_pending(session=db)
+    assert [log.status for log in first if log.target_user_id == admin.id] == [
+        NotificationStatus.FAILED
+    ]
+
+    second = notify.notify_sync_review_pending(session=db)
+    assert not any(log.target_user_id == admin.id for log in second)
+
+
+def test_notify_sync_review_payload_has_no_financial_keys(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models import SyncReviewReason
+
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: _resp(200))
+    admin = _make_user(db, role=UserRole.BKK_ADMIN)
+    _opt_in(db, admin, NotificationChannel.LINE, NotificationEvent.SYNC_REVIEW_PENDING)
+
+    _ingest_pending(db, SyncReviewReason.CONFLICT, admin.id)
+    logs = notify.notify_sync_review_pending(session=db)
+
+    assert logs
+    assert_no_financial_keys(logs[0].payload)
+    assert set(logs[0].payload) == {"total", "stale", "conflict"}

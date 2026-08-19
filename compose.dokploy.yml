@@ -87,6 +87,14 @@ services:
       - POSTGRES_APP_USER=${POSTGRES_APP_USER}
       - POSTGRES_APP_PASSWORD=${POSTGRES_APP_PASSWORD}
       - SENTRY_DSN=${SENTRY_DSN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME}
+      # This block is an allowlist: a setting absent here never reaches the
+      # container no matter what config.py declares. LINE_CHANNEL_ACCESS_TOKEN
+      # was missing until m039, so production never had a LINE token at all.
+      - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
+      - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
+      - LINE_BOT_BASIC_ID=${LINE_BOT_BASIC_ID}
     healthcheck:
       test:
         - CMD
