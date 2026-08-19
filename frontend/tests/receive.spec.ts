@@ -111,7 +111,7 @@ test.describe("Receive screen (admin)", () => {
       page.getByRole("cell", { name: serial, exact: true }),
     ).toBeVisible()
 
-    await page.getByRole("button", { name: "Receive" }).click()
+    await page.getByRole("button", { name: "Receive", exact: true }).click()
 
     // Received-units table renders; read the CastraNova barcode from the UI.
     await expect(
@@ -154,9 +154,9 @@ test.describe("Receive screen (admin)", () => {
     await page.getByRole("option", { name: supplier.name }).click()
 
     await page.getByLabel("Received qty", { exact: false }).fill(String(qty))
-    await page.getByLabel("Purchase cost (THB)").fill("100.00")
+    await page.getByLabel("Unit cost (THB)").fill("100.00")
 
-    await page.getByRole("button", { name: "Receive" }).click()
+    await page.getByRole("button", { name: "Receive", exact: true }).click()
 
     // Success toast confirms the batch landed; then assert on-hand via search.
     await expect(page.getByText(/Received batch/)).toBeVisible()

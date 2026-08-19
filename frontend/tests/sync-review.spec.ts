@@ -4,7 +4,7 @@ import { isResolvable } from "../src/lib/sync-review"
 
 // Pure-logic coverage for the admin sync-review queue (§6.7). Only PENDING
 // items can be resolved/discarded (mirrors the backend) — this gates the
-// Keep/Discard actions.
+// Discard action.
 
 test("isResolvable is true only for PENDING", () => {
   expect(isResolvable("PENDING")).toBe(true)

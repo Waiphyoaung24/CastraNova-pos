@@ -1,0 +1,162 @@
+import { ScanLine } from "lucide-react"
+import {
+  forwardRef,
+  type ReactNode,
+  useCallback,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react"
+
+import { CameraScanFallback } from "@/components/CameraScanFallback"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+
+export interface ScanFieldHandle {
+  focus: () => void
+}
+
+interface ScanFieldProps {
+  /** Fires on a completed scan/submit: wedge Enter, manual Enter, camera
+   * decode, or the submit button. Receives the trimmed code. */
+  onScan: (code: string) => void
+  /** Associates the input with an external <Label htmlFor>. */
+  id?: string
+  /** Optional caption rendered above the input (with a scan icon). */
+  label?: string
+  /** Accessible name when there is no visible `label` / external label. */
+  ariaLabel?: string
+  placeholder?: string
+  /** Controlled value (forms). Omit for an uncontrolled field. */
+  value?: string
+  onValueChange?: (value: string) => void
+  /** Clear and refocus the field after each scan (rapid-scan flows). */
+  clearOnScan?: boolean
+  /** Renders a submit button with this label (e.g. "Search"). */
+  submitLabel?: string
+  /** Show the "Scan with camera" fallback. Default true. */
+  camera?: boolean
+  autoFocus?: boolean
+  /** Optional status node rendered below (callers wire their own aria-live). */
+  status?: ReactNode
+  disabled?: boolean
+}
+
+/**
+ * Reusable scan layout: a single field staff can type into, scan with a
+ * Bluetooth/HID wedge, or scan with the camera. Typing-first — a normal input
+ * whose value is the source of truth; Enter / the submit button / a camera
+ * decode all commit via `onScan`. Wedge scanners work because they type fast
+ * and terminate with Enter.
+ */
+export const ScanField = forwardRef<ScanFieldHandle, ScanFieldProps>(
+  function ScanField(
+    {
+      onScan,
+      id,
+      label,
+      ariaLabel,
+      placeholder = "Scan or type a barcode…",
+      value,
+      onValueChange,
+      clearOnScan = false,
+      submitLabel,
+      camera = true,
+      autoFocus = true,
+      status,
+      disabled = false,
+    },
+    ref,
+  ) {
+    const inputRef = useRef<HTMLInputElement>(null)
+    const generatedId = useId()
+    const inputId = id ?? generatedId
+    const [internal, setInternal] = useState("")
+
+    const isControlled = value !== undefined
+    const current = isControlled ? value : internal
+
+    useImperativeHandle(ref, () => ({
+      focus: () => inputRef.current?.focus(),
+    }))
+
+    const setCurrent = (next: string) => {
+      if (!isControlled) setInternal(next)
+      onValueChange?.(next)
+    }
+
+    const submit = (raw: string) => {
+      const code = raw.trim()
+      if (code === "") return
+      onScan(code)
+      if (clearOnScan) {
+        setCurrent("")
+        inputRef.current?.focus()
+      }
+    }
+
+    // Stable handler for the camera so an open scanner isn't torn down and
+    // restarted on every parent re-render (e.g. Sale's query polling).
+    const submitRef = useRef(submit)
+    submitRef.current = submit
+    const handleCameraScan = useCallback(
+      (code: string) => submitRef.current(code),
+      [],
+    )
+
+    return (
+      <div className="space-y-2">
+        {label ? (
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <ScanLine
+              className="text-muted-foreground size-4"
+              aria-hidden="true"
+            />
+            {label}
+          </p>
+        ) : null}
+
+        <div className="flex gap-2">
+          <Input
+            ref={inputRef}
+            id={inputId}
+            type="text"
+            autoComplete="off"
+            autoFocus={autoFocus}
+            aria-label={ariaLabel ?? "Scan barcode"}
+            disabled={disabled}
+            placeholder={placeholder}
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                // Stop the wedge's CR from submitting a surrounding form.
+                e.preventDefault()
+                submit(current)
+              }
+            }}
+            className="w-full sm:w-80"
+          />
+          {submitLabel ? (
+            <Button
+              type="button"
+              disabled={disabled || current.trim() === ""}
+              onClick={() => submit(current)}
+            >
+              {submitLabel}
+            </Button>
+          ) : null}
+        </div>
+
+        {camera ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <CameraScanFallback onScan={handleCameraScan} />
+          </div>
+        ) : null}
+
+        {status}
+      </div>
+    )
+  },
+)

@@ -1,0 +1,51 @@
+services:
+  db:
+    restart: "no"
+  prestart:
+    restart: "no"
+  backend:
+    restart: "no"
+    # Serve the live worktree source (default fastapi CMD from the image).
+    volumes:
+      - ./backend:/app/backend
+    environment:
+      SMTP_HOST: "mailcatcher"
+      SMTP_PORT: "1025"
+      # Mailcatcher speaks plain SMTP on 1025. .env ships SMTP_TLS=True, and
+      # compose.override.yml (which turns it off for dev) is NOT auto-loaded
+      # when compose files are passed with explicit -f, so it must be repeated
+      # here — otherwise every send fails STARTTLS and the whole
+      # reset-password suite times out waiting for mail that never arrives.
+      SMTP_TLS: "false"
+      RATE_LIMIT_ENABLED: "false"
+
+  mailcatcher:
+    image: schickling/mailcatcher
+
+  playwright:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.playwright
+      args:
+        - VITE_API_URL=http://backend:8000
+        - NODE_ENV=production
+    ipc: host
+    env_file:
+      - .env
+    environment:
+      - VITE_API_URL=http://backend:8000
+      - MAILCATCHER_HOST=http://mailcatcher:1080
+      - CI=true
+      # The DB reset in global.setup.ts shells out to `docker compose` (host
+      # only). Inside this container there is no docker CLI, so skip it — the
+      # isolated DB is reseeded by `prestart` before the run instead.
+      - E2E_SKIP_DB_RESET=1
+    depends_on:
+      - backend
+      - mailcatcher
+
+networks:
+  # Isolated E2E stack — no host ports published, own network. Cannot collide
+  # with the running dev stack on 5173/8000/5432.
+  traefik-public:
+    external: false

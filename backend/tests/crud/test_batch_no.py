@@ -1,12 +1,14 @@
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app import crud
 from app.core.config import settings
 from app.models import (
+    Location,
     PartBatch,
     Product,
     ProductCreate,
@@ -150,3 +152,59 @@ def test_next_batch_no_isolated_per_product_with_shared_prefix(
         session=db, product_id=product_a.id, sku=sku_a, today=today
     )
     assert a_no == f"20260604-{sku_a}-001"  # not inflated by product B
+
+
+# --- Explicit received_at (receive date picker, design 2026-07-25) ------------
+
+
+def _seed_locations(db: Session) -> None:
+    if not db.exec(select(Location).where(Location.code == "YGN_WH")).first():
+        crud.seed_locations(session=db)
+
+
+def test_receive_quantity_backdates_received_at_and_batch_no(
+    db: Session, quantity_setup: tuple[Product, Supplier, User]
+) -> None:
+    """An explicit received_at drives BOTH the stored timestamp and the
+    YYYYMMDD prefix of batch_no, so the label matches the arrival date."""
+    product, supplier, user = quantity_setup
+    _seed_locations(db)
+    backdated = datetime(2026, 7, 10, 14, 32, tzinfo=timezone.utc)
+
+    batch = crud.receive_quantity(
+        session=db,
+        product_id=product.id,
+        supplier_id=supplier.id,
+        received_qty=10,
+        purchase_cost_thb=Decimal("5.00"),
+        idempotency_key=uuid.uuid4(),
+        received_by_user_id=user.id,
+        received_at=backdated,
+    )
+
+    assert batch.received_at == backdated
+    assert batch.batch_no == f"20260710-{product.sku}-001"
+
+
+def test_receive_quantity_without_received_at_uses_now(
+    db: Session, quantity_setup: tuple[Product, Supplier, User]
+) -> None:
+    """Omitting received_at reproduces the pre-existing behaviour: the batch is
+    stamped ~now and numbered with today's date."""
+    product, supplier, user = quantity_setup
+    _seed_locations(db)
+    before = datetime.now(timezone.utc)
+
+    batch = crud.receive_quantity(
+        session=db,
+        product_id=product.id,
+        supplier_id=supplier.id,
+        received_qty=10,
+        purchase_cost_thb=Decimal("5.00"),
+        idempotency_key=uuid.uuid4(),
+        received_by_user_id=user.id,
+    )
+
+    assert before - timedelta(seconds=5) <= batch.received_at
+    assert batch.received_at <= datetime.now(timezone.utc) + timedelta(seconds=5)
+    assert batch.batch_no.startswith(date.today().strftime("%Y%m%d"))

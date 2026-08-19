@@ -1,7 +1,6 @@
 import type {
-  ServiceTicketClose,
-  ServiceTicketCreate,
   ServiceTicketPartCreate,
+  ServiceTicketRecordRequest,
 } from "@/client/types.gen"
 import type { ScanLookupResult } from "@/hooks/useScanLookup"
 
@@ -102,17 +101,13 @@ export function ticketPartsSubtotalThb(lines: TicketPartLine[]): number {
   return lines.reduce((sum, l) => sum + l.unitPriceThb * l.quantity, 0)
 }
 
-/** The three payloads the close orchestration sends, in order. */
-export type TicketSubmission = {
-  open: ServiceTicketCreate
-  parts: ServiceTicketPartCreate[]
-  close: ServiceTicketClose
-}
+/** The single atomic record payload sent on "Close ticket". */
+export type TicketSubmission = ServiceTicketRecordRequest
 
 /**
- * Shape the open/parts/close payloads. Blank `notes`/`resolution` become null;
- * one parts payload per cart line. Price is never sent — the backend defaults to
- * the product's repair price.
+ * Shape the atomic record request. Blank `notes`/`resolution` become null; one
+ * parts entry per cart line. Price is never sent — the backend defaults to the
+ * product's repair price (or an approved override).
  */
 export function buildTicketSubmission(
   lines: TicketPartLine[],
@@ -123,14 +118,16 @@ export function buildTicketSubmission(
   idempotencyKey: string,
 ): TicketSubmission {
   const orNull = (s: string): string | null => (s.trim() === "" ? null : s)
+  const parts: ServiceTicketPartCreate[] = lines.map((l) => ({
+    sku: l.sku,
+    quantity: l.quantity,
+  }))
   return {
-    open: {
-      customer_id: customerId,
-      issue,
-      notes: orNull(notes),
-      idempotency_key: idempotencyKey,
-    },
-    parts: lines.map((l) => ({ sku: l.sku, quantity: l.quantity })),
-    close: { resolution: orNull(resolution) },
+    customer_id: customerId,
+    issue,
+    notes: orNull(notes),
+    resolution: orNull(resolution),
+    idempotency_key: idempotencyKey,
+    parts,
   }
 }

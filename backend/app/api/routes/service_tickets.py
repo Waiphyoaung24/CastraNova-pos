@@ -6,11 +6,9 @@ from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_user
 from app.models import (
     ServiceTicket,
-    ServiceTicketClose,
-    ServiceTicketCreate,
-    ServiceTicketPartCreate,
     ServiceTicketPartPublic,
     ServiceTicketPublic,
+    ServiceTicketRecordRequest,
 )
 from app.services import notify
 
@@ -31,18 +29,34 @@ def _to_public(*, session: SessionDep, ticket: ServiceTicket) -> ServiceTicketPu
     )
 
 
-@router.post("", response_model=ServiceTicketPublic)
-def open_service_ticket(
-    *, session: SessionDep, current_user: CurrentUser, payload: ServiceTicketCreate
+# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
+# authenticated staff/admin may record a service ticket — the ~5-person warehouse
+# team works shifts over shared objects (PRD §5). Ownership scoping was considered
+# and rejected. No derived financials are exposed on this surface.
+@router.post("/record", response_model=ServiceTicketPublic)
+def record_service_ticket(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    payload: ServiceTicketRecordRequest,
 ) -> ServiceTicketPublic:
-    ticket = crud.open_service_ticket(
+    """Record a maintenance ticket in one atomic, idempotent call: open + parts +
+    FIFO-consume + close (FR-008). Offline-replay-safe on idempotency_key."""
+    ticket = crud.record_service_ticket(
         session=session,
         customer_id=payload.customer_id,
         issue=payload.issue,
         notes=payload.notes,
+        resolution=payload.resolution,
+        parts=payload.parts,
         idempotency_key=payload.idempotency_key,
-        created_by_user_id=current_user.id,
+        actor_user_id=current_user.id,
     )
+    # FR-016: alert when consumption dropped a SKU below its low-stock threshold.
+    crossed = crud.pop_low_stock_crossed(session)
+    if crossed:
+        background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, ticket=ticket)
 
 
@@ -57,54 +71,4 @@ def read_service_ticket(
     ticket = crud.get_service_ticket(session=session, ticket_id=ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Service ticket not found")
-    return _to_public(session=session, ticket=ticket)
-
-
-# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
-# authenticated staff/admin may act on any service ticket — the ~5-person
-# warehouse team works shifts over shared objects (PRD §5). Ownership scoping
-# was considered and rejected. No derived financials are exposed on this
-# surface.
-@router.post(
-    "/{ticket_id}/parts",
-    response_model=ServiceTicketPartPublic,
-    dependencies=[Depends(get_current_user)],
-)
-def add_service_ticket_part(
-    *, session: SessionDep, ticket_id: uuid.UUID, payload: ServiceTicketPartCreate
-) -> ServiceTicketPartPublic:
-    part = crud.add_service_ticket_part(
-        session=session,
-        ticket_id=ticket_id,
-        sku=payload.sku,
-        quantity=payload.quantity,
-        pricing_override_request_id=payload.pricing_override_request_id,
-    )
-    return ServiceTicketPartPublic.model_validate(part)
-
-
-# Shared-team access (recorded decision D3, hardening spec 2026-06-11): any
-# authenticated staff/admin may act on any service ticket — the ~5-person
-# warehouse team works shifts over shared objects (PRD §5). Ownership scoping
-# was considered and rejected. No derived financials are exposed on this
-# surface.
-@router.post("/{ticket_id}/close", response_model=ServiceTicketPublic)
-def close_service_ticket(
-    *,
-    session: SessionDep,
-    current_user: CurrentUser,
-    background_tasks: BackgroundTasks,
-    ticket_id: uuid.UUID,
-    payload: ServiceTicketClose,
-) -> ServiceTicketPublic:
-    ticket = crud.close_service_ticket(
-        session=session,
-        ticket_id=ticket_id,
-        actor_user_id=current_user.id,
-        resolution=payload.resolution,
-    )
-    # FR-016: alert when consumption dropped a SKU below its low-stock threshold.
-    crossed = crud.pop_low_stock_crossed(session)
-    if crossed:
-        background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, ticket=ticket)

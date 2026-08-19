@@ -117,11 +117,96 @@ export const AuditEntryPublicSchema = {
                 }
             ],
             title: 'Notes'
+        },
+        product_model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Model Name'
+        },
+        product_sku: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Sku'
+        },
+        unit_castranova_barcode: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Castranova Barcode'
+        },
+        unit_supplier_serial: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Supplier Serial'
+        },
+        customer_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Customer Name'
+        },
+        actor_full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Full Name'
         }
     },
     type: 'object',
     required: ['id', 'ledger', 'event_type', 'occurred_at', 'actor_user_id', 'quantity'],
     title: 'AuditEntryPublic'
+} as const;
+
+export const AuditPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/AuditEntryPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'AuditPublic'
 } as const;
 
 export const BatchDrillRowSchema = {
@@ -138,10 +223,21 @@ export const BatchDrillRowSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Received At'
+        },
+        supplier: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier'
         }
     },
     type: 'object',
-    required: ['batch_no', 'remaining_qty', 'received_at'],
+    required: ['batch_no', 'remaining_qty', 'received_at', 'supplier'],
     title: 'BatchDrillRow'
 } as const;
 
@@ -249,66 +345,6 @@ export const ChannelSchema = {
     type: 'string',
     enum: ['SALE', 'MAINTENANCE', 'PROJECT'],
     title: 'Channel'
-} as const;
-
-export const ChannelMarginReportSchema = {
-    properties: {
-        month: {
-            type: 'string',
-            title: 'Month'
-        },
-        channels: {
-            items: {
-                '$ref': '#/components/schemas/ChannelMarginRow'
-            },
-            type: 'array',
-            title: 'Channels'
-        },
-        total_revenue_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Revenue Thb'
-        },
-        total_cogs_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Cogs Thb'
-        },
-        total_margin_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Total Margin Thb'
-        }
-    },
-    type: 'object',
-    required: ['month', 'channels', 'total_revenue_thb', 'total_cogs_thb', 'total_margin_thb'],
-    title: 'ChannelMarginReport'
-} as const;
-
-export const ChannelMarginRowSchema = {
-    properties: {
-        channel: {
-            '$ref': '#/components/schemas/Channel'
-        },
-        revenue_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Revenue Thb'
-        },
-        cogs_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Cogs Thb'
-        },
-        margin_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
-            title: 'Margin Thb'
-        }
-    },
-    type: 'object',
-    required: ['channel', 'revenue_thb', 'cogs_thb', 'margin_thb'],
-    title: 'ChannelMarginRow'
 } as const;
 
 export const CustomerCreateSchema = {
@@ -463,6 +499,23 @@ export const CustomerDashboardStaffPublicSchema = {
     title: 'CustomerDashboardStaffPublic'
 } as const;
 
+export const CustomerOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name'],
+    title: 'CustomerOption'
+} as const;
+
 export const CustomerPublicSchema = {
     properties: {
         name: {
@@ -592,70 +645,23 @@ export const CustomerUpdateSchema = {
     title: 'CustomerUpdate'
 } as const;
 
-export const ExchangeRatesPublicSchema = {
+export const CustomersPublicSchema = {
     properties: {
-        usd_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
-            title: 'Usd Thb'
+        data: {
+            items: {
+                '$ref': '#/components/schemas/CustomerPublic'
+            },
+            type: 'array',
+            title: 'Data'
         },
-        mmk_thb: {
-            type: 'string',
-            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
-            title: 'Mmk Thb'
-        },
-        updated_at: {
-            anyOf: [
-                {
-                    type: 'string',
-                    format: 'date-time'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Updated At'
+        count: {
+            type: 'integer',
+            title: 'Count'
         }
     },
     type: 'object',
-    required: ['usd_thb', 'mmk_thb'],
-    title: 'ExchangeRatesPublic'
-} as const;
-
-export const ExchangeRatesUpdateSchema = {
-    properties: {
-        usd_thb: {
-            anyOf: [
-                {
-                    type: 'number',
-                    maximum: 1000000,
-                    minimum: 0
-                },
-                {
-                    type: 'string',
-                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
-                }
-            ],
-            title: 'Usd Thb'
-        },
-        mmk_thb: {
-            anyOf: [
-                {
-                    type: 'number',
-                    maximum: 1000000,
-                    minimum: 0
-                },
-                {
-                    type: 'string',
-                    pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$'
-                }
-            ],
-            title: 'Mmk Thb'
-        }
-    },
-    type: 'object',
-    required: ['usd_thb', 'mmk_thb'],
-    title: 'ExchangeRatesUpdate'
+    required: ['data', 'count'],
+    title: 'CustomersPublic'
 } as const;
 
 export const HTTPValidationErrorSchema = {
@@ -737,6 +743,31 @@ export const HoldingPeriodRowSchema = {
     title: 'HoldingPeriodRow'
 } as const;
 
+export const LineConnectResponseSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        deep_link: {
+            type: 'string',
+            title: 'Deep Link'
+        },
+        qr_code_data_uri: {
+            type: 'string',
+            title: 'Qr Code Data Uri'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        }
+    },
+    type: 'object',
+    required: ['code', 'deep_link', 'qr_code_data_uri', 'expires_at'],
+    title: 'LineConnectResponse'
+} as const;
+
 export const LineStateSchema = {
     type: 'string',
     enum: ['PENDING', 'FULFILLED', 'SHORT', 'CANCELLED'],
@@ -775,6 +806,90 @@ export const LowStockItemPublicSchema = {
     title: 'LowStockItemPublic'
 } as const;
 
+export const MarginBreakdownReportSchema = {
+    properties: {
+        month: {
+            type: 'string',
+            title: 'Month'
+        },
+        group_by: {
+            '$ref': '#/components/schemas/MarginDimension'
+        },
+        channel: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/Channel'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        rows: {
+            items: {
+                '$ref': '#/components/schemas/MarginBreakdownRow'
+            },
+            type: 'array',
+            title: 'Rows'
+        },
+        total_revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Revenue Thb'
+        },
+        total_cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Cogs Thb'
+        },
+        total_margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Total Margin Thb'
+        }
+    },
+    type: 'object',
+    required: ['month', 'group_by', 'channel', 'rows', 'total_revenue_thb', 'total_cogs_thb', 'total_margin_thb'],
+    title: 'MarginBreakdownReport'
+} as const;
+
+export const MarginBreakdownRowSchema = {
+    properties: {
+        key: {
+            type: 'string',
+            title: 'Key'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        revenue_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Revenue Thb'
+        },
+        cogs_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Cogs Thb'
+        },
+        margin_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*(?:\\d{0,12}|(?=[\\d.]{1,15}0*$)\\d{0,12}\\.\\d{0,2}0*$)',
+            title: 'Margin Thb'
+        }
+    },
+    type: 'object',
+    required: ['key', 'label', 'revenue_thb', 'cogs_thb', 'margin_thb'],
+    title: 'MarginBreakdownRow'
+} as const;
+
+export const MarginDimensionSchema = {
+    type: 'string',
+    enum: ['channel', 'product', 'customer', 'project'],
+    title: 'MarginDimension'
+} as const;
+
 export const MessageSchema = {
     properties: {
         message: {
@@ -809,7 +924,7 @@ export const MinStockLevelUpdateSchema = {
 
 export const MovementTypeSchema = {
     type: 'string',
-    enum: ['RECEIVED', 'SOLD', 'MAINTENANCE_OUT', 'PROJECT_OUT', 'ADJUSTED_OUT'],
+    enum: ['RECEIVED', 'SOLD', 'MAINTENANCE_OUT', 'PROJECT_OUT', 'ADJUSTED_OUT', 'RETURNED'],
     title: 'MovementType'
 } as const;
 
@@ -833,21 +948,28 @@ export const NewPasswordSchema = {
 
 export const NotificationChannelSchema = {
     type: 'string',
-    enum: ['LINE', 'VIBER'],
+    enum: ['LINE', 'VIBER', 'TELEGRAM'],
     title: 'NotificationChannel'
 } as const;
 
 export const NotificationEventSchema = {
     type: 'string',
-    enum: ['LOW_STOCK', 'OVERRIDE_PENDING', 'PULL_FULFILLED', 'PULL_SHORT'],
+    enum: ['LOW_STOCK', 'OVERRIDE_PENDING', 'PULL_FULFILLED', 'PULL_SHORT', 'SYNC_REVIEW_PENDING'],
     title: 'NotificationEvent'
 } as const;
 
 export const NotificationPreferencePublicSchema = {
     properties: {
         id: {
-            type: 'string',
-            format: 'uuid',
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
             title: 'Id'
         },
         channel: {
@@ -859,10 +981,14 @@ export const NotificationPreferencePublicSchema = {
         enabled: {
             type: 'boolean',
             title: 'Enabled'
+        },
+        channel_connected: {
+            type: 'boolean',
+            title: 'Channel Connected'
         }
     },
     type: 'object',
-    required: ['id', 'channel', 'event_type', 'enabled'],
+    required: ['id', 'channel', 'event_type', 'enabled', 'channel_connected'],
     title: 'NotificationPreferencePublic'
 } as const;
 
@@ -1170,6 +1296,17 @@ export const PriceChangePublicSchema = {
                 }
             ],
             title: 'Changed At'
+        },
+        changed_by_full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Changed By Full Name'
         }
     },
     type: 'object',
@@ -1241,6 +1378,10 @@ export const PricingOverridePublicSchema = {
             format: 'uuid',
             title: 'Product Id'
         },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
         default_price_thb: {
             type: 'string',
             pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
@@ -1299,8 +1440,27 @@ export const PricingOverridePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'target_kind', 'product_id', 'default_price_thb', 'requested_price_thb', 'deviation_pct', 'reason', 'state', 'created_by_user_id', 'created_at', 'decided_by_user_id', 'decided_at'],
+    required: ['id', 'target_kind', 'product_id', 'product_sku', 'default_price_thb', 'requested_price_thb', 'deviation_pct', 'reason', 'state', 'created_by_user_id', 'created_at', 'decided_by_user_id', 'decided_at'],
     title: 'PricingOverridePublic'
+} as const;
+
+export const PricingOverridesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/PricingOverridePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'PricingOverridesPublic'
 } as const;
 
 export const PrivateUserCreateSchema = {
@@ -1430,6 +1590,44 @@ export const ProductCreateSchema = {
     title: 'ProductCreate'
 } as const;
 
+export const ProductOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sku: {
+            type: 'string',
+            title: 'Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode'
+        },
+        retail_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Retail Price Thb'
+        },
+        repair_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Repair Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sku', 'model_name', 'tracking_mode', 'retail_price_thb', 'repair_price_thb'],
+    title: 'ProductOption',
+    description: `Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+receive/tickets/pulls product selection). Omits \`specs\` (JSONB) and admin-only
+catalog fields (brand, category, default_min_stock_level); prices are included
+because GET /products already exposes them to the same authenticated audience.`
+} as const;
+
 export const ProductPublicSchema = {
     properties: {
         sku: {
@@ -1512,6 +1710,11 @@ export const ProductPublicSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Id'
+        },
+        is_fresh: {
+            type: 'boolean',
+            title: 'Is Fresh',
+            default: false
         }
     },
     type: 'object',
@@ -1519,8 +1722,38 @@ export const ProductPublicSchema = {
     title: 'ProductPublic'
 } as const;
 
+export const ProductPurchaseCostSchema = {
+    properties: {
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        latest_purchase_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Latest Purchase Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['product_id', 'latest_purchase_cost_thb'],
+    title: 'ProductPurchaseCost'
+} as const;
+
 export const ProductUpdateSchema = {
     properties: {
+        sku: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sku'
+        },
         model_name: {
             anyOf: [
                 {
@@ -1636,6 +1869,92 @@ export const ProductUpdateSchema = {
     title: 'ProductUpdate'
 } as const;
 
+export const ProductsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProductPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProductsPublic'
+} as const;
+
+export const ProjectConsumptionRowPublicSchema = {
+    properties: {
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
+        unit_serial: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Serial'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        },
+        project_pull_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Pull Id'
+        },
+        total_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cost Thb'
+        },
+        draws: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionDrawAdminPublic'
+            },
+            type: 'array',
+            title: 'Draws'
+        }
+    },
+    type: 'object',
+    required: ['line_kind', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'quantity', 'occurred_at', 'project_pull_id', 'total_cost_thb', 'draws'],
+    title: 'ProjectConsumptionRowPublic',
+    description: `One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+is physically absent from the staff payload.
+
+Reuses SkuConsumptionDrawAdminPublic for \`draws\`: a FIFO batch draw is the
+same concept here as in the SKU consumption history (FR-015).`
+} as const;
+
 export const ProjectCreateSchema = {
     properties: {
         code: {
@@ -1730,10 +2049,17 @@ export const ProjectDashboardAdminPublicSchema = {
             type: 'string',
             pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
             title: 'Consumed Cost Thb'
+        },
+        consumed_items: {
+            items: {
+                '$ref': '#/components/schemas/ProjectConsumptionRowPublic'
+            },
+            type: 'array',
+            title: 'Consumed Items'
         }
     },
     type: 'object',
-    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb'],
+    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb', 'consumed_items'],
     title: 'ProjectDashboardAdminPublic'
 } as const;
 
@@ -1753,6 +2079,27 @@ export const ProjectDashboardStaffPublicSchema = {
     type: 'object',
     required: ['project', 'pulls'],
     title: 'ProjectDashboardStaffPublic'
+} as const;
+
+export const ProjectOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'code', 'name'],
+    title: 'ProjectOption'
 } as const;
 
 export const ProjectPublicSchema = {
@@ -1947,6 +2294,14 @@ export const ProjectPullLinePublicSchema = {
             format: 'uuid',
             title: 'Product Id'
         },
+        product_sku: {
+            type: 'string',
+            title: 'Product Sku'
+        },
+        model_name: {
+            type: 'string',
+            title: 'Model Name'
+        },
         unit_serial: {
             anyOf: [
                 {
@@ -1978,7 +2333,7 @@ export const ProjectPullLinePublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'line_kind', 'product_id', 'unit_serial', 'requested_qty', 'fulfilled_qty', 'line_state'],
+    required: ['id', 'line_kind', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'requested_qty', 'fulfilled_qty', 'line_state'],
     title: 'ProjectPullLinePublic'
 } as const;
 
@@ -2100,6 +2455,25 @@ export const ProjectPullStateSchema = {
     type: 'string',
     enum: ['PENDING', 'FULFILLED', 'SHORT', 'CANCELLED'],
     title: 'ProjectPullState'
+} as const;
+
+export const ProjectPullsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProjectPullPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProjectPullsPublic'
 } as const;
 
 export const ProjectStaffPublicSchema = {
@@ -2318,6 +2692,25 @@ export const ProjectUpdateSchema = {
     title: 'ProjectUpdate'
 } as const;
 
+export const ProjectsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ProjectPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ProjectsPublic'
+} as const;
+
 export const ReceivePieceSchema = {
     properties: {
         supplier_serial: {
@@ -2417,6 +2810,18 @@ export const ReceiveQuantityRequestSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Idempotency Key'
+        },
+        received_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received Date'
         }
     },
     type: 'object',
@@ -2449,6 +2854,18 @@ export const ReceiveSerializedRequestSchema = {
             type: 'string',
             format: 'uuid',
             title: 'Idempotency Key'
+        },
+        received_date: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Received Date'
         }
     },
     type: 'object',
@@ -2469,6 +2886,116 @@ export const ReceiveSerializedResponseSchema = {
     type: 'object',
     required: ['units'],
     title: 'ReceiveSerializedResponse'
+} as const;
+
+export const ReturnableLinePublicSchema = {
+    properties: {
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        product_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Product Id'
+        },
+        unit_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Unit Id'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        quantity_sold: {
+            type: 'integer',
+            title: 'Quantity Sold'
+        },
+        quantity_returned: {
+            type: 'integer',
+            title: 'Quantity Returned'
+        },
+        quantity_returnable: {
+            type: 'integer',
+            title: 'Quantity Returnable'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['sale_line_id', 'line_kind', 'product_id', 'unit_id', 'label', 'quantity_sold', 'quantity_returned', 'quantity_returnable', 'unit_price_thb'],
+    title: 'ReturnableLinePublic'
+} as const;
+
+export const ReturnableSalePublicSchema = {
+    properties: {
+        sale_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Id'
+        },
+        sold_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Sold At'
+        },
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        customer_name: {
+            type: 'string',
+            title: 'Customer Name'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/ReturnableLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['sale_id', 'sold_at', 'customer_id', 'customer_name', 'lines'],
+    title: 'ReturnableSalePublic'
+} as const;
+
+export const ReturnableSalesPublicSchema = {
+    properties: {
+        sales: {
+            items: {
+                '$ref': '#/components/schemas/ReturnableSalePublic'
+            },
+            type: 'array',
+            title: 'Sales'
+        }
+    },
+    type: 'object',
+    required: ['sales'],
+    title: 'ReturnableSalesPublic'
 } as const;
 
 export const SaleCreateRequestSchema = {
@@ -2699,6 +3226,135 @@ export const SalePublicSchema = {
     title: 'SalePublic'
 } as const;
 
+export const SaleReturnCreateRequestSchema = {
+    properties: {
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        reason: {
+            type: 'string',
+            maxLength: 512,
+            minLength: 1,
+            title: 'Reason'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleReturnLineInput'
+            },
+            type: 'array',
+            maxItems: 100,
+            minItems: 1,
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['idempotency_key', 'reason', 'lines'],
+    title: 'SaleReturnCreateRequest'
+} as const;
+
+export const SaleReturnLineInputSchema = {
+    properties: {
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            maximum: 1000000,
+            exclusiveMinimum: 0,
+            title: 'Quantity',
+            default: 1
+        }
+    },
+    type: 'object',
+    required: ['sale_line_id'],
+    title: 'SaleReturnLineInput'
+} as const;
+
+export const SaleReturnLinePublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        },
+        cogs_restored_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Cogs Restored Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_line_id', 'quantity', 'unit_price_thb', 'cogs_restored_thb'],
+    title: 'SaleReturnLinePublic'
+} as const;
+
+export const SaleReturnPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Id'
+        },
+        reason: {
+            type: 'string',
+            title: 'Reason'
+        },
+        returned_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Returned At'
+        },
+        total_refund_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Refund Thb'
+        },
+        total_cogs_restored_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cogs Restored Thb'
+        },
+        created_by_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Created By User Id'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleReturnLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_id', 'reason', 'returned_at', 'total_refund_thb', 'total_cogs_restored_thb', 'created_by_user_id', 'lines'],
+    title: 'SaleReturnPublic'
+} as const;
+
 export const SaleStaffPublicSchema = {
     properties: {
         id: {
@@ -2831,6 +3487,61 @@ export const SerialMovementPublicSchema = {
                 }
             ],
             title: 'Notes'
+        },
+        from_location_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'From Location Name'
+        },
+        to_location_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'To Location Name'
+        },
+        actor_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Name'
+        },
+        reference_kind: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reference Kind'
+        },
+        reference_label: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reference Label'
         }
     },
     type: 'object',
@@ -2871,61 +3582,6 @@ export const SerialSearchResultSchema = {
     type: 'object',
     required: ['castranova_barcode', 'product_id', 'sku', 'supplier_serial', 'current_state', 'movements'],
     title: 'SerialSearchResult'
-} as const;
-
-export const ServiceTicketCloseSchema = {
-    properties: {
-        resolution: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 512
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Resolution'
-        }
-    },
-    type: 'object',
-    title: 'ServiceTicketClose'
-} as const;
-
-export const ServiceTicketCreateSchema = {
-    properties: {
-        customer_id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Customer Id'
-        },
-        issue: {
-            type: 'string',
-            maxLength: 512,
-            minLength: 1,
-            title: 'Issue'
-        },
-        notes: {
-            anyOf: [
-                {
-                    type: 'string',
-                    maxLength: 512
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Notes'
-        },
-        idempotency_key: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Idempotency Key'
-        }
-    },
-    type: 'object',
-    required: ['customer_id', 'issue', 'idempotency_key'],
-    title: 'ServiceTicketCreate'
 } as const;
 
 export const ServiceTicketPartCreateSchema = {
@@ -3054,6 +3710,95 @@ export const ServiceTicketPublicSchema = {
     title: 'ServiceTicketPublic'
 } as const;
 
+export const ServiceTicketRecordRequestSchema = {
+    properties: {
+        customer_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Customer Id'
+        },
+        issue: {
+            type: 'string',
+            maxLength: 512,
+            minLength: 1,
+            title: 'Issue'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        resolution: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Resolution'
+        },
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        parts: {
+            items: {
+                '$ref': '#/components/schemas/ServiceTicketPartCreate'
+            },
+            type: 'array',
+            title: 'Parts'
+        }
+    },
+    type: 'object',
+    required: ['customer_id', 'issue', 'idempotency_key'],
+    title: 'ServiceTicketRecordRequest'
+} as const;
+
+export const SkuBatchAdminPublicSchema = {
+    properties: {
+        batch_no: {
+            type: 'string',
+            title: 'Batch No'
+        },
+        received_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Received At'
+        },
+        received_qty: {
+            type: 'integer',
+            title: 'Received Qty'
+        },
+        remaining_qty: {
+            type: 'integer',
+            title: 'Remaining Qty'
+        },
+        is_adjustment: {
+            type: 'boolean',
+            title: 'Is Adjustment'
+        },
+        purchase_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Purchase Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['batch_no', 'received_at', 'received_qty', 'remaining_qty', 'is_adjustment', 'purchase_cost_thb'],
+    title: 'SkuBatchAdminPublic'
+} as const;
+
 export const SkuBatchPublicSchema = {
     properties: {
         batch_no: {
@@ -3083,6 +3828,254 @@ export const SkuBatchPublicSchema = {
     title: 'SkuBatchPublic'
 } as const;
 
+export const SkuConsumptionDrawAdminPublicSchema = {
+    properties: {
+        batch_no: {
+            type: 'string',
+            title: 'Batch No'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Cost Thb'
+        },
+        total_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cost Thb'
+        }
+    },
+    type: 'object',
+    required: ['batch_no', 'quantity', 'unit_cost_thb', 'total_cost_thb'],
+    title: 'SkuConsumptionDrawAdminPublic',
+    description: 'One FIFO batch draw inside a consumption event — ADMIN only (cost).'
+} as const;
+
+export const SkuConsumptionEventAdminPublicSchema = {
+    properties: {
+        event_type: {
+            '$ref': '#/components/schemas/MovementType'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        reference_kind: {
+            type: 'string',
+            title: 'Reference Kind'
+        },
+        reference_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Reference Id'
+        },
+        customer_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Customer Name'
+        },
+        project_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Name'
+        },
+        project_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Code'
+        },
+        actor_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Name'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        total_cost_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Cost Thb'
+        },
+        draws: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionDrawAdminPublic'
+            },
+            type: 'array',
+            title: 'Draws'
+        }
+    },
+    type: 'object',
+    required: ['event_type', 'occurred_at', 'quantity', 'reference_kind', 'reference_id', 'total_cost_thb', 'draws'],
+    title: 'SkuConsumptionEventAdminPublic'
+} as const;
+
+export const SkuConsumptionEventPublicSchema = {
+    properties: {
+        event_type: {
+            '$ref': '#/components/schemas/MovementType'
+        },
+        occurred_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Occurred At'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        reference_kind: {
+            type: 'string',
+            title: 'Reference Kind'
+        },
+        reference_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Reference Id'
+        },
+        customer_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Customer Name'
+        },
+        project_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Name'
+        },
+        project_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Code'
+        },
+        actor_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Actor Name'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    required: ['event_type', 'occurred_at', 'quantity', 'reference_kind', 'reference_id'],
+    title: 'SkuConsumptionEventPublic',
+    description: `One consuming part_movement, STAFF view — attribution only, NO cost.
+Any NEW cost/margin field MUST go on the Admin subclass only; staff must
+never see cost data (mirrors SaleStaffPublic).`
+} as const;
+
+export const SkuSearchAdminResultSchema = {
+    properties: {
+        sku: {
+            type: 'string',
+            title: 'Sku'
+        },
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        tracking_mode: {
+            '$ref': '#/components/schemas/TrackingMode'
+        },
+        total_on_hand: {
+            type: 'integer',
+            title: 'Total On Hand'
+        },
+        batches: {
+            items: {
+                '$ref': '#/components/schemas/SkuBatchAdminPublic'
+            },
+            type: 'array',
+            title: 'Batches'
+        },
+        consumption: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionEventAdminPublic'
+            },
+            type: 'array',
+            title: 'Consumption'
+        }
+    },
+    type: 'object',
+    required: ['sku', 'product_id', 'tracking_mode', 'total_on_hand', 'batches', 'consumption'],
+    title: 'SkuSearchAdminResult'
+} as const;
+
 export const SkuSearchResultSchema = {
     properties: {
         sku: {
@@ -3107,6 +4100,14 @@ export const SkuSearchResultSchema = {
             },
             type: 'array',
             title: 'Batches'
+        },
+        consumption: {
+            items: {
+                '$ref': '#/components/schemas/SkuConsumptionEventPublic'
+            },
+            type: 'array',
+            title: 'Consumption',
+            default: []
         }
     },
     type: 'object',
@@ -3261,10 +4262,14 @@ export const StockOnHandResponseSchema = {
             },
             type: 'array',
             title: 'Rows'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
         }
     },
     type: 'object',
-    required: ['rows'],
+    required: ['rows', 'count'],
     title: 'StockOnHandResponse'
 } as const;
 
@@ -3282,6 +4287,17 @@ export const StockOnHandRowSchema = {
         model_name: {
             type: 'string',
             title: 'Model Name'
+        },
+        brand: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Brand'
         },
         category: {
             anyOf: [
@@ -3303,7 +4319,7 @@ export const StockOnHandRowSchema = {
         }
     },
     type: 'object',
-    required: ['product_id', 'sku', 'model_name', 'category', 'tracking_mode', 'quantity_on_hand'],
+    required: ['product_id', 'sku', 'model_name', 'brand', 'category', 'tracking_mode', 'quantity_on_hand'],
     title: 'StockOnHandRow'
 } as const;
 
@@ -3342,6 +4358,23 @@ export const SupplierCreateSchema = {
     type: 'object',
     required: ['name'],
     title: 'SupplierCreate'
+} as const;
+
+export const SupplierOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name'],
+    title: 'SupplierOption'
 } as const;
 
 export const SupplierPublicSchema = {
@@ -3427,6 +4460,25 @@ export const SupplierUpdateSchema = {
     },
     type: 'object',
     title: 'SupplierUpdate'
+} as const;
+
+export const SuppliersPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/SupplierPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'SuppliersPublic'
 } as const;
 
 export const SyncReviewItemCreateSchema = {
@@ -3609,6 +4661,139 @@ export const SyncReviewStateSchema = {
     title: 'SyncReviewState'
 } as const;
 
+export const TelegramConfirmRequestSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            title: 'Code'
+        }
+    },
+    type: 'object',
+    required: ['code'],
+    title: 'TelegramConfirmRequest'
+} as const;
+
+export const TelegramConfirmResultSchema = {
+    properties: {
+        connected: {
+            type: 'boolean',
+            title: 'Connected'
+        },
+        telegram_username: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Telegram Username'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['connected'],
+    title: 'TelegramConfirmResult'
+} as const;
+
+export const TelegramConnectResponseSchema = {
+    properties: {
+        code: {
+            type: 'string',
+            title: 'Code'
+        },
+        deep_link: {
+            type: 'string',
+            title: 'Deep Link'
+        },
+        qr_code_data_uri: {
+            type: 'string',
+            title: 'Qr Code Data Uri'
+        },
+        expires_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expires At'
+        }
+    },
+    type: 'object',
+    required: ['code', 'deep_link', 'qr_code_data_uri', 'expires_at'],
+    title: 'TelegramConnectResponse'
+} as const;
+
+export const TelegramStatusSchema = {
+    properties: {
+        connected: {
+            type: 'boolean',
+            title: 'Connected'
+        },
+        telegram_username: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Telegram Username'
+        },
+        delivery_failing: {
+            type: 'boolean',
+            title: 'Delivery Failing',
+            default: false
+        },
+        last_error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Error'
+        }
+    },
+    type: 'object',
+    required: ['connected'],
+    title: 'TelegramStatus'
+} as const;
+
+export const TelegramTestResultSchema = {
+    properties: {
+        ok: {
+            type: 'boolean',
+            title: 'Ok'
+        },
+        detail: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Detail'
+        }
+    },
+    type: 'object',
+    required: ['ok'],
+    title: 'TelegramTestResult'
+} as const;
+
 export const TokenSchema = {
     properties: {
         access_token: {
@@ -3676,10 +4861,21 @@ export const UnitDrillRowSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Received At'
+        },
+        supplier: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier'
         }
     },
     type: 'object',
-    required: ['id', 'castranova_barcode', 'supplier_serial', 'current_state', 'received_at'],
+    required: ['id', 'castranova_barcode', 'supplier_serial', 'current_state', 'received_at', 'supplier'],
     title: 'UnitDrillRow'
 } as const;
 
@@ -3816,6 +5012,39 @@ export const UserCreateSchema = {
     type: 'object',
     required: ['email', 'password'],
     title: 'UserCreate'
+} as const;
+
+export const UserOptionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        full_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Full Name'
+        },
+        email: {
+            type: 'string',
+            format: 'email',
+            title: 'Email'
+        }
+    },
+    type: 'object',
+    required: ['id', 'full_name', 'email'],
+    title: 'UserOption',
+    description: `Lightweight actor projection for the audit User filter. Deliberately
+unpaginated: no client parameter can amplify the response size. \`email\` is the
+label fallback because \`full_name\` is nullable. Includes deactivated users,
+whose historical movements still appear in the append-only ledgers.`
 } as const;
 
 export const UserPublicSchema = {

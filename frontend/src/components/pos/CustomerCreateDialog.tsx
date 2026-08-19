@@ -101,6 +101,7 @@ export function CustomerCreateDialog({ onCreated }: CustomerCreateDialogProps) {
               id={nameId}
               value={name}
               maxLength={255}
+              placeholder="e.g. John Doe"
               onChange={(e) => setName(e.target.value)}
             />
           </div>
@@ -125,6 +126,7 @@ export function CustomerCreateDialog({ onCreated }: CustomerCreateDialogProps) {
               id={contactId}
               value={contact}
               maxLength={255}
+              placeholder="Phone or email"
               onChange={(e) => setContact(e.target.value)}
             />
           </div>

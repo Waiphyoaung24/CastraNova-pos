@@ -11,6 +11,7 @@ from app.models import (
     ProjectPullFulfill,
     ProjectPullLinePublic,
     ProjectPullPublic,
+    ProjectPullsPublic,
     ProjectPullState,
 )
 from app.services import notify
@@ -22,6 +23,18 @@ def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
     lines = crud.list_project_pull_lines(session=session, pull_id=pull.id)
     project = crud.get_project(session=session, project_id=pull.project_id)
     customer = crud.get_customer(session=session, customer_id=pull.customer_id)
+    public_lines = []
+    for line in lines:
+        product = crud.get_product(session=session, product_id=line.product_id)
+        public_lines.append(
+            ProjectPullLinePublic.model_validate(
+                line,
+                update={
+                    "product_sku": product.sku if product else "",
+                    "model_name": product.model_name if product else "",
+                },
+            )
+        )
     return ProjectPullPublic(
         id=pull.id,
         project_id=pull.project_id,
@@ -37,7 +50,7 @@ def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
         fulfilled_by_user_id=pull.fulfilled_by_user_id,
         cancelled_at=pull.cancelled_at,
         cancelled_by_user_id=pull.cancelled_by_user_id,
-        lines=[ProjectPullLinePublic.model_validate(ln) for ln in lines],
+        lines=public_lines,
     )
 
 
@@ -53,7 +66,7 @@ def create_project_pull(
 
 @router.get(
     "",
-    response_model=list[ProjectPullPublic],
+    response_model=ProjectPullsPublic,
     dependencies=[Depends(get_current_user)],
 )
 def read_project_pulls(
@@ -62,11 +75,14 @@ def read_project_pulls(
     state: ProjectPullState | None = None,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[ProjectPullPublic]:
+) -> ProjectPullsPublic:
     pulls = crud.list_project_pulls(
         session=session, state=state, skip=skip, limit=limit
     )
-    return [_to_public(session=session, pull=p) for p in pulls]
+    return ProjectPullsPublic(
+        data=[_to_public(session=session, pull=p) for p in pulls],
+        count=crud.count_project_pulls(session=session, state=state),
+    )
 
 
 @router.get(
@@ -109,11 +125,14 @@ def fulfill_project_pull(
         fulfill_lines=payload.lines,
         actor_user_id=current_user.id,
     )
-    # FR-018: notify BKK admins on a SHORT settlement. Dispatched to a background
-    # task (its own session, swallows errors) so outbound HTTP + retries never
-    # block the request or turn a successful fulfill into a 500.
+    # FR-018: notify BKK admins on settlement. Dispatched to a background task
+    # (its own session, swallows errors) so outbound HTTP + retries never block
+    # the request or turn a successful fulfill into a 500. SHORT and FULFILLED are
+    # mutually exclusive terminal states, so at most one event fires.
     if pull.state == ProjectPullState.SHORT:
         background_tasks.add_task(notify.notify_pull_short_bg, pull_id=pull.id)
+    elif pull.state == ProjectPullState.FULFILLED:
+        background_tasks.add_task(notify.notify_pull_fulfilled_bg, pull_id=pull.id)
     # FR-016: alert when fulfillment dropped a SKU below its low-stock threshold.
     crossed = crud.pop_low_stock_crossed(session)
     if crossed:

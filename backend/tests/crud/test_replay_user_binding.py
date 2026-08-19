@@ -262,35 +262,37 @@ def test_create_sale_replay_same_user_returns_same_sale(db: Session) -> None:
     assert replay.created_by_user_id == actor.id
 
 
-# --- open_service_ticket ---------------------------------------------------------
+# --- record_service_ticket -------------------------------------------------------
 
 
-def test_open_service_ticket_replay_different_user_409(db: Session) -> None:
+def test_record_service_ticket_replay_different_user_409(db: Session) -> None:
     """Same key, different user -> 409 (spec §4.1.2 / §6.6 addendum)."""
     actor, other = _seed_users(db)
     customer = crud.create_customer(
         session=db, customer_in=CustomerCreate(name="Ticket Cust")
     )
     key = uuid.uuid4()
-    crud.open_service_ticket(
+    crud.record_service_ticket(
         session=db,
         customer_id=customer.id,
         issue="noisy",
+        parts=[],
         idempotency_key=key,
-        created_by_user_id=actor.id,
+        actor_user_id=actor.id,
     )
     with pytest.raises(HTTPException) as exc_info:
-        crud.open_service_ticket(
+        crud.record_service_ticket(
             session=db,
             customer_id=customer.id,
             issue="noisy",
+            parts=[],
             idempotency_key=key,
-            created_by_user_id=other.id,
+            actor_user_id=other.id,
         )
     assert exc_info.value.status_code == 409
 
 
-def test_open_service_ticket_replay_same_user_returns_same_ticket(
+def test_record_service_ticket_replay_same_user_returns_same_ticket(
     db: Session,
 ) -> None:
     """Same key, same user -> replay returns the existing ticket (§6.6 addendum)."""
@@ -299,19 +301,21 @@ def test_open_service_ticket_replay_same_user_returns_same_ticket(
         session=db, customer_in=CustomerCreate(name="Ticket Cust")
     )
     key = uuid.uuid4()
-    first = crud.open_service_ticket(
+    first = crud.record_service_ticket(
         session=db,
         customer_id=customer.id,
         issue="noisy",
+        parts=[],
         idempotency_key=key,
-        created_by_user_id=actor.id,
+        actor_user_id=actor.id,
     )
-    replay = crud.open_service_ticket(
+    replay = crud.record_service_ticket(
         session=db,
         customer_id=customer.id,
         issue="noisy",
+        parts=[],
         idempotency_key=key,
-        created_by_user_id=actor.id,
+        actor_user_id=actor.id,
     )
     assert replay.id == first.id
     # Identity is pinned from the stored row, not rebuilt from the caller.

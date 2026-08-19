@@ -1,46 +1,175 @@
 """Sale receipt PDF rendering (FR-007).
 
-Minimal A6-ish receipt: header, line items (price), and totals. Rendered on
-demand from the persisted sale + sale_line rows.
+A4 invoice-style receipt: CastraNova logo header, sale metadata, a bordered
+line-item table (NO / DESCRIPTION / QTY / PER UNIT / TOTAL AMOUNT), a GRAND
+TOTAL row, and a faint logo watermark behind the table. Rendered on demand
+from the persisted sale + sale_line rows.
 """
 
 import io
+from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import Any
+from xml.sax.saxutils import escape
 
-from reportlab.lib.pagesizes import A6  # type: ignore[import-untyped]
+from reportlab.lib import colors  # type: ignore[import-untyped]
+from reportlab.lib.pagesizes import A4  # type: ignore[import-untyped]
+from reportlab.lib.styles import (  # type: ignore[import-untyped]
+    ParagraphStyle,
+    getSampleStyleSheet,
+)
 from reportlab.lib.units import mm  # type: ignore[import-untyped]
-from reportlab.pdfgen import canvas  # type: ignore[import-untyped]
+from reportlab.lib.utils import ImageReader  # type: ignore[import-untyped]
+from reportlab.platypus import (  # type: ignore[import-untyped]
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
+
+_ASSETS = Path(__file__).resolve().parent.parent / "assets"
+_LOGO_HEADER = _ASSETS / "castranova-logo-header.png"
+_LOGO_WATERMARK = _ASSETS / "castranova-logo-watermark.png"
+
+
+def _fmt_amount(value: Decimal) -> str:
+    """Comma-grouped THB with 2 decimals, e.g. ``49,900.00``."""
+    return f"{value:,.2f}"
+
+
+def _fmt_date(sold_at: str) -> str:
+    """ISO string -> ``25 Jun 2026, 14:02``; raw string on parse failure."""
+    try:
+        dt = datetime.fromisoformat(sold_at)
+    except ValueError:
+        return sold_at
+    return dt.strftime("%d %b %Y, %H:%M")
+
+
+def _draw_page_furniture(canvas: Any, doc: Any) -> None:
+    """onPage callback: paint the faint watermark (behind the flowables) and the
+    logo header + title in the top margin. Missing assets are skipped so the
+    table still renders (belt-and-suspenders; the assets are committed)."""
+    page_w, page_h = A4
+    if _LOGO_WATERMARK.exists():
+        wm_w = 120 * mm
+        img = ImageReader(str(_LOGO_WATERMARK))
+        iw, ih = img.getSize()
+        wm_h = wm_w * ih / iw
+        canvas.drawImage(
+            img,
+            (page_w - wm_w) / 2,
+            (page_h - wm_h) / 2,
+            width=wm_w,
+            height=wm_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+    if _LOGO_HEADER.exists():
+        logo_w = 60 * mm
+        img = ImageReader(str(_LOGO_HEADER))
+        iw, ih = img.getSize()
+        logo_h = logo_w * ih / iw
+        top = page_h - 12 * mm - logo_h
+        canvas.drawImage(
+            img,
+            (page_w - logo_w) / 2,
+            top,
+            width=logo_w,
+            height=logo_h,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+        canvas.setFont("Helvetica", 11)
+        canvas.drawCentredString(page_w / 2, top - 6 * mm, "Sales Receipt")
 
 
 def render_sale_receipt(
     *,
     sale_id: str,
     sold_at: str,
+    customer_name: str,
+    sold_by: str,
     lines: list[tuple[str, int, Decimal]],
     total_thb: Decimal,
 ) -> bytes:
-    """Return a one-page receipt PDF. ``lines`` are (label, quantity, price)."""
+    """Return a one-page A4 receipt PDF. ``lines`` are (label, qty, price)."""
     buf = io.BytesIO()
-    pdf = canvas.Canvas(buf, pagesize=A6)
-    width, height = A6
-    y = height - 12 * mm
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(8 * mm, y, "CastraNova POS — Receipt")
-    pdf.setFont("Helvetica", 7)
-    y -= 6 * mm
-    pdf.drawString(8 * mm, y, f"Sale {sale_id}")
-    y -= 4 * mm
-    pdf.drawString(8 * mm, y, f"Date {sold_at}")
-    y -= 8 * mm
-    pdf.setFont("Helvetica", 8)
-    for label, qty, price in lines:
-        pdf.drawString(8 * mm, y, f"{label[:28]}")
-        pdf.drawRightString(width - 8 * mm, y, f"{qty} x {price}")
-        y -= 5 * mm
-    y -= 3 * mm
-    pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(8 * mm, y, "Total")
-    pdf.drawRightString(width - 8 * mm, y, f"{total_thb} THB")
-    pdf.showPage()
-    pdf.save()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        topMargin=46 * mm,  # clears the logo header band drawn in the margin
+        bottomMargin=18 * mm,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        title="Sales Receipt",
+    )
+
+    styles = getSampleStyleSheet()
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=12)
+    meta = ParagraphStyle("meta", parent=styles["Normal"], fontSize=9, leading=15)
+
+    story: list[Any] = []
+    for label, value in (
+        ("Sale #", sale_id[:8]),
+        ("Date", _fmt_date(sold_at)),
+        ("Customer", customer_name),
+        ("Sold by", sold_by),
+    ):
+        story.append(Paragraph(f"<b>{label}</b>&nbsp;&nbsp;{escape(value)}", meta))
+    story.append(Spacer(1, 8 * mm))
+
+    data: list[Any] = [["NO", "DESCRIPTION", "QTY", "PER UNIT", "TOTAL AMOUNT"]]
+    for i, (label, qty, price) in enumerate(lines, start=1):
+        data.append(
+            [
+                str(i),
+                Paragraph(escape(label), cell),
+                str(qty),
+                _fmt_amount(price),
+                _fmt_amount(Decimal(qty) * price),
+            ]
+        )
+    data.append(["GRAND TOTAL", "", "", "", f"{_fmt_amount(total_thb)} THB"])
+    last = len(data) - 1
+
+    table = Table(
+        data,
+        # Sum = 174 mm = A4 width (210) minus left+right margins (18+18); any
+        # wider overflows the printable frame and clips the TOTAL column.
+        colWidths=[11 * mm, 75 * mm, 14 * mm, 36 * mm, 38 * mm],
+        repeatRows=1,
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),  # NO
+                ("ALIGN", (2, 0), (2, -1), "CENTER"),  # QTY
+                ("ALIGN", (3, 0), (4, -1), "RIGHT"),  # PER UNIT, TOTAL AMOUNT
+                # Header row
+                ("BACKGROUND", (0, 0), (-1, 0), colors.Color(0.9, 0.9, 0.9)),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                # GRAND TOTAL row: merge first four cells, bold, right-aligned label
+                ("SPAN", (0, last), (3, last)),
+                ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
+                ("ALIGN", (0, last), (3, last), "RIGHT"),
+                ("ALIGN", (4, last), (4, last), "RIGHT"),
+            ]
+        )
+    )
+    story.append(table)
+
+    doc.build(
+        story,
+        onFirstPage=_draw_page_furniture,
+        onLaterPages=_draw_page_furniture,
+    )
     return buf.getvalue()

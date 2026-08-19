@@ -1,35 +1,28 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ScanLine } from "lucide-react"
+import { Wrench } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
-import {
-  type CustomerPublic,
-  CustomersService,
-  ProductsService,
-  type ServiceTicketPublic,
-  ServiceTicketsService,
-} from "@/client"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
+import type { ApiError, CustomerOption, ServiceTicketPublic } from "@/client"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import {
   TicketPartsList,
   type TicketResultSummary,
 } from "@/components/pos/TicketPartsList"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { useCustomerOptions } from "@/hooks/useCustomerOptions"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useProductOptions } from "@/hooks/useProductOptions"
 import { useScanLookup } from "@/hooks/useScanLookup"
+import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
+import type { Queued } from "@/lib/sync-producer"
 import {
   addScanToTicketParts,
   buildTicketSubmission,
@@ -39,6 +32,7 @@ import {
   type TicketPartLine,
   type TicketSubmission,
 } from "@/lib/ticket-parts"
+import { handleError } from "@/utils"
 
 export const Route = createFileRoute("/_layout/tickets")({
   component: Tickets,
@@ -48,18 +42,10 @@ export const Route = createFileRoute("/_layout/tickets")({
   }),
 })
 
-const WALK_IN_RE = /walk[\s-]?in/i
-
-function findWalkIn(customers: CustomerPublic[]): CustomerPublic | undefined {
-  return customers.find((c) => WALK_IN_RE.test(c.name))
-}
-
 interface CustomerPickerProps {
-  customers: CustomerPublic[]
+  customers: CustomerOption[]
   value: string
   onChange: (value: string) => void
-  /** Set on desktop where an external <Label htmlFor> binds to it. */
-  triggerId?: string
   /** Set on mobile where there is no visible label. */
   ariaLabel?: string
 }
@@ -73,68 +59,24 @@ function CustomerPicker({
   customers,
   value,
   onChange,
-  triggerId,
   ariaLabel,
 }: CustomerPickerProps) {
   return (
     <div className="space-y-2">
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger id={triggerId} aria-label={ariaLabel} className="w-full">
-          <SelectValue placeholder="Select a customer" />
-        </SelectTrigger>
-        <SelectContent>
-          {customers.map((c) => (
-            <SelectItem key={c.id} value={c.id}>
-              {c.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <EntityCombobox
+        items={customers}
+        value={value || undefined}
+        onChange={(next) => onChange(next ?? "")}
+        getKey={(customer) => customer.id}
+        getLabel={(customer) => customer.name}
+        placeholder="Select a customer"
+        searchPlaceholder="Search customers…"
+        emptyText="No customers available"
+        ariaLabel={ariaLabel}
+      />
       <CustomerCreateDialog onCreated={(c) => onChange(c.id)} />
     </div>
   )
-}
-
-/**
- * Run the full ticket lifecycle online: open -> add parts -> close.
- *
- * The idempotency key is reused across retries (see idempotencyKeyRef), so a
- * retry resumes the SAME ticket via the idempotent openServiceTicket — no
- * duplicate ticket shell. Known residual: addServiceTicketPart is NOT
- * idempotent (the backend appends a row per call), so if a multi-part
- * submission fails AFTER some parts were already added, a retry re-adds those
- * parts and duplicates part lines on the resumed ticket. Fully fixing this
- * needs an idempotent backend part-add (or client-side tracking of confirmed
- * parts) — deferred per the remediation spec. On any post-open failure we
- * surface a clear message instead of silently leaving the ticket inconsistent.
- */
-async function submitTicket(s: TicketSubmission): Promise<ServiceTicketPublic> {
-  const ticket = await ServiceTicketsService.openServiceTicket({
-    requestBody: s.open,
-  })
-  // The ticket is now open server-side. There is no cancel/void endpoint, so a
-  // failure here cannot be rolled back — surface a clear message and let the
-  // user retry. The retry reuses the same idempotency key (see handleClose), so
-  // openServiceTicket dedupes onto this same ticket instead of orphaning it.
-  try {
-    for (const part of s.parts) {
-      await ServiceTicketsService.addServiceTicketPart({
-        ticketId: ticket.id,
-        requestBody: part,
-      })
-    }
-    return await ServiceTicketsService.closeServiceTicket({
-      ticketId: ticket.id,
-      requestBody: s.close,
-    })
-  } catch {
-    // No cancel/void endpoint exists to roll the opened ticket back, so surface
-    // a clear retry message; the retry reuses the same idempotency key and
-    // resumes this ticket rather than opening a duplicate.
-    throw new Error(
-      "Ticket opened but could not be completed. Retry to resume it.",
-    )
-  }
 }
 
 function Tickets() {
@@ -151,27 +93,18 @@ function Tickets() {
   // UNIT-rejection notice: a UNIT scan resolves successfully (not notFound/error),
   // so it needs its own message slot, cleared on the next successful PART add.
   const [scanNotice, setScanNotice] = useState<string>("")
-  const scanRef = useRef<ScanInputHandle>(null)
-  // One idempotency key per logical submission. Reused across retries so a retry
-  // after a partial failure resumes the same ticket instead of opening a duplicate.
-  // Rotated only after a ticket successfully closes.
+  const scanRef = useRef<ScanFieldHandle>(null)
+  // One idempotency key per logical submission. Reused across an offline replay
+  // so record_service_ticket dedupes onto the same ticket. Rotated only after a
+  // ticket successfully closes.
   const idempotencyKeyRef = useRef<string>(crypto.randomUUID())
 
-  const customerSelectId = useId()
   const issueId = useId()
   const notesId = useId()
   const resolutionId = useId()
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => CustomersService.readCustomers(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products } = useProductOptions({ activeOnly: true })
+  const { data: customers } = useCustomerOptions()
 
   // sku → catalog entry, restricted to QUANTITY products (the only valid parts).
   const partLookup = useMemo(() => {
@@ -187,19 +120,12 @@ function Tickets() {
     return map
   }, [products])
 
-  // Default-select the walk-in customer once customers load, if one exists.
-  useEffect(() => {
-    if (!customers || customerId) return
-    const walkIn = findWalkIn(customers)
-    if (walkIn) setCustomerId(walkIn.id)
-  }, [customers, customerId])
-
   const { resolve, result, isSearching, notFound, isError, reset } =
     useScanLookup()
 
   // Fold each resolved scan into the cart. PART → add (clears stale notice +
-  // post-close summary); UNIT → show the not-a-part notice; NOT_FOUND → handled
-  // by the `notFound` live region below.
+  // post-close summary); UNIT / SERIALIZED_SKU → show the not-a-part notice;
+  // NOT_FOUND → handled by the `notFound` live region below.
   useEffect(() => {
     if (!result) return
     if (result.kind === "PART") {
@@ -208,14 +134,23 @@ function Tickets() {
       setTicketResult(undefined)
     } else if (result.kind === "UNIT") {
       setScanNotice("Serialized units can't be added as repair parts.")
+    } else if (result.kind === "SERIALIZED_SKU") {
+      setScanNotice("Serialized items can't be added as repair parts.")
     } else {
       setScanNotice("")
     }
     reset()
   }, [result, partLookup, reset])
 
-  const mutation = useMutation<ServiceTicketPublic, Error, TicketSubmission>({
-    mutationFn: submitTicket,
+  const mutation = useMutation<
+    ServiceTicketPublic,
+    ApiError,
+    Queued<TicketSubmission>
+  >({
+    // No mutationFn here on purpose: inherit the persisted ["tickets"] default
+    // from query-client.ts so an offline close is queued and replayed by key
+    // (the whole-ticket idempotency_key makes the replay safe).
+    mutationKey: ["tickets"],
     onSuccess: (ticket) => {
       const total = ticket.parts.reduce(
         (sum, p) => sum + Number(p.unit_price_thb) * p.quantity,
@@ -230,11 +165,9 @@ function Tickets() {
       showSuccessToast("Ticket closed.")
       scanRef.current?.focus()
     },
-    onError: (err) => {
-      showErrorToast(
-        err.message || "Could not close the ticket. Please try again.",
-      )
-    },
+    // Surface the server reason (e.g. "Product X is inactive", insufficient
+    // stock on a part line) — retrying will never clear these.
+    onError: handleError.bind(showErrorToast),
   })
 
   const canClose =
@@ -250,7 +183,9 @@ function Tickets() {
       resolution,
       idempotencyKeyRef.current,
     )
-    mutation.mutate(submission)
+    // One idempotency key per attempt, reused across an offline replay so the
+    // backend dedupes (record_service_ticket is idempotent on it).
+    mutation.mutate(queued(submission, idempotencyKeyRef.current))
   }, [canClose, parts, customerId, issue, notes, resolution, mutation])
 
   const closeButton = (
@@ -267,16 +202,24 @@ function Tickets() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Service ticket</h1>
-        <p className="text-muted-foreground">
-          Open a ticket, scan repair parts, then close it.
-        </p>
-      </div>
+      <PageHeader
+        title="Service ticket"
+        description="Open a ticket, scan repair parts, then close it."
+      />
 
       <div className="grid gap-6 md:grid-cols-[1fr_20rem]">
         {/* Left pane: issue + scan + parts */}
         <div className="space-y-4">
+          <Alert>
+            <Wrench />
+            <AlertTitle>Log a repair</AlertTitle>
+            <AlertDescription>
+              Describe the issue and pick a customer, then scan each repair part
+              to add it — parts are priced automatically. Close the ticket to
+              record the repair and draw the parts from stock.
+            </AlertDescription>
+          </Alert>
+
           <div className="space-y-2">
             <Label htmlFor={issueId}>Issue</Label>
             <Input
@@ -295,36 +238,36 @@ function Tickets() {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               maxLength={512}
+              placeholder="Any extra details (optional)"
             />
           </div>
 
-          <div className="space-y-2">
-            <p className="flex items-center gap-2 text-sm font-medium">
-              <ScanLine
-                className="text-muted-foreground size-4"
-                aria-hidden="true"
-              />
-              Scan part
-            </p>
-            <ScanInput ref={scanRef} onScan={resolve} />
-            <CameraScanFallback onScan={resolve} />
-            <p
-              aria-live="assertive"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isError
-                ? "Scan lookup failed. Try again."
-                : notFound
-                  ? "No item found for that code."
-                  : scanNotice}
-            </p>
-            <p
-              aria-live="polite"
-              className="text-muted-foreground min-h-5 text-sm"
-            >
-              {isSearching ? "Searching…" : ""}
-            </p>
-          </div>
+          <ScanField
+            ref={scanRef}
+            label="Scan part"
+            clearOnScan
+            onScan={resolve}
+            status={
+              <>
+                <p
+                  aria-live="assertive"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isError
+                    ? "Scan lookup failed. Try again."
+                    : notFound
+                      ? "No item found for that code."
+                      : scanNotice}
+                </p>
+                <p
+                  aria-live="polite"
+                  className="text-muted-foreground min-h-5 text-sm"
+                >
+                  {isSearching ? "Searching…" : ""}
+                </p>
+              </>
+            }
+          />
 
           <TicketPartsList
             lines={parts}
@@ -339,21 +282,22 @@ function Tickets() {
         {/* Right pane (desktop): customer + resolution + close */}
         <div className="hidden space-y-4 md:block">
           <div className="space-y-2">
-            <Label htmlFor={customerSelectId}>Customer</Label>
+            <Label>Customer</Label>
             <CustomerPicker
               customers={customers ?? []}
               value={customerId}
               onChange={setCustomerId}
-              triggerId={customerSelectId}
+              ariaLabel="Customer"
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={resolutionId}>Resolution (optional)</Label>
+            <Label htmlFor={resolutionId}>What was done (optional)</Label>
             <Input
               id={resolutionId}
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
               maxLength={512}
+              placeholder="Describe the repair or outcome"
             />
           </div>
           {closeButton}

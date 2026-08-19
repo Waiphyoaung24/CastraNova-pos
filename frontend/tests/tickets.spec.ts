@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test"
 import { expect, test } from "@playwright/test"
 
 import {
@@ -64,22 +65,67 @@ async function seedRepairPart(onHand: number): Promise<SeededPart> {
 }
 
 /**
- * Drive the keyboard-wedge scan field. The wedge buffer resets on inter-key
- * gaps >50ms, and Playwright's per-key typing (one CDP roundtrip per key)
- * can stall past that under suite load — so dispatch the whole keydown burst
- * in one in-page evaluate, like a real wedge's ~1ms keystroke stream.
+ * Drive the scan field. ScanField is typing-first — the input's value is the
+ * source of truth and Enter commits it via onScan. Fill the value (which fires
+ * the change the controlled input needs) and press Enter; there is no wedge
+ * inter-key timing to worry about on this path.
  */
 async function scanCode(page: import("@playwright/test").Page, code: string) {
-  await expect(
-    page.getByRole("textbox", { name: "Scan barcode" }),
-  ).toBeVisible()
-  await page.evaluate((c) => {
-    const el = document.querySelector('input[aria-label="Scan barcode"]')
-    if (!el) throw new Error("scan input not found")
-    for (const key of [...c, "Enter"]) {
-      el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
-    }
-  }, code)
+  const input = page.getByRole("textbox", { name: "Scan barcode" })
+  await expect(input).toBeVisible()
+  await input.fill(code)
+  await input.press("Enter")
+}
+
+/**
+ * Deterministic reload point for the offline test: poll IndexedDB (idb-keyval's
+ * `keyval-store`/`keyval`, where the async-storage persister writes under
+ * REACT_QUERY_OFFLINE_CACHE) until a paused mutation has been flushed. The
+ * persister throttles writes, so reloading before this would drop the queue.
+ * (Copied from pulls-offline.spec.ts — same harness.)
+ */
+async function waitForPersistedPausedMutation(page: Page) {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const raw: unknown = await new Promise((resolve, reject) => {
+            const open = indexedDB.open("keyval-store")
+            open.onerror = () => reject(open.error)
+            open.onsuccess = () => {
+              const db = open.result
+              if (!db.objectStoreNames.contains("keyval")) {
+                db.close()
+                resolve(undefined)
+                return
+              }
+              const req = db
+                .transaction("keyval", "readonly")
+                .objectStore("keyval")
+                .get("REACT_QUERY_OFFLINE_CACHE")
+              req.onsuccess = () => {
+                db.close()
+                resolve(req.result)
+              }
+              req.onerror = () => {
+                db.close()
+                reject(req.error)
+              }
+            }
+          })
+          if (typeof raw !== "string") return false
+          const persisted = JSON.parse(raw) as {
+            clientState?: {
+              mutations?: Array<{ state?: { isPaused?: boolean } }>
+            }
+          }
+          return (persisted.clientState?.mutations ?? []).some(
+            (m) => m.state?.isPaused,
+          )
+        }),
+      { timeout: 10_000, intervals: [250, 500, 1_000] },
+    )
+    .toBe(true)
 }
 
 test.describe("Tickets screen", () => {
@@ -119,7 +165,7 @@ test.describe("Tickets screen", () => {
 
     await page.getByRole("combobox", { name: "Customer" }).click()
     await page.getByRole("option", { name: customerName, exact: true }).click()
-    await page.getByLabel("Resolution (optional)").fill("Replaced part")
+    await page.getByLabel("What was done (optional)").fill("Replaced part")
 
     await page.getByRole("button", { name: "Close ticket" }).click()
 
@@ -142,36 +188,16 @@ test.describe("Tickets screen", () => {
       .toBe(onHand - 2)
   })
 
-  test("retry after a failed part-add reuses the same idempotency key", async ({
+  // FR-008 / §8.3: a ticket closed offline is saved on the device and replays
+  // once on reconnect. The atomic record endpoint is idempotent on its
+  // idempotency_key, so the replay consumes stock exactly once (the old 3-call
+  // flow could not guarantee this — its non-idempotent part-add could duplicate).
+  test("ticket offline → reload → reconnect → replays once (parts consumed)", async ({
     page,
   }) => {
-    const { sku, modelName, customerName } = await seedRepairPart(5)
+    const onHand = 5
+    const { sku, modelName, customerName } = await seedRepairPart(onHand)
 
-    // Capture the idempotency_key sent on every openServiceTicket POST, and fail
-    // the FIRST add-part so the ticket opens but never completes — exercising the
-    // orphan/retry path.
-    const openKeys: string[] = []
-    let failNextPartAdd = true
-
-    await page.route("**/api/v1/service-tickets", async (route) => {
-      if (route.request().method() === "POST") {
-        const body = route.request().postDataJSON() as {
-          idempotency_key: string
-        }
-        openKeys.push(body.idempotency_key)
-      }
-      await route.continue()
-    })
-    await page.route("**/api/v1/service-tickets/*/parts", async (route) => {
-      if (failNextPartAdd) {
-        failNextPartAdd = false
-        await route.fulfill({ status: 500, body: "{}" })
-        return
-      }
-      await route.continue()
-    })
-
-    // Same UI drive as the happy-path test above.
     const productsLoaded = page.waitForResponse((r) =>
       r.url().includes("/api/v1/products"),
     )
@@ -181,28 +207,34 @@ test.describe("Tickets screen", () => {
     ).toBeVisible()
 
     await page.getByLabel("Issue").fill("Won't power on")
-
     await productsLoaded
     await scanCode(page, sku)
     await expect(page.getByText(modelName)).toBeVisible()
-
+    // Bump to qty 2 so the consumed quantity is provable after replay.
+    await page
+      .getByRole("button", { name: `Increase quantity of ${sku}` })
+      .click()
     await page.getByRole("combobox", { name: "Customer" }).click()
     await page.getByRole("option", { name: customerName, exact: true }).click()
 
-    // First close: ticket opens, the part-add fails → explicit "retry to resume"
-    // message (no cancel endpoint exists to roll the orphan back).
+    // Go offline and close the ticket — the record mutation queues (pauses).
+    await page.evaluate(() => window.dispatchEvent(new Event("offline")))
     await page.getByRole("button", { name: "Close ticket" }).click()
-    await expect(page.getByText(/retry to resume it/i)).toBeVisible()
 
-    // Retry: this time the part-add and close succeed.
-    await page.getByRole("button", { name: "Close ticket" }).click()
-    await expect(
-      page.getByText("Ticket closed.", { exact: true }),
-    ).toBeVisible()
+    // Reload only once the queued mutation is persisted; the fresh online load
+    // rehydrates and resumePausedMutations replays the record.
+    await waitForPersistedPausedMutation(page)
+    await page.reload()
 
-    // The retry must reuse the SAME idempotency key, so the backend dedupes onto
-    // the already-opened ticket instead of creating a duplicate.
-    expect(openKeys.length).toBe(2)
-    expect(new Set(openKeys).size).toBe(1)
+    // The queue survived and replayed exactly once: 2 consumed FIFO from stock.
+    await expect
+      .poll(
+        async () => {
+          const res = await SearchService.searchSku({ sku })
+          return res.total_on_hand
+        },
+        { timeout: 15_000, intervals: [500, 1_000] },
+      )
+      .toBe(onHand - 2)
   })
 })

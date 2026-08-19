@@ -37,6 +37,7 @@ function validQuantityDraft(): QuantityDraft {
     supplierBatchRef: "",
     expectedQty: "",
     note: "",
+    receivedDate: "2026-07-10",
   }
 }
 
@@ -91,6 +92,7 @@ test("buildReceiveSerializedRequest maps a 2-piece draft to the SDK shape", () =
     "prod-1",
     "sup-1",
     "idem-123",
+    "2026-07-10",
   )
   expect(req).toEqual({
     product_id: "prod-1",
@@ -100,6 +102,7 @@ test("buildReceiveSerializedRequest maps a 2-piece draft to the SDK shape", () =
       { supplier_serial: "SER-2", purchase_cost_thb: "11.5" },
     ],
     idempotency_key: "idem-123",
+    received_date: "2026-07-10",
   })
 })
 
@@ -118,6 +121,7 @@ test("buildReceiveQuantityRequest maps required fields + nulls blank optionals",
     expected_qty: null,
     note: null,
     idempotency_key: "idem-q",
+    received_date: "2026-07-10",
   })
 })
 
@@ -138,6 +142,7 @@ test("buildReceiveQuantityRequest carries filled optionals (trimmed + coerced)",
     expected_qty: 12,
     note: "partial",
     idempotency_key: "idem-q",
+    received_date: "2026-07-10",
   })
 })
 
@@ -156,40 +161,59 @@ test("buildReceiveQuantityRequest nulls a whitespace-only expectedQty", () => {
 
 test("canSubmitSerialized true on a valid draft", () => {
   const pieces = [piece("a", "SER-1", "10"), piece("b", "SER-2", "0.5")]
-  expect(canSubmitSerialized(pieces, "prod-1", "sup-1")).toBe(true)
+  expect(canSubmitSerialized(pieces, "prod-1", "sup-1", "2026-07-10")).toBe(
+    true,
+  )
 })
 
 test("canSubmitSerialized false when there are no pieces", () => {
-  expect(canSubmitSerialized([], "prod-1", "sup-1")).toBe(false)
+  expect(canSubmitSerialized([], "prod-1", "sup-1", "2026-07-10")).toBe(false)
 })
 
 test("canSubmitSerialized false when product is missing", () => {
   const pieces = [piece("a", "SER-1", "10")]
-  expect(canSubmitSerialized(pieces, "", "sup-1")).toBe(false)
+  expect(canSubmitSerialized(pieces, "", "sup-1", "2026-07-10")).toBe(false)
 })
 
 test("canSubmitSerialized false when supplier is missing", () => {
   const pieces = [piece("a", "SER-1", "10")]
-  expect(canSubmitSerialized(pieces, "prod-1", "")).toBe(false)
+  expect(canSubmitSerialized(pieces, "prod-1", "", "2026-07-10")).toBe(false)
 })
 
 test("canSubmitSerialized false when a piece has a blank serial", () => {
   const pieces = [piece("a", "SER-1", "10"), piece("b", "   ", "10")]
-  expect(canSubmitSerialized(pieces, "prod-1", "sup-1")).toBe(false)
+  expect(canSubmitSerialized(pieces, "prod-1", "sup-1", "2026-07-10")).toBe(
+    false,
+  )
 })
 
 test("canSubmitSerialized false when a piece cost is 0 or non-numeric", () => {
   expect(
-    canSubmitSerialized([piece("a", "SER-1", "0")], "prod-1", "sup-1"),
+    canSubmitSerialized(
+      [piece("a", "SER-1", "0")],
+      "prod-1",
+      "sup-1",
+      "2026-07-10",
+    ),
   ).toBe(false)
   expect(
-    canSubmitSerialized([piece("a", "SER-1", "abc")], "prod-1", "sup-1"),
+    canSubmitSerialized(
+      [piece("a", "SER-1", "abc")],
+      "prod-1",
+      "sup-1",
+      "2026-07-10",
+    ),
   ).toBe(false)
 })
 
 test("canSubmitSerialized false when a piece cost is negative", () => {
   expect(
-    canSubmitSerialized([piece("a", "SER-1", "-5")], "prod-1", "sup-1"),
+    canSubmitSerialized(
+      [piece("a", "SER-1", "-5")],
+      "prod-1",
+      "sup-1",
+      "2026-07-10",
+    ),
   ).toBe(false)
 })
 

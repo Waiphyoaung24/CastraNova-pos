@@ -2,6 +2,7 @@ import type {
   ReceiveQuantityRequest,
   ReceiveSerializedRequest,
 } from "../client/types.gen"
+import { todayISO } from "./date-field"
 
 // Pure, React-free form logic for the Receive screen (Task 4.1).
 // Costs stay as strings end-to-end (money-boundary discipline); they are only
@@ -24,6 +25,23 @@ export type QuantityDraft = {
   supplierBatchRef: string
   expectedQty: string
   note: string
+  receivedDate: string
+}
+
+// ---------------------------------------------------------------------------
+// Receive date
+// ---------------------------------------------------------------------------
+
+// `todayISO` lives in `date-field.ts` now — a generic date module must not
+// depend on a receive-form module. Re-exported so `receive.tsx` and
+// `receive-form.test.ts` keep importing it from here.
+export { todayISO }
+
+/** A well-formed, non-future receive date. ISO dates compare correctly as
+ * strings, so no Date parsing is needed. The server re-checks this — the guard
+ * here only stops an obviously-bad submit. */
+export function isValidReceivedDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && value <= todayISO()
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +76,7 @@ export function buildReceiveSerializedRequest(
   productId: string,
   supplierId: string,
   idempotencyKey: string,
+  receivedDate: string,
 ): ReceiveSerializedRequest {
   return {
     product_id: productId,
@@ -67,6 +86,7 @@ export function buildReceiveSerializedRequest(
       purchase_cost_thb: p.purchaseCostThb.trim(),
     })),
     idempotency_key: idempotencyKey,
+    received_date: receivedDate,
   }
 }
 
@@ -84,6 +104,7 @@ export function buildReceiveQuantityRequest(
       draft.expectedQty.trim() !== "" ? Number(draft.expectedQty.trim()) : null,
     note: draft.note.trim() || null,
     idempotency_key: idempotencyKey,
+    received_date: draft.receivedDate,
   }
 }
 
@@ -100,10 +121,12 @@ export function canSubmitSerialized(
   pieces: DraftPiece[],
   productId: string,
   supplierId: string,
+  receivedDate: string,
 ): boolean {
   return (
     Boolean(productId) &&
     Boolean(supplierId) &&
+    isValidReceivedDate(receivedDate) &&
     pieces.length >= 1 &&
     pieces.every(
       (p) =>
@@ -117,6 +140,7 @@ export function canSubmitQuantity(draft: QuantityDraft): boolean {
   return (
     Boolean(draft.productId) &&
     Boolean(draft.supplierId) &&
+    isValidReceivedDate(draft.receivedDate) &&
     Number.isInteger(qty) &&
     qty >= 1 &&
     isPositiveCost(draft.purchaseCostThb)

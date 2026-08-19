@@ -16,14 +16,26 @@ export type AuditEntryPublic = {
     project_pull_id?: (string | null);
     stock_adjustment_id?: (string | null);
     notes?: (string | null);
+    product_model_name?: (string | null);
+    product_sku?: (string | null);
+    unit_castranova_barcode?: (string | null);
+    unit_supplier_serial?: (string | null);
+    customer_name?: (string | null);
+    actor_full_name?: (string | null);
 };
 
 export type ledger = 'UNIT' | 'PART';
+
+export type AuditPublic = {
+    data: Array<AuditEntryPublic>;
+    count: number;
+};
 
 export type BatchDrillRow = {
     batch_no: string;
     remaining_qty: number;
     received_at: string;
+    supplier: (string | null);
 };
 
 export type Body_login_login_access_token = {
@@ -45,21 +57,6 @@ export type BulkMinStockUpdate = {
 };
 
 export type Channel = 'SALE' | 'MAINTENANCE' | 'PROJECT';
-
-export type ChannelMarginReport = {
-    month: string;
-    channels: Array<ChannelMarginRow>;
-    total_revenue_thb: string;
-    total_cogs_thb: string;
-    total_margin_thb: string;
-};
-
-export type ChannelMarginRow = {
-    channel: Channel;
-    revenue_thb: string;
-    cogs_thb: string;
-    margin_thb: string;
-};
 
 export type CustomerCreate = {
     name: string;
@@ -90,6 +87,11 @@ export type CustomerDashboardStaffPublic = {
     closed_projects: Array<ProjectSummaryStaffPublic>;
 };
 
+export type CustomerOption = {
+    id: string;
+    name: string;
+};
+
 export type CustomerPublic = {
     name: string;
     country?: (string | null);
@@ -97,6 +99,11 @@ export type CustomerPublic = {
     type?: CustomerType;
     notes?: (string | null);
     id: string;
+};
+
+export type CustomersPublic = {
+    data: Array<CustomerPublic>;
+    count: number;
 };
 
 export type CustomerType = 'DEALER' | 'END_CUSTOMER';
@@ -107,17 +114,6 @@ export type CustomerUpdate = {
     contact?: (string | null);
     type?: (CustomerType | null);
     notes?: (string | null);
-};
-
-export type ExchangeRatesPublic = {
-    usd_thb: string;
-    mmk_thb: string;
-    updated_at?: (string | null);
-};
-
-export type ExchangeRatesUpdate = {
-    usd_thb: (number | string);
-    mmk_thb: (number | string);
 };
 
 export type HoldingPeriodReport = {
@@ -141,6 +137,13 @@ export type HTTPValidationError = {
     detail?: Array<ValidationError>;
 };
 
+export type LineConnectResponse = {
+    code: string;
+    deep_link: string;
+    qr_code_data_uri: string;
+    expires_at: string;
+};
+
 export type LineState = 'PENDING' | 'FULFILLED' | 'SHORT' | 'CANCELLED';
 
 export type LowStockItemPublic = {
@@ -152,6 +155,26 @@ export type LowStockItemPublic = {
     min_stock_level: number;
 };
 
+export type MarginBreakdownReport = {
+    month: string;
+    group_by: MarginDimension;
+    channel: (Channel | null);
+    rows: Array<MarginBreakdownRow>;
+    total_revenue_thb: string;
+    total_cogs_thb: string;
+    total_margin_thb: string;
+};
+
+export type MarginBreakdownRow = {
+    key: string;
+    label: string;
+    revenue_thb: string;
+    cogs_thb: string;
+    margin_thb: string;
+};
+
+export type MarginDimension = 'channel' | 'product' | 'customer' | 'project';
+
 export type Message = {
     message: string;
 };
@@ -160,22 +183,23 @@ export type MinStockLevelUpdate = {
     min_stock_level?: (number | null);
 };
 
-export type MovementType = 'RECEIVED' | 'SOLD' | 'MAINTENANCE_OUT' | 'PROJECT_OUT' | 'ADJUSTED_OUT';
+export type MovementType = 'RECEIVED' | 'SOLD' | 'MAINTENANCE_OUT' | 'PROJECT_OUT' | 'ADJUSTED_OUT' | 'RETURNED';
 
 export type NewPassword = {
     token: string;
     new_password: string;
 };
 
-export type NotificationChannel = 'LINE' | 'VIBER';
+export type NotificationChannel = 'LINE' | 'VIBER' | 'TELEGRAM';
 
-export type NotificationEvent = 'LOW_STOCK' | 'OVERRIDE_PENDING' | 'PULL_FULFILLED' | 'PULL_SHORT';
+export type NotificationEvent = 'LOW_STOCK' | 'OVERRIDE_PENDING' | 'PULL_FULFILLED' | 'PULL_SHORT' | 'SYNC_REVIEW_PENDING';
 
 export type NotificationPreferencePublic = {
-    id: string;
+    id: (string | null);
     channel: NotificationChannel;
     event_type: NotificationEvent;
     enabled: boolean;
+    channel_connected: boolean;
 };
 
 export type NotificationPreferencesUpdate = {
@@ -241,6 +265,7 @@ export type PriceChangePublic = {
     id: string;
     changed_by_user_id: string;
     changed_at?: (string | null);
+    changed_by_full_name?: (string | null);
 };
 
 export type PricingOverrideCreate = {
@@ -260,6 +285,7 @@ export type PricingOverridePublic = {
     id: string;
     target_kind: OverrideTargetKind;
     product_id: string;
+    product_sku: string;
     default_price_thb: string;
     requested_price_thb: string;
     deviation_pct: string;
@@ -269,6 +295,11 @@ export type PricingOverridePublic = {
     created_at: string;
     decided_by_user_id: (string | null);
     decided_at: (string | null);
+};
+
+export type PricingOverridesPublic = {
+    data: Array<PricingOverridePublic>;
+    count: number;
 };
 
 export type PrivateUserCreate = {
@@ -294,6 +325,21 @@ export type ProductCreate = {
     is_active?: boolean;
 };
 
+/**
+ * Lightweight catalog projection for pickers/lookups (audit SKU filter, sale/
+ * receive/tickets/pulls product selection). Omits `specs` (JSONB) and admin-only
+ * catalog fields (brand, category, default_min_stock_level); prices are included
+ * because GET /products already exposes them to the same authenticated audience.
+ */
+export type ProductOption = {
+    id: string;
+    sku: string;
+    model_name: string;
+    tracking_mode: TrackingMode;
+    retail_price_thb: string;
+    repair_price_thb: string;
+};
+
 export type ProductPublic = {
     sku: string;
     model_name: string;
@@ -308,9 +354,21 @@ export type ProductPublic = {
     default_min_stock_level?: (number | null);
     is_active?: boolean;
     id: string;
+    is_fresh?: boolean;
+};
+
+export type ProductPurchaseCost = {
+    product_id: string;
+    latest_purchase_cost_thb: string;
+};
+
+export type ProductsPublic = {
+    data: Array<ProductPublic>;
+    count: number;
 };
 
 export type ProductUpdate = {
+    sku?: (string | null);
     model_name?: (string | null);
     brand?: (string | null);
     category?: (string | null);
@@ -322,6 +380,27 @@ export type ProductUpdate = {
     repair_price_thb?: (number | string | null);
     default_min_stock_level?: (number | null);
     is_active?: (boolean | null);
+};
+
+/**
+ * One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ * ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
+ * is physically absent from the staff payload.
+ *
+ * Reuses SkuConsumptionDrawAdminPublic for `draws`: a FIFO batch draw is the
+ * same concept here as in the SKU consumption history (FR-015).
+ */
+export type ProjectConsumptionRowPublic = {
+    line_kind: SaleLineKind;
+    product_id: string;
+    product_sku: string;
+    model_name: string;
+    unit_serial: (string | null);
+    quantity: number;
+    occurred_at: string;
+    project_pull_id: string;
+    total_cost_thb: string;
+    draws: Array<SkuConsumptionDrawAdminPublic>;
 };
 
 export type ProjectCreate = {
@@ -339,11 +418,18 @@ export type ProjectDashboardAdminPublic = {
     pulls: Array<TransactionSummaryPublic>;
     budget_thb: (string | null);
     consumed_cost_thb: string;
+    consumed_items: Array<ProjectConsumptionRowPublic>;
 };
 
 export type ProjectDashboardStaffPublic = {
     project: ProjectStaffPublic;
     pulls: Array<TransactionSummaryPublic>;
+};
+
+export type ProjectOption = {
+    id: string;
+    code: string;
+    name: string;
 };
 
 export type ProjectPublic = {
@@ -383,6 +469,8 @@ export type ProjectPullLinePublic = {
     id: string;
     line_kind: SaleLineKind;
     product_id: string;
+    product_sku: string;
+    model_name: string;
     unit_serial: (string | null);
     requested_qty: (number | null);
     fulfilled_qty: number;
@@ -407,7 +495,17 @@ export type ProjectPullPublic = {
     lines: Array<ProjectPullLinePublic>;
 };
 
+export type ProjectPullsPublic = {
+    data: Array<ProjectPullPublic>;
+    count: number;
+};
+
 export type ProjectPullState = 'PENDING' | 'FULFILLED' | 'SHORT' | 'CANCELLED';
+
+export type ProjectsPublic = {
+    data: Array<ProjectPublic>;
+    count: number;
+};
 
 export type ProjectStaffPublic = {
     id: string;
@@ -461,6 +559,7 @@ export type ReceiveQuantityRequest = {
     expected_qty?: (number | null);
     note?: (string | null);
     idempotency_key: string;
+    received_date?: (string | null);
 };
 
 export type ReceiveSerializedRequest = {
@@ -468,10 +567,35 @@ export type ReceiveSerializedRequest = {
     supplier_id: string;
     pieces: Array<ReceivePiece>;
     idempotency_key: string;
+    received_date?: (string | null);
 };
 
 export type ReceiveSerializedResponse = {
     units: Array<UnitPublic>;
+};
+
+export type ReturnableLinePublic = {
+    sale_line_id: string;
+    line_kind: SaleLineKind;
+    product_id: (string | null);
+    unit_id: (string | null);
+    label: string;
+    quantity_sold: number;
+    quantity_returned: number;
+    quantity_returnable: number;
+    unit_price_thb: string;
+};
+
+export type ReturnableSalePublic = {
+    sale_id: string;
+    sold_at: string;
+    customer_id: string;
+    customer_name: string;
+    lines: Array<ReturnableLinePublic>;
+};
+
+export type ReturnableSalesPublic = {
+    sales: Array<ReturnableSalePublic>;
 };
 
 export type SaleCreateRequest = {
@@ -518,6 +642,36 @@ export type SalePublic = {
     lines: Array<SaleLinePublic>;
 };
 
+export type SaleReturnCreateRequest = {
+    idempotency_key: string;
+    reason: string;
+    lines: Array<SaleReturnLineInput>;
+};
+
+export type SaleReturnLineInput = {
+    sale_line_id: string;
+    quantity?: number;
+};
+
+export type SaleReturnLinePublic = {
+    id: string;
+    sale_line_id: string;
+    quantity: number;
+    unit_price_thb: string;
+    cogs_restored_thb: string;
+};
+
+export type SaleReturnPublic = {
+    id: string;
+    sale_id: string;
+    reason: string;
+    returned_at: string;
+    total_refund_thb: string;
+    total_cogs_restored_thb: string;
+    created_by_user_id: string;
+    lines: Array<SaleReturnLinePublic>;
+};
+
 export type SaleStaffPublic = {
     id: string;
     customer_id: string;
@@ -537,6 +691,11 @@ export type SerialMovementPublic = {
     project_pull_id: (string | null);
     stock_adjustment_id: (string | null);
     notes: (string | null);
+    from_location_name?: (string | null);
+    to_location_name?: (string | null);
+    actor_name?: (string | null);
+    reference_kind?: (string | null);
+    reference_label?: (string | null);
 };
 
 export type SerialSearchResult = {
@@ -546,17 +705,6 @@ export type SerialSearchResult = {
     supplier_serial: string;
     current_state: UnitState;
     movements: Array<SerialMovementPublic>;
-};
-
-export type ServiceTicketClose = {
-    resolution?: (string | null);
-};
-
-export type ServiceTicketCreate = {
-    customer_id: string;
-    issue: string;
-    notes?: (string | null);
-    idempotency_key: string;
 };
 
 export type ServiceTicketPartCreate = {
@@ -583,6 +731,24 @@ export type ServiceTicketPublic = {
     parts: Array<ServiceTicketPartPublic>;
 };
 
+export type ServiceTicketRecordRequest = {
+    customer_id: string;
+    issue: string;
+    notes?: (string | null);
+    resolution?: (string | null);
+    idempotency_key: string;
+    parts?: Array<ServiceTicketPartCreate>;
+};
+
+export type SkuBatchAdminPublic = {
+    batch_no: string;
+    received_at: string;
+    received_qty: number;
+    remaining_qty: number;
+    is_adjustment: boolean;
+    purchase_cost_thb: string;
+};
+
 export type SkuBatchPublic = {
     batch_no: string;
     received_at: string;
@@ -591,12 +757,65 @@ export type SkuBatchPublic = {
     is_adjustment: boolean;
 };
 
+/**
+ * One FIFO batch draw inside a consumption event — ADMIN only (cost).
+ */
+export type SkuConsumptionDrawAdminPublic = {
+    batch_no: string;
+    quantity: number;
+    unit_cost_thb: string;
+    total_cost_thb: string;
+};
+
+export type SkuConsumptionEventAdminPublic = {
+    event_type: MovementType;
+    occurred_at: string;
+    quantity: number;
+    reference_kind: string;
+    reference_id: string;
+    customer_name?: (string | null);
+    project_name?: (string | null);
+    project_code?: (string | null);
+    actor_name?: (string | null);
+    notes?: (string | null);
+    total_cost_thb: string;
+    draws: Array<SkuConsumptionDrawAdminPublic>;
+};
+
+/**
+ * One consuming part_movement, STAFF view — attribution only, NO cost.
+ * Any NEW cost/margin field MUST go on the Admin subclass only; staff must
+ * never see cost data (mirrors SaleStaffPublic).
+ */
+export type SkuConsumptionEventPublic = {
+    event_type: MovementType;
+    occurred_at: string;
+    quantity: number;
+    reference_kind: string;
+    reference_id: string;
+    customer_name?: (string | null);
+    project_name?: (string | null);
+    project_code?: (string | null);
+    actor_name?: (string | null);
+    notes?: (string | null);
+};
+
+export type SkuSearchAdminResult = {
+    sku: string;
+    product_id: string;
+    tracking_mode: TrackingMode;
+    total_on_hand: number;
+    batches: Array<SkuBatchAdminPublic>;
+    consumption: Array<SkuConsumptionEventAdminPublic>;
+};
+
 export type SkuSearchResult = {
     sku: string;
     product_id: string;
     tracking_mode: TrackingMode;
     total_on_hand: number;
     batches: Array<SkuBatchPublic>;
+    consumption?: Array<SkuConsumptionEventPublic>;
 };
 
 export type StockAdjustmentCreate = {
@@ -622,12 +841,14 @@ export type StockAdjustmentPublic = {
 
 export type StockOnHandResponse = {
     rows: Array<StockOnHandRow>;
+    count: number;
 };
 
 export type StockOnHandRow = {
     product_id: string;
     sku: string;
     model_name: string;
+    brand: (string | null);
     category: (string | null);
     tracking_mode: TrackingMode;
     quantity_on_hand: number;
@@ -639,11 +860,21 @@ export type SupplierCreate = {
     contact?: (string | null);
 };
 
+export type SupplierOption = {
+    id: string;
+    name: string;
+};
+
 export type SupplierPublic = {
     name: string;
     country?: (string | null);
     contact?: (string | null);
     id: string;
+};
+
+export type SuppliersPublic = {
+    data: Array<SupplierPublic>;
+    count: number;
 };
 
 export type SupplierUpdate = {
@@ -695,6 +926,35 @@ export type SyncReviewResolve = {
 
 export type SyncReviewState = 'PENDING' | 'RESOLVED' | 'DISCARDED';
 
+export type TelegramConfirmRequest = {
+    code: string;
+};
+
+export type TelegramConfirmResult = {
+    connected: boolean;
+    telegram_username?: (string | null);
+    error?: (string | null);
+};
+
+export type TelegramConnectResponse = {
+    code: string;
+    deep_link: string;
+    qr_code_data_uri: string;
+    expires_at: string;
+};
+
+export type TelegramStatus = {
+    connected: boolean;
+    telegram_username?: (string | null);
+    delivery_failing?: boolean;
+    last_error?: (string | null);
+};
+
+export type TelegramTestResult = {
+    ok: boolean;
+    detail?: (string | null);
+};
+
 export type Token = {
     access_token: string;
     token_type?: string;
@@ -714,6 +974,7 @@ export type UnitDrillRow = {
     supplier_serial: string;
     current_state: UnitState;
     received_at: string;
+    supplier: (string | null);
 };
 
 export type UnitPublic = {
@@ -743,6 +1004,18 @@ export type UserCreate = {
     role?: UserRole;
     full_name?: (string | null);
     password: string;
+};
+
+/**
+ * Lightweight actor projection for the audit User filter. Deliberately
+ * unpaginated: no client parameter can amplify the response size. `email` is the
+ * label fallback because `full_name` is nullable. Includes deactivated users,
+ * whose historical movements still appear in the append-only ledgers.
+ */
+export type UserOption = {
+    id: string;
+    full_name: (string | null);
+    email: string;
 };
 
 export type UserPublic = {
@@ -803,6 +1076,10 @@ export type AuditListAuditData = {
     productId?: (string | null);
     skip?: number;
     /**
+     * Restrict to a product's SKU (spans UNIT + PART ledgers)
+     */
+    sku?: (string | null);
+    /**
      * ISO-8601 upper bound, exclusive
      */
     toDate?: (string | null);
@@ -812,20 +1089,33 @@ export type AuditListAuditData = {
     unitId?: (string | null);
 };
 
-export type AuditListAuditResponse = (Array<AuditEntryPublic>);
+export type AuditListAuditResponse = (AuditPublic);
 
 export type CustomersReadCustomersData = {
+    /**
+     * Exact match on country
+     */
+    country?: (string | null);
     limit?: number;
+    /**
+     * Case-insensitive substring match on name
+     */
+    q?: (string | null);
     skip?: number;
+    type?: (CustomerType | null);
 };
 
-export type CustomersReadCustomersResponse = (Array<CustomerPublic>);
+export type CustomersReadCustomersResponse = (CustomersPublic);
 
 export type CustomersCreateCustomerData = {
     requestBody: CustomerCreate;
 };
 
 export type CustomersCreateCustomerResponse = (CustomerPublic);
+
+export type CustomersReadOptionsResponse = (Array<CustomerOption>);
+
+export type CustomersListCountriesResponse = (Array<(string)>);
 
 export type CustomersGetCustomerDashboardData = {
     customerId: string;
@@ -841,8 +1131,11 @@ export type CustomersUpdateCustomerData = {
 export type CustomersUpdateCustomerResponse = (CustomerPublic);
 
 export type DashboardsGetStockOnHandData = {
+    brand?: (string | null);
     category?: (string | null);
-    customer?: (string | null);
+    limit?: number;
+    q?: (string | null);
+    skip?: number;
     supplier?: (string | null);
 };
 
@@ -906,6 +1199,26 @@ export type NotificationsUpdateNotificationPreferencesData = {
 
 export type NotificationsUpdateNotificationPreferencesResponse = (Array<NotificationPreferencePublic>);
 
+export type NotificationsConnectTelegramResponse = (TelegramConnectResponse);
+
+export type NotificationsConfirmTelegramData = {
+    requestBody: TelegramConfirmRequest;
+};
+
+export type NotificationsConfirmTelegramResponse = (TelegramConfirmResult);
+
+export type NotificationsDisconnectTelegramResponse = (Message);
+
+export type NotificationsTestTelegramResponse = (TelegramTestResult);
+
+export type NotificationsGetTelegramStatusResponse = (TelegramStatus);
+
+export type NotificationsConnectLineResponse = (LineConnectResponse);
+
+export type NotificationsDisconnectLineResponse = (Message);
+
+export type NotificationsLineWebhookResponse = (Message);
+
 export type PricingOverridesCreatePricingOverrideData = {
     requestBody: PricingOverrideCreate;
 };
@@ -918,7 +1231,13 @@ export type PricingOverridesListPricingOverridesData = {
     state?: (OverrideState | null);
 };
 
-export type PricingOverridesListPricingOverridesResponse = (Array<PricingOverridePublic>);
+export type PricingOverridesListPricingOverridesResponse = (PricingOverridesPublic);
+
+export type PricingOverridesGetPricingOverrideData = {
+    overrideId: string;
+};
+
+export type PricingOverridesGetPricingOverrideResponse = (PricingOverridePublic);
 
 export type PricingOverridesDecidePricingOverrideData = {
     overrideId: string;
@@ -934,17 +1253,42 @@ export type PrivateCreateUserData = {
 export type PrivateCreateUserResponse = (UserPublic);
 
 export type ProductsReadProductsData = {
+    /**
+     * Case-insensitive substring match on brand
+     */
+    brand?: (string | null);
+    /**
+     * Case-insensitive substring match on category
+     */
+    category?: (string | null);
+    /**
+     * Filter by active/inactive status
+     */
+    isActive?: (boolean | null);
     limit?: number;
+    /**
+     * Case-insensitive substring match on SKU or model name
+     */
+    q?: (string | null);
     skip?: number;
+    trackingMode?: (TrackingMode | null);
 };
 
-export type ProductsReadProductsResponse = (Array<ProductPublic>);
+export type ProductsReadProductsResponse = (ProductsPublic);
 
 export type ProductsCreateProductData = {
     requestBody: ProductCreate;
 };
 
 export type ProductsCreateProductResponse = (ProductPublic);
+
+export type ProductsReadPurchaseCostsResponse = (Array<ProductPurchaseCost>);
+
+export type ProductsReadOptionsData = {
+    activeOnly?: boolean;
+};
+
+export type ProductsReadOptionsResponse = (Array<ProductOption>);
 
 export type ProductsReadSkuLabelData = {
     productId: string;
@@ -959,6 +1303,12 @@ export type ProductsUpdateProductData = {
 };
 
 export type ProductsUpdateProductResponse = (ProductPublic);
+
+export type ProductsDeleteProductData = {
+    productId: string;
+};
+
+export type ProductsDeleteProductResponse = (void);
 
 export type ProductsSetMinStockLevelData = {
     productId: string;
@@ -985,7 +1335,7 @@ export type ProjectPullsReadProjectPullsData = {
     state?: (ProjectPullState | null);
 };
 
-export type ProjectPullsReadProjectPullsResponse = (Array<ProjectPullPublic>);
+export type ProjectPullsReadProjectPullsResponse = (ProjectPullsPublic);
 
 export type ProjectPullsReadProjectPullData = {
     pullId: string;
@@ -1007,17 +1357,28 @@ export type ProjectPullsCancelProjectPullData = {
 export type ProjectPullsCancelProjectPullResponse = (ProjectPullPublic);
 
 export type ProjectsReadProjectsData = {
+    /**
+     * Exact customer match
+     */
+    customerId?: (string | null);
     limit?: number;
+    /**
+     * Case-insensitive substring match on code or name
+     */
+    q?: (string | null);
     skip?: number;
+    status?: (ProjectStatus | null);
 };
 
-export type ProjectsReadProjectsResponse = (Array<ProjectPublic>);
+export type ProjectsReadProjectsResponse = (ProjectsPublic);
 
 export type ProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
 
 export type ProjectsCreateProjectResponse = (ProjectPublic);
+
+export type ProjectsReadOptionsResponse = (Array<ProjectOption>);
 
 export type ProjectsGetProjectDashboardData = {
     projectId: string;
@@ -1052,15 +1413,19 @@ export type ReceiptsReadUnitLabelData = {
 export type ReceiptsReadUnitLabelResponse = (unknown);
 
 export type ReportsChannelMarginData = {
+    channel?: (Channel | null);
+    groupBy?: MarginDimension;
     /**
      * Reporting month in YYYY-MM (year 2000-2099)
      */
     month: string;
 };
 
-export type ReportsChannelMarginResponse = (ChannelMarginReport);
+export type ReportsChannelMarginResponse = (MarginBreakdownReport);
 
 export type ReportsChannelMarginPdfData = {
+    channel?: (Channel | null);
+    groupBy?: MarginDimension;
     /**
      * Reporting month in YYYY-MM (year 2000-2099)
      */
@@ -1070,6 +1435,8 @@ export type ReportsChannelMarginPdfData = {
 export type ReportsChannelMarginPdfResponse = (unknown);
 
 export type ReportsChannelMarginXlsxData = {
+    channel?: (Channel | null);
+    groupBy?: MarginDimension;
     /**
      * Reporting month in YYYY-MM (year 2000-2099)
      */
@@ -1129,6 +1496,20 @@ export type SalesCreateSaleData = {
 
 export type SalesCreateSaleResponse = ((SalePublic | SaleStaffPublic));
 
+export type SalesCreateSaleReturnData = {
+    requestBody: SaleReturnCreateRequest;
+    saleId: string;
+};
+
+export type SalesCreateSaleReturnResponse = (SaleReturnPublic);
+
+export type SalesReadReturnableSalesData = {
+    castranovaBarcode?: (string | null);
+    sku?: (string | null);
+};
+
+export type SalesReadReturnableSalesResponse = (ReturnableSalesPublic);
+
 export type SalesReadSaleReceiptData = {
     saleId: string;
 };
@@ -1145,41 +1526,19 @@ export type SearchSearchSkuData = {
     sku: string;
 };
 
-export type SearchSearchSkuResponse = (SkuSearchResult);
+export type SearchSearchSkuResponse = ((SkuSearchAdminResult | SkuSearchResult));
 
-export type ServiceTicketsOpenServiceTicketData = {
-    requestBody: ServiceTicketCreate;
+export type ServiceTicketsRecordServiceTicketData = {
+    requestBody: ServiceTicketRecordRequest;
 };
 
-export type ServiceTicketsOpenServiceTicketResponse = (ServiceTicketPublic);
+export type ServiceTicketsRecordServiceTicketResponse = (ServiceTicketPublic);
 
 export type ServiceTicketsReadServiceTicketData = {
     ticketId: string;
 };
 
 export type ServiceTicketsReadServiceTicketResponse = (ServiceTicketPublic);
-
-export type ServiceTicketsAddServiceTicketPartData = {
-    requestBody: ServiceTicketPartCreate;
-    ticketId: string;
-};
-
-export type ServiceTicketsAddServiceTicketPartResponse = (ServiceTicketPartPublic);
-
-export type ServiceTicketsCloseServiceTicketData = {
-    requestBody: ServiceTicketClose;
-    ticketId: string;
-};
-
-export type ServiceTicketsCloseServiceTicketResponse = (ServiceTicketPublic);
-
-export type SettingsGetExchangeRatesResponse = (ExchangeRatesPublic);
-
-export type SettingsUpdateExchangeRatesData = {
-    requestBody: ExchangeRatesUpdate;
-};
-
-export type SettingsUpdateExchangeRatesResponse = (ExchangeRatesPublic);
 
 export type StockAdjustmentsCreateStockAdjustmentData = {
     requestBody: StockAdjustmentCreate;
@@ -1188,17 +1547,29 @@ export type StockAdjustmentsCreateStockAdjustmentData = {
 export type StockAdjustmentsCreateStockAdjustmentResponse = (StockAdjustmentPublic);
 
 export type SuppliersReadSuppliersData = {
+    /**
+     * Exact match on country
+     */
+    country?: (string | null);
     limit?: number;
+    /**
+     * Case-insensitive substring match on name
+     */
+    q?: (string | null);
     skip?: number;
 };
 
-export type SuppliersReadSuppliersResponse = (Array<SupplierPublic>);
+export type SuppliersReadSuppliersResponse = (SuppliersPublic);
 
 export type SuppliersCreateSupplierData = {
     requestBody: SupplierCreate;
 };
 
 export type SuppliersCreateSupplierResponse = (SupplierPublic);
+
+export type SuppliersReadOptionsResponse = (Array<SupplierOption>);
+
+export type SuppliersListCountriesResponse = (Array<(string)>);
 
 export type SuppliersUpdateSupplierData = {
     requestBody: SupplierUpdate;
@@ -1240,6 +1611,8 @@ export type UsersCreateUserData = {
 };
 
 export type UsersCreateUserResponse = (UserPublic);
+
+export type UsersReadOptionsResponse = (Array<UserOption>);
 
 export type UsersReadUserMeResponse = (UserPublic);
 

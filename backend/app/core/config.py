@@ -32,11 +32,14 @@ class Settings(BaseSettings):
     )
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = secrets.token_urlsafe(32)
-    # 60 minutes * 24 hours * 8 days = 8 days
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
-    # 60 minutes * 24 hours * 7 days = 7 days. Rotated on each /login/refresh-token
-    # call (sliding expiry), so the static 7-day window is an upper bound, not a fixed TTL.
-    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # spec §6.2: refresh tokens live 7 days
+    # Access tokens are short-lived (15 min); the frontend transparently
+    # refreshes them via /login/refresh-token while the user is active.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    # 12 hours. Rotated + re-set (max_age) on every /login/refresh-token call,
+    # so this is a SLIDING inactivity window, not a fixed session length:
+    # the clock resets on activity and only expires after 12h of silence.
+    # This is the concrete mechanism behind PRD §8.3 (12h idle auto-logout).
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 12
     # Rate limiting is enabled by default; the test session disables it globally
     # and re-enables it only inside the dedicated rate-limit test.
     RATE_LIMIT_ENABLED: bool = True
@@ -106,10 +109,20 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: EmailStr | None = None
     EMAILS_FROM_NAME: str | None = None
 
-    # Outbound push notification tokens (FR-018). None in dev/test; the LINE +
-    # Viber clients are mocked in tests. Never log these.
+    # Outbound push notification tokens (FR-018). None in dev/test; the LINE
+    # and Telegram clients are mocked in tests. Never log these.
+    # TELEGRAM_BOT_TOKEN goes in the request URL, not a header — see notify.py.
     LINE_CHANNEL_ACCESS_TOKEN: str | None = None
-    VIBER_AUTH_TOKEN: str | None = None
+    # Webhook HMAC key. SECRET -- never log it, and never return it from an
+    # endpoint. Unset means the LINE webhook fails closed with 503.
+    LINE_CHANNEL_SECRET: str | None = None
+    # The Official Account's basic ID, e.g. "@097shucy". Public, not secret --
+    # it is percent-encoded into the connect deep link the user opens.
+    LINE_BOT_BASIC_ID: str | None = None
+    TELEGRAM_BOT_TOKEN: str | None = None
+    # Public (not secret) -- used to build the t.me/<username>?start=<code>
+    # connect deep link. The bot token above is what's actually sensitive.
+    TELEGRAM_BOT_USERNAME: str | None = None
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:

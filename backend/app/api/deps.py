@@ -2,7 +2,7 @@ from collections.abc import Generator
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
 from pydantic import ValidationError
@@ -27,6 +27,19 @@ SessionDep = Annotated[Session, Depends(get_db)]
 TokenDep = Annotated[str, Depends(reusable_oauth2)]
 
 
+# A token the server cannot resolve to a valid, active user is an
+# AUTHENTICATION failure -> 401 (with WWW-Authenticate: Bearer) so clients
+# re-authenticate. 401 is reserved here for exactly that; 403 stays for an
+# authenticated user who lacks a role (see get_admin), and route-level resource
+# lookups keep their own 404s. This includes the stale-token case (valid
+# signature, subject no longer a user): still an auth failure, not a 404.
+_CREDENTIALS_EXC = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Could not validate credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+)
+
+
 def get_current_user(session: SessionDep, token: TokenDep) -> User:
     try:
         payload = jwt.decode(
@@ -34,20 +47,14 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
         )
         token_data = TokenPayload(**payload)
     except (InvalidTokenError, ValidationError):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials",
-        )
+        raise _CREDENTIALS_EXC
     # Only access-typed tokens may act as bearer credentials (rejects refresh
     # tokens and any token missing a type claim).
     if token_data.type != "access":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials",
-        )
+        raise _CREDENTIALS_EXC
     user = session.get(User, token_data.sub)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise _CREDENTIALS_EXC
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return user
@@ -76,3 +83,17 @@ def get_admin(current_user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(get_admin)]
+
+
+def bind_rate_limit_identity(request: Request, current_user: CurrentUser) -> None:
+    """Stash the authenticated user's id where the limiter's key_func can read
+    it (see ``core.limiter.user_or_remote_address``).
+
+    Needed because ``get_remote_address`` keys on the client IP, and staff at
+    one site share a public IP -- an IP-keyed limit sized for one user's poll
+    would 429 the second person to connect. slowapi's key_func only receives
+    the Request, hence the handoff through ``request.state``. FastAPI resolves
+    dependencies before invoking the endpoint that slowapi's decorator wraps,
+    so this always runs first.
+    """
+    request.state.rate_limit_key = str(current_user.id)

@@ -1,33 +1,29 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Boxes, Trash2 } from "lucide-react"
+import { Boxes, PackagePlus, Trash2 } from "lucide-react"
 import { type ReactNode, useId, useRef, useState } from "react"
 
 import {
-  type ProductPublic,
-  ProductsService,
+  type ApiError,
+  type ProductOption,
   type ReceiptsReceiveQuantityResponse,
   ReceiptsService,
   type ReceiveQuantityRequest,
   type ReceiveSerializedRequest,
   type ReceiveSerializedResponse,
-  SuppliersService,
   type UnitPublic,
 } from "@/client"
+import { EntityCombobox } from "@/components/Common/EntityCombobox"
+import { PageHeader } from "@/components/Common/PageHeader"
 import { EmptyState } from "@/components/EmptyState"
 import { PrintLabelButton } from "@/components/PrintLabelButton"
-import { ScanInput } from "@/components/ScanInput"
+import { ScanField } from "@/components/ScanField"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -38,6 +34,10 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
+import { useIsMobile } from "@/hooks/useMobile"
+import { useProductOptions } from "@/hooks/useProductOptions"
+import { useSupplierOptions } from "@/hooks/useSupplierOptions"
+import { queued } from "@/lib/query-client"
 import {
   addPiece,
   buildReceiveQuantityRequest,
@@ -47,9 +47,12 @@ import {
   type DraftPiece,
   type QuantityDraft,
   removePiece,
+  todayISO,
 } from "@/lib/receive-form"
 import { requireAdmin } from "@/lib/route-guards"
+import type { Queued } from "@/lib/sync-producer"
 import { cn } from "@/lib/utils"
+import { handleError } from "@/utils"
 
 export const Route = createFileRoute("/_layout/receive")({
   component: Receive,
@@ -62,12 +65,19 @@ export const Route = createFileRoute("/_layout/receive")({
 function Receive() {
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Receive stock</h1>
-        <p className="text-muted-foreground">
-          Record incoming units from a supplier delivery.
-        </p>
-      </div>
+      <PageHeader
+        title="Receive stock"
+        description="Record incoming units from a supplier delivery."
+      />
+      <Alert>
+        <PackagePlus />
+        <AlertTitle>Book in a delivery</AlertTitle>
+        <AlertDescription>
+          Use Serialized for items tracked by individual barcode — scan each
+          serial and its cost, then receive to print unit labels. Use Quantity
+          for bulk SKUs — enter the count and cost to open a new stock batch.
+        </AlertDescription>
+      </Alert>
       <Tabs defaultValue="serialized">
         <TabsList>
           <TabsTrigger value="serialized">Serialized</TabsTrigger>
@@ -107,12 +117,14 @@ function SectionLabel({
 
 function SerializedTab() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
+  const isMobile = useIsMobile()
 
   const [productId, setProductId] = useState("")
   const [supplierId, setSupplierId] = useState("")
   const [pieces, setPieces] = useState<DraftPiece[]>([])
   const [serial, setSerial] = useState("")
   const [cost, setCost] = useState("")
+  const [receivedDate, setReceivedDate] = useState(todayISO())
   const [received, setReceived] = useState<UnitPublic[]>([])
   const [announce, setAnnounce] = useState("")
 
@@ -128,16 +140,11 @@ function SerializedTab() {
   }
 
   // Reference data — same staleTime as other reference-data screens.
-  const { data: products = [], isPending: productsPending } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: suppliers = [], isPending: suppliersPending } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: () => SuppliersService.readSuppliers(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products = [], isPending: productsPending } = useProductOptions(
+    { activeOnly: true },
+  )
+  const { data: suppliers = [], isPending: suppliersPending } =
+    useSupplierOptions()
 
   const serializedProducts = products.filter(
     (p) => p.tracking_mode === "SERIALIZED",
@@ -148,8 +155,8 @@ function SerializedTab() {
   // mutations replay after an offline reload.
   const mutation = useMutation<
     ReceiveSerializedResponse,
-    Error,
-    ReceiveSerializedRequest
+    ApiError,
+    Queued<ReceiveSerializedRequest>
   >({
     mutationKey: ["receipts"],
     onSuccess: (data) => {
@@ -161,9 +168,11 @@ function SerializedTab() {
       showSuccessToast(`Received ${data.units.length} unit(s).`)
       serialInputRef.current?.focus()
     },
-    onError: () => {
+    onError: (err) => {
       announceMessage("Receive failed.")
-      showErrorToast("Could not receive units. Please retry.")
+      // Surface the server reason (e.g. "Product X is inactive") rather than a
+      // generic retry prompt — retrying will never clear it.
+      handleError.call(showErrorToast, err)
     },
   })
 
@@ -195,11 +204,17 @@ function SerializedTab() {
       productId,
       supplierId,
       crypto.randomUUID(),
+      receivedDate,
     )
-    mutation.mutate(request)
+    mutation.mutate(queued(request, request.idempotency_key))
   }
 
-  const canSubmit = canSubmitSerialized(pieces, productId, supplierId)
+  const canSubmit = canSubmitSerialized(
+    pieces,
+    productId,
+    supplierId,
+    receivedDate,
+  )
 
   return (
     <div className="flex flex-col gap-6 py-4">
@@ -215,23 +230,20 @@ function SerializedTab() {
               *
             </span>
           </Label>
-          <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger
-              id="receive-product"
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={productsPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a serialized product" />
-            </SelectTrigger>
-            <SelectContent>
-              {serializedProducts.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.model_name} ({p.sku})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <EntityCombobox
+            items={serializedProducts}
+            value={productId || undefined}
+            onChange={(value) => setProductId(value ?? "")}
+            getKey={(product) => product.id}
+            getLabel={(product) => `${product.model_name} (${product.sku})`}
+            placeholder="Select a serialized product"
+            searchPlaceholder="Search products…"
+            emptyText="No serialized products available"
+            disabled={productsPending || mutation.isPending}
+            ariaLabel="Product"
+            id="receive-product"
+            required
+          />
         </div>
 
         <div className="flex flex-col gap-2">
@@ -242,23 +254,40 @@ function SerializedTab() {
               *
             </span>
           </Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
-            <SelectTrigger
-              id="receive-supplier"
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={suppliersPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a supplier" />
-            </SelectTrigger>
-            <SelectContent>
-              {suppliers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <EntityCombobox
+            items={suppliers}
+            value={supplierId || undefined}
+            onChange={(value) => setSupplierId(value ?? "")}
+            getKey={(supplier) => supplier.id}
+            getLabel={(supplier) => supplier.name}
+            placeholder="Select a supplier"
+            searchPlaceholder="Search suppliers…"
+            emptyText="No suppliers available"
+            disabled={suppliersPending || mutation.isPending}
+            ariaLabel="Supplier"
+            id="receive-supplier"
+            required
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label id="receive-date-label" htmlFor="receive-date">
+            Receive date
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
+          <DatePicker
+            id="receive-date"
+            labelledBy="receive-date-label"
+            className="h-11"
+            max={todayISO()}
+            required
+            disabled={mutation.isPending}
+            value={receivedDate}
+            onChange={setReceivedDate}
+          />
         </div>
       </div>
 
@@ -267,20 +296,17 @@ function SerializedTab() {
           <CardTitle>Add piece</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            {/* Plain visual label: ScanInput renders a bare input whose own
-                aria-label covers screen readers, so no htmlFor association. */}
-            <p className="text-sm font-medium">Scan serial</p>
-            {/* Scanning fills the serial field below; the operator confirms the
-                cost and presses Add. (No useScanLookup — units don't exist yet.) */}
-            <ScanInput
-              placeholder="Scan serial…"
-              onScan={(code) => {
-                setSerial(code)
-                serialInputRef.current?.focus()
-              }}
-            />
-          </div>
+          {/* Scanning fills the serial field below; the operator confirms the
+              cost and presses Add. (No useScanLookup — units don't exist yet.) */}
+          <ScanField
+            label="Scan serial"
+            placeholder="Scan serial…"
+            clearOnScan
+            onScan={(code) => {
+              setSerial(code)
+              serialInputRef.current?.focus()
+            }}
+          />
 
           <div className="grid gap-4 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
             <div className="flex flex-col gap-2">
@@ -352,6 +378,33 @@ function SerializedTab() {
             title="No pieces added yet"
             hint="Scan or type a serial above, then add it."
           />
+        ) : isMobile ? (
+          <div className="space-y-3">
+            {pieces.map((p) => (
+              <div
+                key={p.key}
+                className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4"
+              >
+                <div className="min-w-0">
+                  <p className="num truncate font-medium">{p.supplierSerial}</p>
+                  <p className="text-muted-foreground num text-sm">
+                    ฿{p.purchaseCostThb}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 shrink-0"
+                  aria-label={`Remove piece ${p.supplierSerial}`}
+                  disabled={mutation.isPending}
+                  onClick={() => handleRemovePiece(p.key, p.supplierSerial)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
         ) : (
           <Table>
             <TableHeader>
@@ -403,20 +456,25 @@ function SerializedTab() {
   )
 }
 
-const EMPTY_QUANTITY_DRAFT: QuantityDraft = {
-  productId: "",
-  supplierId: "",
-  receivedQty: "",
-  purchaseCostThb: "",
-  supplierBatchRef: "",
-  expectedQty: "",
-  note: "",
+// A function, not a constant: todayISO() must be re-read on every reset, or a
+// tablet left open overnight would keep defaulting to yesterday.
+function emptyQuantityDraft(): QuantityDraft {
+  return {
+    productId: "",
+    supplierId: "",
+    receivedQty: "",
+    purchaseCostThb: "",
+    supplierBatchRef: "",
+    expectedQty: "",
+    note: "",
+    receivedDate: todayISO(),
+  }
 }
 
 function QuantityTab() {
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
-  const [draft, setDraft] = useState<QuantityDraft>(EMPTY_QUANTITY_DRAFT)
+  const [draft, setDraft] = useState<QuantityDraft>(emptyQuantityDraft())
   const [receivedBatch, setReceivedBatch] =
     useState<ReceiptsReceiveQuantityResponse | null>(null)
   const [announce, setAnnounce] = useState("")
@@ -431,16 +489,11 @@ function QuantityTab() {
 
   // Reference data — keyed identically to the Serialized tab, so TanStack Query
   // serves both tabs from one shared cache entry (no duplicate fetch).
-  const { data: products = [], isPending: productsPending } = useQuery({
-    queryKey: ["products"],
-    queryFn: () => ProductsService.readProducts(),
-    staleTime: 5 * 60 * 1000,
-  })
-  const { data: suppliers = [], isPending: suppliersPending } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: () => SuppliersService.readSuppliers(),
-    staleTime: 5 * 60 * 1000,
-  })
+  const { data: products = [], isPending: productsPending } = useProductOptions(
+    { activeOnly: true },
+  )
+  const { data: suppliers = [], isPending: suppliersPending } =
+    useSupplierOptions()
 
   const quantityProducts = products.filter(
     (p) => p.tracking_mode === "QUANTITY",
@@ -451,22 +504,24 @@ function QuantityTab() {
   // receiveSerialized only). No mutationKey here.
   const mutation = useMutation<
     ReceiptsReceiveQuantityResponse,
-    Error,
+    ApiError,
     ReceiveQuantityRequest
   >({
     mutationFn: (body) =>
       ReceiptsService.receiveQuantity({ requestBody: body }),
     onSuccess: (batch) => {
       setReceivedBatch(batch)
-      setDraft(EMPTY_QUANTITY_DRAFT)
+      setDraft(emptyQuantityDraft())
       announceMessage(
         `Received ${batch.received_qty} unit(s) into batch ${batch.batch_no}.`,
       )
       showSuccessToast(`Received batch ${batch.batch_no}.`)
     },
-    onError: () => {
+    onError: (err) => {
       announceMessage("Receive failed.")
-      showErrorToast("Could not receive batch. Please retry.")
+      // Surface the server reason (e.g. "Product X is inactive") rather than a
+      // generic retry prompt — retrying will never clear it.
+      handleError.call(showErrorToast, err)
     },
   })
 
@@ -502,26 +557,20 @@ function QuantityTab() {
               *
             </span>
           </Label>
-          <Select
-            value={draft.productId}
-            onValueChange={(v) => patch("productId", v)}
-          >
-            <SelectTrigger
-              id={`${fieldId}-product`}
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={productsPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a quantity product" />
-            </SelectTrigger>
-            <SelectContent>
-              {quantityProducts.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.model_name} ({p.sku})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <EntityCombobox
+            items={quantityProducts}
+            value={draft.productId || undefined}
+            onChange={(value) => patch("productId", value ?? "")}
+            getKey={(product) => product.id}
+            getLabel={(product) => `${product.model_name} (${product.sku})`}
+            placeholder="Select a quantity product"
+            searchPlaceholder="Search products…"
+            emptyText="No quantity products available"
+            disabled={productsPending || mutation.isPending}
+            ariaLabel="Product"
+            id={`${fieldId}-product`}
+            required
+          />
         </div>
 
         <div className="flex flex-col gap-2">
@@ -532,26 +581,43 @@ function QuantityTab() {
               *
             </span>
           </Label>
-          <Select
-            value={draft.supplierId}
-            onValueChange={(v) => patch("supplierId", v)}
+          <EntityCombobox
+            items={suppliers}
+            value={draft.supplierId || undefined}
+            onChange={(value) => patch("supplierId", value ?? "")}
+            getKey={(supplier) => supplier.id}
+            getLabel={(supplier) => supplier.name}
+            placeholder="Select a supplier"
+            searchPlaceholder="Search suppliers…"
+            emptyText="No suppliers available"
+            disabled={suppliersPending || mutation.isPending}
+            ariaLabel="Supplier"
+            id={`${fieldId}-supplier`}
+            required
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label
+            id={`${fieldId}-received-date-label`}
+            htmlFor={`${fieldId}-received-date`}
           >
-            <SelectTrigger
-              id={`${fieldId}-supplier`}
-              className="h-11 w-full"
-              aria-required="true"
-              disabled={suppliersPending || mutation.isPending}
-            >
-              <SelectValue placeholder="Select a supplier" />
-            </SelectTrigger>
-            <SelectContent>
-              {suppliers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            Receive date
+            <span aria-hidden="true" className="text-destructive">
+              {" "}
+              *
+            </span>
+          </Label>
+          <DatePicker
+            id={`${fieldId}-received-date`}
+            labelledBy={`${fieldId}-received-date-label`}
+            className="h-11"
+            max={todayISO()}
+            required
+            disabled={mutation.isPending}
+            value={draft.receivedDate}
+            onChange={(iso) => patch("receivedDate", iso)}
+          />
         </div>
       </div>
 
@@ -581,7 +647,7 @@ function QuantityTab() {
         </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor={`${fieldId}-cost`}>
-            Purchase cost (THB)
+            Unit cost (THB)
             <span aria-hidden="true" className="text-destructive">
               {" "}
               *
@@ -668,35 +734,63 @@ function QuantityTab() {
 }
 
 function ReceivedUnits({ units }: { units: UnitPublic[] }) {
+  const isMobile = useIsMobile()
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-semibold">Received units ({units.length})</h2>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>CastraNova barcode</TableHead>
-            <TableHead>Supplier serial</TableHead>
-            <TableHead className="w-0" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+      {isMobile ? (
+        <div className="space-y-3">
           {units.map((u) => (
-            <TableRow key={u.id}>
-              <TableCell className="num">{u.castranova_barcode}</TableCell>
-              <TableCell className="num">{u.supplier_serial}</TableCell>
-              <TableCell className="text-right">
-                <PrintLabelButton
-                  target={{
-                    kind: "unit",
-                    unitId: u.id,
-                    serial: u.supplier_serial,
-                  }}
-                />
-              </TableCell>
-            </TableRow>
+            <div
+              key={u.id}
+              className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4"
+            >
+              <div className="min-w-0">
+                <p className="num truncate font-medium">
+                  {u.castranova_barcode}
+                </p>
+                <p className="num text-muted-foreground truncate text-sm">
+                  {u.supplier_serial}
+                </p>
+              </div>
+              <PrintLabelButton
+                target={{
+                  kind: "unit",
+                  unitId: u.id,
+                  serial: u.supplier_serial,
+                }}
+              />
+            </div>
           ))}
-        </TableBody>
-      </Table>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>CastraNova barcode</TableHead>
+              <TableHead>Supplier serial</TableHead>
+              <TableHead className="w-0" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {units.map((u) => (
+              <TableRow key={u.id}>
+                <TableCell className="num">{u.castranova_barcode}</TableCell>
+                <TableCell className="num">{u.supplier_serial}</TableCell>
+                <TableCell className="text-right">
+                  <PrintLabelButton
+                    target={{
+                      kind: "unit",
+                      unitId: u.id,
+                      serial: u.supplier_serial,
+                    }}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </div>
   )
 }
@@ -706,7 +800,7 @@ function ReceivedBatchLabels({
   products,
 }: {
   batch: ReceiptsReceiveQuantityResponse
-  products: ProductPublic[]
+  products: ProductOption[]
 }) {
   const product = products.find((p) => p.id === batch.product_id)
   if (!product) return null

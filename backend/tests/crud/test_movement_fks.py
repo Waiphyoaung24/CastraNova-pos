@@ -64,12 +64,13 @@ def fk_prereqs(db: Session) -> dict[str, uuid.UUID]:
         received_by_user_id=user.id,
     )
     unit = units[0]
-    ticket = crud.open_service_ticket(
+    ticket = crud.record_service_ticket(
         session=db,
         customer_id=customer.id,
         issue="FK smoke",
+        parts=[],
         idempotency_key=uuid.uuid4(),
-        created_by_user_id=user.id,
+        actor_user_id=user.id,
     )
     return {
         "user_id": user.id,

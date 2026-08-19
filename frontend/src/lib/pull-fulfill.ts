@@ -1,6 +1,7 @@
 import type {
   ProjectPullFulfill,
   ProjectPullLinePublic,
+  ProjectPullState,
 } from "@/client/types.gen"
 import type { ScanLookupResult } from "@/hooks/useScanLookup"
 
@@ -20,10 +21,24 @@ export function lineCap(line: ProjectPullLinePublic): number {
   return line.line_kind === "UNIT" ? 1 : (line.requested_qty ?? 0)
 }
 
-/** Seed a draft with every line at 0 (required — see file header). */
-export function seedFulfillDraft(lines: ProjectPullLinePublic[]): FulfillDraft {
+/**
+ * Seed a draft for a pull.
+ *
+ * PENDING — every line at 0 (required — see file header).
+ *
+ * Settled (FULFILLED / SHORT / CANCELLED) — every line at its persisted
+ * fulfilled_qty, so reopening the pull shows what was actually given out
+ * instead of zeros. Fulfillment is one-shot and PENDING-only server-side
+ * (crud.fulfill_project_pull), so this draft is read-only and never submitted.
+ */
+export function seedFulfillDraft(
+  lines: ProjectPullLinePublic[],
+  state: ProjectPullState,
+): FulfillDraft {
   const draft: FulfillDraft = {}
-  for (const line of lines) draft[line.id] = 0
+  for (const line of lines) {
+    draft[line.id] = state === "PENDING" ? 0 : line.fulfilled_qty
+  }
   return draft
 }
 
@@ -89,4 +104,12 @@ export function projectedPullState(
 ): "FULFILLED" | "SHORT" {
   const allFull = lines.every((l) => (draft[l.id] ?? 0) >= lineCap(l))
   return allFull ? "FULFILLED" : "SHORT"
+}
+
+/** How many lines are drafted to their full cap (for the give-out progress). */
+export function fulfilledLineCount(
+  lines: ProjectPullLinePublic[],
+  draft: FulfillDraft,
+): number {
+  return lines.filter((l) => (draft[l.id] ?? 0) >= lineCap(l)).length
 }

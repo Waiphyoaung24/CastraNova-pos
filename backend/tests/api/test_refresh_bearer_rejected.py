@@ -15,5 +15,5 @@ def test_refresh_token_rejected_as_bearer(client: TestClient) -> None:
         f"{settings.API_V1_STR}/login/test-token",
         headers={"Authorization": f"Bearer {refresh}"},
     )
-    assert r.status_code == 403
+    assert r.status_code == 401
     assert r.json()["detail"] == "Could not validate credentials"

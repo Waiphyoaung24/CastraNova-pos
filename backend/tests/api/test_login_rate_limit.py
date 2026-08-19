@@ -38,7 +38,7 @@ def test_sixth_login_attempt_is_rate_limited(
     assert "Rate limit" in r6.json().get("error", "")
 
 
-def test_sixth_refresh_attempt_is_rate_limited(
+def test_refresh_is_rate_limited_above_the_cap(
     client: TestClient,
     rate_limit_on: None,  # noqa: ARG001 — side-effect fixture; enables rate limiting
 ) -> None:
@@ -46,12 +46,12 @@ def test_sixth_refresh_attempt_is_rate_limited(
     client.cookies.clear()  # no refresh cookie -> 401s, which still count
     url = f"{settings.API_V1_STR}/login/refresh-token"
 
-    codes = [client.post(url).status_code for _ in range(5)]
+    codes = [client.post(url).status_code for _ in range(60)]
     assert all(c == 401 for c in codes)
 
-    r6 = client.post(url)
-    assert r6.status_code == 429
-    assert "Rate limit" in r6.json().get("error", "")
+    r61 = client.post(url)
+    assert r61.status_code == 429
+    assert "Rate limit" in r61.json().get("error", "")
 
 
 def test_twenty_first_logout_is_rate_limited(
@@ -106,6 +106,49 @@ def test_thirty_first_pricing_override_is_rate_limited(
     r31 = client.post(url, headers=staff_token_headers, json=payload)
     assert r31.status_code == 429
     assert "Rate limit" in r31.json().get("error", "")
+
+
+def test_121st_pricing_override_poll_is_rate_limited(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    db: Session,
+    rate_limit_on: None,  # noqa: ARG001 — side-effect fixture; enables rate limiting
+) -> None:
+    """Pricing-override poll read is rate limited (FR-010 polling backstop)."""
+    crud.set_setting(session=db, key=crud.OVERRIDE_THRESHOLD_KEY, value=5.0)
+    product = crud.create_product(
+        session=db,
+        product_in=ProductCreate(
+            sku=f"POLLLIM-{uuid.uuid4().hex[:8]}",
+            model_name="Poll Rate Limit Test",
+            brand="Acme",
+            category="compressor",
+            tracking_mode=TrackingMode.QUANTITY,
+            retail_price_thb=Decimal("1000.00"),
+            repair_price_thb=Decimal("300.00"),
+        ),
+    )
+    created = client.post(
+        f"{settings.API_V1_STR}/pricing-overrides",
+        headers=staff_token_headers,
+        json={
+            "target_kind": "SALE_LINE",
+            "product_id": str(product.id),
+            "requested_price_thb": "970.00",  # 3% -> AUTO_APPROVED
+            "reason": "poll rate limit test",
+        },
+    )
+    assert created.status_code == 200, created.text
+    url = f"{settings.API_V1_STR}/pricing-overrides/{created.json()['id']}"
+
+    codes = [
+        client.get(url, headers=staff_token_headers).status_code for _ in range(120)
+    ]
+    assert all(c == 200 for c in codes)
+
+    r121 = client.get(url, headers=staff_token_headers)
+    assert r121.status_code == 429
+    assert "Rate limit" in r121.json().get("error", "")
 
 
 def test_121st_sync_ingest_is_rate_limited(

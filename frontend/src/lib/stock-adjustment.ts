@@ -1,5 +1,9 @@
 import type {
   AdjustmentTarget,
+  SkuBatchAdminPublic,
+  SkuBatchPublic,
+  SkuSearchAdminResult,
+  SkuSearchResult,
   StockAdjustmentCreate,
 } from "@/client/types.gen"
 
@@ -73,4 +77,26 @@ export function buildAdjustmentPayload(
   }
   if (delta > 0) body.purchase_cost_thb = d.purchaseCost.trim()
   return body
+}
+
+/** A bare `in` check leaves the staff shape in the union (TS widens it to
+ *  `SkuBatchPublic & Record<"purchase_cost_thb", unknown>`), so the narrowing
+ *  is spelled out as a predicate. */
+function hasCost(
+  batch: SkuBatchAdminPublic | SkuBatchPublic,
+): batch is SkuBatchAdminPublic {
+  return "purchase_cost_thb" in batch
+}
+
+/** Newest batch for a SKU — the search endpoint returns batches oldest-first,
+ *  so that is the last one. This is the default cost basis for a positive
+ *  adjustment. Null for staff-scoped results (no cost in the payload),
+ *  SERIALIZED SKUs, and SKUs that have never been received. */
+export function latestCostBatch(
+  res: SkuSearchAdminResult | SkuSearchResult | undefined,
+): SkuBatchAdminPublic | null {
+  const batches = res?.batches ?? []
+  // Not .at(-1): tsconfig targets ES2020 and Array.prototype.at is ES2022.
+  const newest = batches[batches.length - 1]
+  return newest && hasCost(newest) ? newest : null
 }

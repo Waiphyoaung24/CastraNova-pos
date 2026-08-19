@@ -57,7 +57,7 @@ For multi-step tasks, state a brief plan with verification per step.
 | 3. Test-first | `test-driven-development` | Inside every build task | `ecc:e2e-testing` skill + `ecc:e2e-runner` agent (Playwright) alongside pytest |
 | 4. Debug | `systematic-debugging` | Any failing/flaky test or wrong stock total | `ecc:silent-failure-hunter`, `ecc:performance-optimizer` |
 | 5. Review | `requesting-code-review` (orchestrator) | Before opening a PR | dispatches `ecc:fastapi-reviewer`, `ecc:python-reviewer`, `ecc:react-reviewer`, `ecc:typescript-reviewer`, `ecc:database-reviewer`, `ecc:security-reviewer` |
-| 6. Ship | `create-pr` (+ `git-pushing`) | After review passes | Clean, scoped PRs — one feature/task group per PR; never push to `master` directly. |
+| 6. Ship | `create-pr` (+ `git-pushing`) | After review passes | Clean, scoped PRs — one feature/task group per PR, into `dev`. Release by merging `dev` → `production`; never push to `master` directly. |
 
 **The loop:** `writing-plans` (once) → for each task: `subagent-driven-development` → `test-driven-development` → `systematic-debugging` (only if a test resists) → `requesting-code-review` → `create-pr`.
 
@@ -71,13 +71,16 @@ For multi-step tasks, state a brief plan with verification per step.
 
 CastraNova-POS is an **inventory tracking & management system**. Forked from `fastapi/full-stack-fastapi-template`. Core domain (forward-looking): products, stock movements, suppliers, sales, audit trails.
 
-## Project Status (as of 2026-06-12)
+## Project Status (as of 2026-07-19)
 
-- **Default working branch: `dev`.** Flow is feature branch → PR → `dev`. `master` is the upstream `full-stack-fastapi-template` base — never target or push it.
+- **Branch model (3 branches).** `dev` is the development trunk — flow is feature branch → PR → `dev`. `production` is the release/deploy branch (created 2026-06-17 from `dev`); promote by merging `dev` → `production`. `master` is the upstream `full-stack-fastapi-template` base — never target or push it (no `dev`/`production` → `master` PRs).
 - **Core POS implementation** (plan Parts 0–2) is built; Parts 3–5 remain a roadmap to expand on demand.
 - **Pre-deploy hardening shipped** (merged to `dev` 2026-06-12 via PRs #6/#7/#8; per-PR branches deleted): bounded/ordered catalog endpoints; security (idempotency replay→actor binding, rate limits, least-privilege `castranova_app` DB role); E2E per-run DB reset + admin de-flake.
 - **CodeRabbit whole-repo remediation done:** migration `m027` (saleline `quantity > 0`, product `retail/repair_price_thb >= 0` CHECKs, `systemsetting.updated_by_user_id` FK `ON DELETE SET NULL`) + `tickets.tsx` idempotency-key reuse on retry. Design/plan under `docs/superpowers/`.
-- **Alembic head: `m027`** (`586bc2d1d79d`). Run `alembic upgrade head` on any DB still on an older revision.
+- **Telegram self-enrollment shipped** (m030/m031): a one-time-code connect flow binds a user's Telegram chat to their account (`telegramconnectcode` table, unique `telegram_chat_id`). **Viber was removed entirely** (m038) — it had no enrollment path and no way to deliver; `NotificationChannel.VIBER` is retained only so historical append-only `notificationlog` rows still deserialize (Postgres has no `DROP VALUE`). `CHANNEL_ADDRESS_ATTR` is now the single source of truth for live channels — the preference grid is built from its keys.
+- **LINE self-enrollment shipped** (m039): a one-time code + a `line.me/R/oaMessage` deep link (which pre-types the code in a chat with the Official Account) binds `user.line_user_id` via a **public, unauthenticated webhook** at `POST /notifications/line/webhook`. Its only gate is an HMAC-SHA256 signature computed over the **raw request body before parsing** — re-serializing a parsed dict breaks the HMAC. The handler always returns 200 past that gate, because a non-200 makes LINE disable the webhook. `unfollow` clears the binding, which is the partial fix for LINE returning 200 (and so logging `SENT`) on pushes to users who blocked the Official Account. Needs `LINE_CHANNEL_SECRET` + `LINE_BOT_BASIC_ID` alongside `LINE_CHANNEL_ACCESS_TOKEN`, **all three threaded through `compose.dokploy.yml`** — that file's `backend.environment` is an allowlist, and the access token was missing from it, so production never had a LINE token before m039. Design: `docs/superpowers/specs/2026-08-10-line-enrollment-design.md`.
+- **Ledger/report indexes shipped** (m028/m029/m032/m033): FK and range-filter indexes on the append-only unit/part movement ledgers and the margin-report date columns.
+- **Alembic head: `m039`** (`c4d5e6f7a8b0`). Run `alembic upgrade head` on any DB still on an older revision. This line goes stale fast — several worktrees add migrations concurrently, so trust `alembic heads` over this doc.
 - **Known backlog:** `ServiceTicketPart` has no `idempotency_key`, so a multi-part ticket retry can duplicate part lines — add one (mirroring `Sale`/`PartMovement`) in a future hardening pass. Remaining deploy-checklist leftovers are tracked outside this file.
 
 ## Stack
@@ -89,7 +92,7 @@ CastraNova-POS is an **inventory tracking & management system**. Forked from `fa
 | DB       | PostgreSQL                                                           |
 | Frontend | React + TypeScript, Vite, TanStack Router + Query, shadcn/ui, Tailwind v4 |
 | SDK      | `@hey-api/openapi-ts` — auto-generated from FastAPI OpenAPI          |
-| Testing  | pytest (backend), Playwright (E2E)                                   |
+| Testing  | pytest (backend), vitest (frontend unit), Playwright (E2E)            |
 | Infra    | Docker Compose, Traefik, Mailcatcher (dev SMTP), Sentry              |
 | Tooling  | uv, ruff, mypy (strict), biome, prek (pre-commit)                    |
 
@@ -150,7 +153,8 @@ scripts/                # generate-client.sh, test.sh, etc.
 
 - Start dev stack: `docker compose watch`
 - Backend tests: `bash scripts/test.sh` (or `pytest` inside `backend/`)
-- E2E tests: `bun run test` (Playwright) in `frontend/`
+- Frontend unit tests: `bun run test:unit` (vitest) in `frontend/`. Scoped to colocated `src/**/*.test.ts` — pure logic only, no stack or DB needed. Playwright specs live in `frontend/tests/` and are never collected by vitest.
+- E2E tests: `bun run test` (Playwright) in `frontend/`. **Always set `E2E_SKIP_DB_RESET=1`** unless a full dev-DB reset was explicitly requested — `frontend/tests/global.setup.ts` truncates and reseeds the shared dev database by default on every run.
 - Pre-commit (`prek` / biome / ruff / mypy) must pass before commit.
 - Required env vars before any deploy: `SECRET_KEY`, `POSTGRES_PASSWORD`, `FIRST_SUPERUSER_PASSWORD`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 

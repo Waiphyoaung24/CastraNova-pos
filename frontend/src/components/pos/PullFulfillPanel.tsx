@@ -4,8 +4,7 @@ import type {
   ProjectPullLinePublic,
   ProjectPullPublic,
 } from "@/client/types.gen"
-import { CameraScanFallback } from "@/components/CameraScanFallback"
-import { ScanInput, type ScanInputHandle } from "@/components/ScanInput"
+import { ScanField, type ScanFieldHandle } from "@/components/ScanField"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,6 +17,7 @@ import {
 } from "@/components/ui/table"
 import {
   type FulfillDraft,
+  fulfilledLineCount,
   lineCap,
   projectedPullState,
 } from "@/lib/pull-fulfill"
@@ -26,10 +26,8 @@ interface PullFulfillPanelProps {
   pull: ProjectPullPublic
   projectLabel: string
   customerLabel: string
-  /** product_id -> model name, for PART line labels. */
-  productNames: Map<string, string>
   draft: FulfillDraft
-  scanRef: Ref<ScanInputHandle>
+  scanRef: Ref<ScanFieldHandle>
   onScan: (code: string) => void
   isSearching: boolean
   notFound: boolean
@@ -41,19 +39,15 @@ interface PullFulfillPanelProps {
   isPending: boolean
 }
 
-function lineLabel(
-  line: ProjectPullLinePublic,
-  productNames: Map<string, string>,
-): string {
+function lineLabel(line: ProjectPullLinePublic): string {
   if (line.line_kind === "UNIT") return line.unit_serial ?? "(no serial)"
-  return productNames.get(line.product_id) ?? line.product_id
+  return `${line.model_name} (${line.product_sku})`
 }
 
 export function PullFulfillPanel({
   pull,
   projectLabel,
   customerLabel,
-  productNames,
   draft,
   scanRef,
   onScan,
@@ -68,11 +62,20 @@ export function PullFulfillPanel({
 }: PullFulfillPanelProps) {
   const canFulfill = pull.state === "PENDING" && !isPending
   const projected = projectedPullState(pull.lines, draft)
+  const given = fulfilledLineCount(pull.lines, draft)
+  const total = pull.lines.length
+  const pct = total === 0 ? 0 : Math.round((given / total) * 100)
+  const stateWord =
+    pull.state === "FULFILLED"
+      ? "done"
+      : pull.state === "CANCELLED"
+        ? "cancelled"
+        : "short"
 
   return (
     <div className="space-y-4">
       <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-        <ArrowLeft /> Back to queue
+        <ArrowLeft /> Back to requests
       </Button>
 
       <div>
@@ -80,38 +83,52 @@ export function PullFulfillPanel({
         <p className="text-muted-foreground text-sm">{customerLabel}</p>
       </div>
 
-      {pull.state === "PENDING" ? (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">Scan item</p>
-          <ScanInput ref={scanRef} onScan={onScan} />
-          <CameraScanFallback onScan={onScan} />
-          <p
-            aria-live="assertive"
-            className="text-muted-foreground min-h-5 text-sm"
-          >
-            {isError
-              ? "Scan lookup failed. Try again."
-              : notFound
-                ? "No item found for that code."
-                : scanNotice}
-          </p>
-          <p
-            aria-live="polite"
-            className="text-muted-foreground min-h-5 text-sm"
-          >
-            {isSearching ? "Searching…" : ""}
-          </p>
+      <div>
+        <p className="text-sm font-medium">
+          Given out: {given} of {total} {total === 1 ? "item" : "items"}
+        </p>
+        <div className="bg-muted mt-2 h-2 w-full overflow-hidden rounded-full">
+          <div className="bg-cta h-full" style={{ width: `${pct}%` }} />
         </div>
+      </div>
+
+      {pull.state === "PENDING" ? (
+        <ScanField
+          ref={scanRef}
+          label="Scan item"
+          clearOnScan
+          onScan={onScan}
+          status={
+            <>
+              <p
+                aria-live="assertive"
+                className="text-muted-foreground min-h-5 text-sm"
+              >
+                {isError
+                  ? "Scan lookup failed. Try again."
+                  : notFound
+                    ? "No item found for that code."
+                    : scanNotice}
+              </p>
+              <p
+                aria-live="polite"
+                className="text-muted-foreground min-h-5 text-sm"
+              >
+                {isSearching ? "Searching…" : ""}
+              </p>
+            </>
+          }
+        />
       ) : (
-        <Badge variant="outline">This pull is {pull.state}</Badge>
+        <Badge variant="outline">This request is {stateWord}</Badge>
       )}
 
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Line</TableHead>
-            <TableHead className="text-muted-foreground">Type</TableHead>
-            <TableHead className="text-center">Fulfilled / Requested</TableHead>
+            <TableHead>Item</TableHead>
+            <TableHead className="text-muted-foreground">Kind</TableHead>
+            <TableHead className="text-center">Given / Needed</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -121,7 +138,7 @@ export function PullFulfillPanel({
             return (
               <TableRow key={line.id}>
                 <TableCell className="num font-medium">
-                  {lineLabel(line, productNames)}
+                  {lineLabel(line)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
                   {line.line_kind}
@@ -134,7 +151,7 @@ export function PullFulfillPanel({
                       size="icon"
                       className="size-11"
                       disabled={!canFulfill || qty <= 0}
-                      aria-label={`Decrease ${lineLabel(line, productNames)}`}
+                      aria-label={`Decrease ${lineLabel(line)}`}
                       onClick={() => onQtyChange(line, qty - 1)}
                     >
                       <Minus />
@@ -143,7 +160,7 @@ export function PullFulfillPanel({
                       {qty} / {cap}
                     </span>
                     <span className="sr-only" aria-live="polite">
-                      {`${lineLabel(line, productNames)} ${qty} of ${cap}`}
+                      {`${lineLabel(line)} ${qty} of ${cap}`}
                     </span>
                     <Button
                       type="button"
@@ -151,7 +168,7 @@ export function PullFulfillPanel({
                       size="icon"
                       className="size-11"
                       disabled={!canFulfill || qty >= cap}
-                      aria-label={`Increase ${lineLabel(line, productNames)}`}
+                      aria-label={`Increase ${lineLabel(line)}`}
                       onClick={() => onQtyChange(line, qty + 1)}
                     >
                       <Plus />
@@ -164,12 +181,19 @@ export function PullFulfillPanel({
         </TableBody>
       </Table>
 
-      <div className="flex items-center justify-end gap-4">
-        <span className="text-muted-foreground text-sm">Will settle as</span>
-        <Badge variant={projected === "FULFILLED" ? "default" : "destructive"}>
-          {projected}
-        </Badge>
-      </div>
+      {/* Forecast of the outcome you're about to save — only meaningful while
+          the pull can still be fulfilled. A settled pull states its real
+          outcome in the badge above instead. */}
+      {pull.state === "PENDING" ? (
+        <div className="flex items-center justify-end gap-4">
+          <span className="text-muted-foreground text-sm">When you finish</span>
+          <Badge
+            variant={projected === "FULFILLED" ? "default" : "destructive"}
+          >
+            {projected === "FULFILLED" ? "All items ready" : "Some items short"}
+          </Badge>
+        </div>
+      ) : null}
 
       <button
         type="button"
@@ -177,7 +201,7 @@ export function PullFulfillPanel({
         disabled={!canFulfill}
         className="bg-cta text-cta-foreground hover:bg-cta/90 focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none flex h-11 w-full items-center justify-center rounded-md px-4 text-sm font-semibold disabled:pointer-events-none disabled:opacity-50"
       >
-        {isPending ? "Fulfilling…" : "Fulfill pull"}
+        {isPending ? "Saving…" : "Done — give out parts"}
       </button>
     </div>
   )

@@ -1,6 +1,7 @@
 import re
 import uuid
 from collections.abc import Iterator
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -234,3 +235,41 @@ def test_unit_label_qty_emits_multiple_pages(
     )
     assert r1.status_code == 200
     assert _page_count(r1.content) == 1
+
+
+# --- received_date (receive date picker, design 2026-07-25) -------------------
+
+
+def test_receive_serialized_accepts_received_date(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    product_id, supplier_id = seed_product_supplier
+    r = client.post(
+        f"{PREFIX}/receipts/serialized",
+        headers=superuser_token_headers,
+        json=_body(product_id, supplier_id, received_date="2026-07-10"),
+    )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    unit = db.get(Unit, uuid.UUID(r.json()["units"][0]["id"]))
+    assert unit is not None
+    assert unit.received_at.date() == date(2026, 7, 10)
+
+
+def test_receive_serialized_rejects_future_date(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    seed_product_supplier: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    product_id, supplier_id = seed_product_supplier
+    future = (date.today() + timedelta(days=5)).isoformat()
+    r = client.post(
+        f"{PREFIX}/receipts/serialized",
+        headers=superuser_token_headers,
+        json=_body(product_id, supplier_id, received_date=future),
+    )
+    assert r.status_code == 422
+    assert "future" in r.json()["detail"].lower()

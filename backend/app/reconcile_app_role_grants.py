@@ -32,6 +32,9 @@ def main() -> None:
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             f"GRANT USAGE, SELECT ON SEQUENCES TO {quoted_role}",
             f'GRANT DELETE ON "user" TO {quoted_role}',
+            f"GRANT DELETE ON product TO {quoted_role}",
+            f"GRANT DELETE ON telegramconnectcode TO {quoted_role}",
+            f"GRANT DELETE ON lineconnectcode TO {quoted_role}",
             f"REVOKE ALL ON alembic_version FROM {quoted_role}",
         ):
             conn.execute(text(statement))

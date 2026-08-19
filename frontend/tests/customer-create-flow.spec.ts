@@ -42,6 +42,9 @@ test("admin Customers screen creates a customer that appears in the list", async
     page.getByRole("heading", { name: "Customers", exact: true }),
   ).toBeVisible()
 
+  // Creation lives behind a dialog, same pattern as the inline Sale flow above.
+  await page.getByRole("button", { name: "New customer" }).click()
+
   await page.getByLabel("Name").fill(name)
   await page.getByRole("button", { name: "Create customer" }).click()
 
