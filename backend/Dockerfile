@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # These base-image build tools are not runtime dependencies. Removing them
 # reduces attack surface and avoids shipping vulnerable unused metadata.
-RUN python -m pip uninstall --yes wheel jaraco.context
+RUN /usr/local/bin/python -m pip uninstall --yes wheel jaraco.context
 
 WORKDIR /app/backend/
 
