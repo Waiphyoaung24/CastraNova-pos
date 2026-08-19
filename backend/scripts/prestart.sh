@@ -17,5 +17,9 @@ python app/backend_pre_start.py
 # Run migrations
 alembic upgrade head
 
+# A fresh migration or ACL-less restore can create tables after M026 ran.
+# Reconcile the restricted runtime role before initial_data uses it.
+python app/reconcile_app_role_grants.py
+
 # Create initial data in DB
 python app/initial_data.py
