@@ -1,4 +1,4 @@
-FROM python:3.10
+FROM python:3.10.20-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1
 
@@ -20,12 +20,12 @@ WORKDIR /app/
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#using-the-environment
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Install dependencies
+# Install production dependencies only
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-workspace --package app
+    uv sync --frozen --no-dev --no-install-workspace --package app
 
 COPY ./backend/scripts /app/backend/scripts
 
@@ -33,12 +33,16 @@ COPY ./backend/pyproject.toml ./backend/alembic.ini /app/backend/
 
 COPY ./backend/app /app/backend/app
 
-# Sync the project
+# Sync the project without adding development tooling to the runtime image
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --package app
+    uv sync --frozen --no-dev --package app
+
+# Setuptools vendors the flagged wheel and jaraco.context copies; none of these
+# build tools are runtime dependencies, so remove them from the final image.
+RUN /usr/local/bin/python -m pip uninstall --yes setuptools wheel
 
 WORKDIR /app/backend/
 

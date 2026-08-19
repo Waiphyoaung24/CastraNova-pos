@@ -1,5 +1,5 @@
 # Stage 0, "build-stage", based on Bun, to build and compile the frontend
-FROM oven/bun:1 AS build-stage
+FROM oven/bun:1.3.14-alpine AS build-stage
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN bun run build
 
 
 # Stage 1, based on Nginx, to have only the compiled app, ready for production with Nginx
-FROM nginx:1
+FROM nginx:1.31.3-alpine
 
 COPY --from=build-stage /app/frontend/dist/ /usr/share/nginx/html
 
