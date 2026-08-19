@@ -40,6 +40,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-dev --package app
 
+# These base-image build tools are not runtime dependencies. Removing them
+# reduces attack surface and avoids shipping vulnerable unused metadata.
+RUN python -m pip uninstall --yes wheel jaraco.context
+
 WORKDIR /app/backend/
 
 CMD ["fastapi", "run", "--workers", "4", "app/main.py"]
