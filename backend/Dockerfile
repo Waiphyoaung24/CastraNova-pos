@@ -40,9 +40,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-dev --package app
 
-# These base-image build tools are not runtime dependencies. Removing them
-# reduces attack surface and avoids shipping vulnerable unused metadata.
-RUN /usr/local/bin/python -m pip uninstall --yes wheel jaraco.context
+# Setuptools vendors the flagged wheel and jaraco.context copies; none of these
+# build tools are runtime dependencies, so remove them from the final image.
+RUN /usr/local/bin/python -m pip uninstall --yes setuptools wheel
 
 WORKDIR /app/backend/
 
