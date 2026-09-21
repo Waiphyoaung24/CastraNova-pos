@@ -1893,6 +1893,9 @@ export const ProjectConsumptionRowPublicSchema = {
         line_kind: {
             '$ref': '#/components/schemas/SaleLineKind'
         },
+        event_type: {
+            '$ref': '#/components/schemas/MovementType'
+        },
         product_id: {
             type: 'string',
             format: 'uuid',
@@ -1945,9 +1948,10 @@ export const ProjectConsumptionRowPublicSchema = {
         }
     },
     type: 'object',
-    required: ['line_kind', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'quantity', 'occurred_at', 'project_pull_id', 'total_cost_thb', 'draws'],
+    required: ['line_kind', 'event_type', 'product_id', 'product_sku', 'model_name', 'unit_serial', 'quantity', 'occurred_at', 'project_pull_id', 'total_cost_thb', 'draws'],
     title: 'ProjectConsumptionRowPublic',
-    description: `One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+    description: `One PROJECT_OUT or pull RETURNED movement against a project (FR-020
+consumed-items list).
 ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
 is physically absent from the staff payload.
 
@@ -2330,6 +2334,11 @@ export const ProjectPullLinePublicSchema = {
         },
         line_state: {
             '$ref': '#/components/schemas/LineState'
+        },
+        returnable_qty: {
+            type: 'integer',
+            title: 'Returnable Qty',
+            default: 0
         }
     },
     type: 'object',
@@ -2453,6 +2462,47 @@ export const ProjectPullPublicSchema = {
     type: 'object',
     required: ['id', 'project_id', 'project_name', 'project_code', 'customer_id', 'customer_name', 'state', 'admin_notes', 'created_by_user_id', 'created_at', 'fulfilled_at', 'fulfilled_by_user_id', 'cancelled_at', 'cancelled_by_user_id', 'stock_deducted', 'lines'],
     title: 'ProjectPullPublic'
+} as const;
+
+export const ProjectPullReturnCreateSchema = {
+    properties: {
+        idempotency_key: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Idempotency Key'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/ProjectPullReturnLine'
+            },
+            type: 'array',
+            maxItems: 200,
+            minItems: 1,
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['idempotency_key', 'lines'],
+    title: 'ProjectPullReturnCreate'
+} as const;
+
+export const ProjectPullReturnLineSchema = {
+    properties: {
+        line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            maximum: 1000000,
+            exclusiveMinimum: 0,
+            title: 'Quantity'
+        }
+    },
+    type: 'object',
+    required: ['line_id', 'quantity'],
+    title: 'ProjectPullReturnLine'
 } as const;
 
 export const ProjectPullStateSchema = {

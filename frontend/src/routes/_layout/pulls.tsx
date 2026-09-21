@@ -14,6 +14,7 @@ import {
   type ProjectPullFulfill,
   type ProjectPullLinePublic,
   type ProjectPullPublic,
+  type ProjectPullReturnCreate,
   ProjectPullsService,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -21,6 +22,7 @@ import { PaginationControls } from "@/components/Common/PaginationControls"
 import { PullCreatePanel } from "@/components/pos/PullCreatePanel"
 import { PullFulfillPanel } from "@/components/pos/PullFulfillPanel"
 import { PullQueue, type PullStateFilter } from "@/components/pos/PullQueue"
+import { PullReturnDialog } from "@/components/pos/PullReturnDialog"
 import type { ScanFieldHandle } from "@/components/ScanField"
 import useCustomToast from "@/hooks/useCustomToast"
 import { usePagination } from "@/hooks/usePagination"
@@ -43,6 +45,11 @@ import {
   seedFulfillDraft,
   setLineFulfilledQty,
 } from "@/lib/pull-fulfill"
+import {
+  buildPullReturnPayload,
+  canReturnPull,
+  type ReturnDraft,
+} from "@/lib/pull-return"
 import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
 import type { Queued } from "@/lib/sync-producer"
@@ -193,15 +200,35 @@ function Pulls() {
       showErrorToast(extractErrorMessage(err), "Request not created"),
   })
 
-  const cancelMutation = useMutation({
+  const cancelMutation = useMutation<ProjectPullPublic, ApiError, string>({
     mutationFn: (pullId: string) =>
       ProjectPullsService.cancelProjectPull({ pullId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
-      showSuccessToast("Request cancelled.")
+      showSuccessToast("Request cancelled — stock put back.")
     },
-    onError: () =>
-      showErrorToast("Could not cancel the request. Please try again."),
+    onError: (err: ApiError) =>
+      showErrorToast(extractErrorMessage(err), "Request not cancelled"),
+  })
+
+  const [returnOpen, setReturnOpen] = useState(false)
+  // One key per return attempt: reused on retry so a lost response can't
+  // return twice; replaced only after a success.
+  const returnKeyRef = useRef<string>(crypto.randomUUID())
+  const returnMutation = useMutation<
+    ProjectPullPublic,
+    ApiError,
+    { pullId: string; requestBody: ProjectPullReturnCreate }
+  >({
+    mutationFn: (vars) => ProjectPullsService.returnProjectPull(vars),
+    onSuccess: () => {
+      returnKeyRef.current = crypto.randomUUID()
+      queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
+      showSuccessToast("Items returned to stock.")
+      setReturnOpen(false)
+    },
+    onError: (err: ApiError) =>
+      showErrorToast(extractErrorMessage(err), "Items not returned"),
   })
 
   const handleSelect = useCallback((pull: ProjectPullPublic) => {
@@ -324,30 +351,49 @@ function Pulls() {
           isPending={createMutation.isPending}
         />
       ) : selectedPull ? (
-        <PullFulfillPanel
-          pull={selectedPull}
-          projectLabel={
-            projectLabels.get(selectedPull.project_id) ??
-            selectedPull.project_id
-          }
-          customerLabel={
-            customerLabels.get(selectedPull.customer_id) ??
-            selectedPull.customer_id
-          }
-          draft={fulfillDraft}
-          scanRef={scanRef}
-          onScan={resolve}
-          isSearching={isSearching}
-          notFound={notFound}
-          isError={isError}
-          scanNotice={scanNotice}
-          onQtyChange={(line: ProjectPullLinePublic, qty: number) =>
-            setFulfillDraft((prev) => setLineFulfilledQty(prev, line, qty))
-          }
-          onSubmit={handleFulfill}
-          onBack={handleBackToQueue}
-          isPending={fulfillMutation.isPending}
-        />
+        <>
+          <PullFulfillPanel
+            pull={selectedPull}
+            projectLabel={
+              projectLabels.get(selectedPull.project_id) ??
+              selectedPull.project_id
+            }
+            customerLabel={
+              customerLabels.get(selectedPull.customer_id) ??
+              selectedPull.customer_id
+            }
+            draft={fulfillDraft}
+            scanRef={scanRef}
+            onScan={resolve}
+            isSearching={isSearching}
+            notFound={notFound}
+            isError={isError}
+            scanNotice={scanNotice}
+            onQtyChange={(line: ProjectPullLinePublic, qty: number) =>
+              setFulfillDraft((prev) => setLineFulfilledQty(prev, line, qty))
+            }
+            onSubmit={handleFulfill}
+            onBack={handleBackToQueue}
+            isPending={fulfillMutation.isPending}
+            canReturn={canReturnPull(selectedPull)}
+            onReturn={() => setReturnOpen(true)}
+          />
+          <PullReturnDialog
+            pull={selectedPull}
+            open={returnOpen}
+            onOpenChange={setReturnOpen}
+            isPending={returnMutation.isPending}
+            onSubmit={(draft: ReturnDraft) =>
+              returnMutation.mutate({
+                pullId: selectedPull.id,
+                requestBody: buildPullReturnPayload(
+                  draft,
+                  returnKeyRef.current,
+                ),
+              })
+            }
+          />
+        </>
       ) : (
         <PullQueue
           loading={listLoading}

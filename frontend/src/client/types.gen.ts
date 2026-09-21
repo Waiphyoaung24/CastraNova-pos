@@ -383,7 +383,8 @@ export type ProductUpdate = {
 };
 
 /**
- * One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ * One PROJECT_OUT or pull RETURNED movement against a project (FR-020
+ * consumed-items list).
  * ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
  * is physically absent from the staff payload.
  *
@@ -392,6 +393,7 @@ export type ProductUpdate = {
  */
 export type ProjectConsumptionRowPublic = {
     line_kind: SaleLineKind;
+    event_type: MovementType;
     product_id: string;
     product_sku: string;
     model_name: string;
@@ -475,6 +477,7 @@ export type ProjectPullLinePublic = {
     requested_qty: (number | null);
     fulfilled_qty: number;
     line_state: LineState;
+    returnable_qty?: number;
 };
 
 export type ProjectPullPublic = {
@@ -494,6 +497,16 @@ export type ProjectPullPublic = {
     cancelled_by_user_id: (string | null);
     stock_deducted: boolean;
     lines: Array<ProjectPullLinePublic>;
+};
+
+export type ProjectPullReturnCreate = {
+    idempotency_key: string;
+    lines: Array<ProjectPullReturnLine>;
+};
+
+export type ProjectPullReturnLine = {
+    line_id: string;
+    quantity: number;
 };
 
 export type ProjectPullsPublic = {
@@ -1367,6 +1380,13 @@ export type ProjectPullsFulfillProjectPullData = {
 };
 
 export type ProjectPullsFulfillProjectPullResponse = (ProjectPullPublic);
+
+export type ProjectPullsReturnProjectPullData = {
+    pullId: string;
+    requestBody: ProjectPullReturnCreate;
+};
+
+export type ProjectPullsReturnProjectPullResponse = (ProjectPullPublic);
 
 export type ProjectPullsCancelProjectPullData = {
     pullId: string;

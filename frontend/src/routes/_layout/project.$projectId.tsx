@@ -147,10 +147,11 @@ function ProjectDetail() {
 }
 
 /**
- * FR-020 consumed-items list: one row per PROJECT_OUT movement, admin-only
- * (it carries cost). A PART row expands to the FIFO batches its cost came from
- * — that is the "batch attribution" the PRD asks for. A UNIT row has nothing to
- * expand: a serialized unit is its own cost layer.
+ * FR-020 consumed-items list: one row per PROJECT_OUT or pull RETURNED
+ * movement, admin-only (it carries cost). A PART row expands to the FIFO
+ * batches its cost came from — that is the "batch attribution" the PRD asks
+ * for. A UNIT row has nothing to expand: a serialized unit is its own cost
+ * layer.
  */
 function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -188,6 +189,7 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
               const key = `${r.project_pull_id}-${r.product_id}-${i}`
               const isOpen = expanded.has(key)
               const canExpand = r.draws.length > 0
+              const returned = r.event_type === "RETURNED"
               return (
                 <Fragment key={key}>
                   <TableRow>
@@ -206,13 +208,16 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
                       )}
                     </TableCell>
                     <TableCell className="num text-right">
-                      {r.quantity}
+                      {returned ? `−${r.quantity}` : r.quantity}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
+                      {returned ? "Returned · " : ""}
                       {new Date(r.occurred_at).toLocaleString()}
                     </TableCell>
                     <TableCell className="num text-right">
-                      {formatThb(r.total_cost_thb)}
+                      {returned
+                        ? `−${formatThb(r.total_cost_thb)}`
+                        : formatThb(r.total_cost_thb)}
                     </TableCell>
                   </TableRow>
                   {isOpen
