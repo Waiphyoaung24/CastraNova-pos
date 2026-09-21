@@ -601,6 +601,28 @@ export type ReturnableLinePublic = {
     unit_price_thb: string;
 };
 
+export type ReturnablePullLinePublic = {
+    line_id: string;
+    line_kind: SaleLineKind;
+    product_id: string;
+    label: string;
+    quantity_out: number;
+    quantity_returnable: number;
+};
+
+export type ReturnablePullPublic = {
+    pull_id: string;
+    project_code: string;
+    project_name: string;
+    customer_name: string;
+    created_at: string;
+    lines: Array<ReturnablePullLinePublic>;
+};
+
+export type ReturnablePullsPublic = {
+    pulls: Array<ReturnablePullPublic>;
+};
+
 export type ReturnableSalePublic = {
     sale_id: string;
     sold_at: string;
@@ -1368,6 +1390,13 @@ export type ProjectPullsReadProjectPullsData = {
 };
 
 export type ProjectPullsReadProjectPullsResponse = (ProjectPullsPublic);
+
+export type ProjectPullsReadReturnablePullsData = {
+    castranovaBarcode?: (string | null);
+    sku?: (string | null);
+};
+
+export type ProjectPullsReadReturnablePullsResponse = (ReturnablePullsPublic);
 
 export type ProjectPullsReadProjectPullData = {
     pullId: string;

@@ -3007,6 +3007,91 @@ export const ReturnableLinePublicSchema = {
     title: 'ReturnableLinePublic'
 } as const;
 
+export const ReturnablePullLinePublicSchema = {
+    properties: {
+        line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Line Id'
+        },
+        line_kind: {
+            '$ref': '#/components/schemas/SaleLineKind'
+        },
+        product_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Product Id'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        quantity_out: {
+            type: 'integer',
+            title: 'Quantity Out'
+        },
+        quantity_returnable: {
+            type: 'integer',
+            title: 'Quantity Returnable'
+        }
+    },
+    type: 'object',
+    required: ['line_id', 'line_kind', 'product_id', 'label', 'quantity_out', 'quantity_returnable'],
+    title: 'ReturnablePullLinePublic'
+} as const;
+
+export const ReturnablePullPublicSchema = {
+    properties: {
+        pull_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Pull Id'
+        },
+        project_code: {
+            type: 'string',
+            title: 'Project Code'
+        },
+        project_name: {
+            type: 'string',
+            title: 'Project Name'
+        },
+        customer_name: {
+            type: 'string',
+            title: 'Customer Name'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/ReturnablePullLinePublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['pull_id', 'project_code', 'project_name', 'customer_name', 'created_at', 'lines'],
+    title: 'ReturnablePullPublic'
+} as const;
+
+export const ReturnablePullsPublicSchema = {
+    properties: {
+        pulls: {
+            items: {
+                '$ref': '#/components/schemas/ReturnablePullPublic'
+            },
+            type: 'array',
+            title: 'Pulls'
+        }
+    },
+    type: 'object',
+    required: ['pulls'],
+    title: 'ReturnablePullsPublic'
+} as const;
+
 export const ReturnableSalePublicSchema = {
     properties: {
         sale_id: {
