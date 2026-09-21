@@ -432,6 +432,7 @@ export type ProjectOption = {
     id: string;
     code: string;
     name: string;
+    customer_name: string;
 };
 
 export type ProjectPublic = {

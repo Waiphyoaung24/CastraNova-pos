@@ -458,6 +458,7 @@ class ProjectOption(SQLModel):
     id: uuid.UUID
     code: str
     name: str
+    customer_name: str  # a pull's customer is copied from its project
 
 
 class CustomersPublic(SQLModel):

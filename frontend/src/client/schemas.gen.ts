@@ -2099,10 +2099,14 @@ export const ProjectOptionSchema = {
         name: {
             type: 'string',
             title: 'Name'
+        },
+        customer_name: {
+            type: 'string',
+            title: 'Customer Name'
         }
     },
     type: 'object',
-    required: ['id', 'code', 'name'],
+    required: ['id', 'code', 'name', 'customer_name'],
     title: 'ProjectOption'
 } as const;
 

@@ -542,11 +542,15 @@ def list_projects(
 
 def list_project_options(*, session: Session) -> list[ProjectOption]:
     rows = session.exec(
-        select(col(Project.id), col(Project.code), col(Project.name))
+        select(col(Project.id), col(Project.code), col(Project.name), col(Customer.name))
+        .join(Customer, col(Project.customer_id) == col(Customer.id))
         .where(Project.status == ProjectStatus.ACTIVE)
         .order_by(col(Project.code))
     ).all()
-    return [ProjectOption(id=row[0], code=row[1], name=row[2]) for row in rows]
+    return [
+        ProjectOption(id=row[0], code=row[1], name=row[2], customer_name=row[3])
+        for row in rows
+    ]
 
 
 def count_projects(
