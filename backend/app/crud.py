@@ -2822,6 +2822,45 @@ def _returned_so_far(*, session: Session, sale_line_id: uuid.UUID) -> int:
     return int(total)
 
 
+def _reverse_unit_out(
+    *,
+    session: Session,
+    unit: Unit,
+    back_to: uuid.UUID,
+    idempotency_key: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    sale_id: uuid.UUID | None = None,
+    project_pull_id: uuid.UUID | None = None,
+) -> Decimal:
+    """Walk a SOLD or PROJECT_OUT unit back to IN_STOCK at ``back_to`` and
+    return its cost. The caller holds ``unit`` FOR UPDATE and picks
+    ``back_to`` (where the unit stood before it left)."""
+    try:
+        new_state = assert_unit_transition(unit.current_state, MovementType.RETURNED)
+    except IllegalTransition:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unit cannot be returned from {unit.current_state.value}",
+        )
+    session.add(
+        UnitMovement(
+            unit_id=unit.id,
+            event_type=MovementType.RETURNED,
+            from_location_id=unit.current_location_id,
+            to_location_id=back_to,
+            sale_id=sale_id,
+            project_pull_id=project_pull_id,
+            actor_user_id=actor_user_id,
+            idempotency_key=idempotency_key,
+        )
+    )
+    unit.current_state = new_state
+    unit.current_location_id = back_to
+    unit.updated_at = get_datetime_utc()
+    session.add(unit)
+    return unit.purchase_cost_thb
+
+
 def _return_unit_line(
     *,
     session: Session,
@@ -2847,13 +2886,6 @@ def _return_unit_line(
     ).first()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-    try:
-        new_state = assert_unit_transition(unit.current_state, MovementType.RETURNED)
-    except IllegalTransition:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Unit cannot be returned from {unit.current_state.value}",
-        )
 
     sold = session.exec(
         select(UnitMovement)
@@ -2870,65 +2902,46 @@ def _return_unit_line(
         else fallback_location_id
     )
 
-    session.add(
-        UnitMovement(
-            unit_id=unit.id,
-            event_type=MovementType.RETURNED,
-            from_location_id=unit.current_location_id,
-            to_location_id=back_to,
-            sale_id=sale_line.sale_id,
-            actor_user_id=actor_user_id,
-            idempotency_key=uuid.uuid5(ret.idempotency_key, f"unit:{sale_line.id}"),
-        )
+    return _reverse_unit_out(
+        session=session,
+        unit=unit,
+        back_to=back_to,
+        idempotency_key=uuid.uuid5(ret.idempotency_key, f"unit:{sale_line.id}"),
+        actor_user_id=actor_user_id,
+        sale_id=sale_line.sale_id,
     )
-    unit.current_state = new_state
-    unit.current_location_id = back_to
-    unit.updated_at = get_datetime_utc()
-    session.add(unit)
-    return unit.purchase_cost_thb
 
 
-def _return_part_line(
+def _reverse_part_out(
     *,
     session: Session,
-    ret: SaleReturn,
-    sale_line: SaleLine,
+    source: PartMovement,
     already_returned: int,
     quantity: int,
+    idempotency_key: uuid.UUID,
     actor_user_id: uuid.UUID,
     from_location_id: uuid.UUID,
     to_location_id: uuid.UUID,
 ) -> Decimal:
-    """Roll back ``quantity`` units of a PART sale line onto the exact batches
-    the sale consumed, at the exact cost, and return the cost restored.
+    """Roll back ``quantity`` of a consuming movement (SOLD or PROJECT_OUT)
+    onto the exact batches it drew, at the exact cost, and return the cost
+    restored.
 
-    The sale's cost_lines record which batch supplied each unit. We walk them in
-    REVERSE consumption order (newest-received batch first) and skip the units a
-    prior partial return already restored, so repeated partial returns are
-    deterministic and never restore the same unit twice. The batch is a cost
-    bucket, not a physical bin: nobody knows which piece came back, and FIFO was
-    itself an accounting convention — the return reverses that convention.
+    ``source``'s cost_lines record which batch supplied each unit. We walk them
+    in REVERSE consumption order (newest-received batch first) and skip the
+    units a prior partial return already restored, so repeated partial returns
+    are deterministic and never restore the same unit twice. The batch is a
+    cost bucket, not a physical bin: nobody knows which piece came back, and
+    FIFO was itself an accounting convention — the return reverses that
+    convention.
     """
-    assert sale_line.product_id is not None  # PART lines always carry a product
-    sold = session.exec(
-        select(PartMovement).where(
-            PartMovement.sale_id == sale_line.sale_id,
-            PartMovement.product_id == sale_line.product_id,
-            PartMovement.event_type == MovementType.SOLD,
-        )
-    ).first()
-    if sold is None:
-        raise HTTPException(
-            status_code=409, detail="Original consumption movement not found"
-        )
-
     # Reverse consumption order == reverse FIFO. Ordering by the batch's
     # (received_at, id) is deterministic across re-reads; cost_line.created_at
     # is not (same-transaction inserts).
     consumed = session.exec(
         select(CostLine, PartBatch)
         .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
-        .where(CostLine.part_movement_id == sold.id)
+        .where(CostLine.part_movement_id == source.id)
         .order_by(col(PartBatch.received_at).desc(), col(PartBatch.id).desc())
     ).all()
 
@@ -2975,14 +2988,15 @@ def _return_part_line(
     }
 
     movement = PartMovement(
-        product_id=sale_line.product_id,
+        product_id=source.product_id,
         event_type=MovementType.RETURNED,
         quantity=quantity,
         from_location_id=from_location_id,
         to_location_id=to_location_id,
-        sale_id=sale_line.sale_id,
+        sale_id=source.sale_id,
+        project_pull_id=source.project_pull_id,
         actor_user_id=actor_user_id,
-        idempotency_key=uuid.uuid5(ret.idempotency_key, f"part:{sale_line.id}"),
+        idempotency_key=idempotency_key,
     )
     session.add(movement)
     session.flush()
@@ -3006,6 +3020,52 @@ def _return_part_line(
         )
         restored += qty * unit_cost
     return restored
+
+
+def _return_part_line(
+    *,
+    session: Session,
+    ret: SaleReturn,
+    sale_line: SaleLine,
+    already_returned: int,
+    quantity: int,
+    actor_user_id: uuid.UUID,
+    from_location_id: uuid.UUID,
+    to_location_id: uuid.UUID,
+) -> Decimal:
+    """Roll back ``quantity`` units of a PART sale line onto the exact batches
+    the sale consumed, at the exact cost, and return the cost restored.
+
+    The sale's cost_lines record which batch supplied each unit. We walk them in
+    REVERSE consumption order (newest-received batch first) and skip the units a
+    prior partial return already restored, so repeated partial returns are
+    deterministic and never restore the same unit twice. The batch is a cost
+    bucket, not a physical bin: nobody knows which piece came back, and FIFO was
+    itself an accounting convention — the return reverses that convention.
+    """
+    assert sale_line.product_id is not None  # PART lines always carry a product
+    sold = session.exec(
+        select(PartMovement).where(
+            PartMovement.sale_id == sale_line.sale_id,
+            PartMovement.product_id == sale_line.product_id,
+            PartMovement.event_type == MovementType.SOLD,
+        )
+    ).first()
+    if sold is None:
+        raise HTTPException(
+            status_code=409, detail="Original consumption movement not found"
+        )
+
+    return _reverse_part_out(
+        session=session,
+        source=sold,
+        already_returned=already_returned,
+        quantity=quantity,
+        idempotency_key=uuid.uuid5(ret.idempotency_key, f"part:{sale_line.id}"),
+        actor_user_id=actor_user_id,
+        from_location_id=from_location_id,
+        to_location_id=to_location_id,
+    )
 
 
 def create_sale_return(
