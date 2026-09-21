@@ -23,6 +23,7 @@ import {
   SlidersHorizontal,
   Store,
   Truck,
+  Undo2,
   Users,
   Warehouse,
   Wrench,
@@ -48,6 +49,8 @@ const baseItems: Entry[] = [
     items: [
       { icon: ShoppingCart, title: "Sale", path: "/sale" },
       { icon: Search, title: "Search", path: "/search" },
+      // Sale returns: shared sale-desk action, both roles (moved off Adjust 2026-09-21).
+      { icon: Undo2, title: "Return", path: "/returns" },
     ],
   },
   {

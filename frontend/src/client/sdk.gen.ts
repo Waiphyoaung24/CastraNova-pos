@@ -1380,14 +1380,16 @@ export class SalesService {
     
     /**
      * Create Sale Return
-     * Record a customer return against a sale (admin-only, design 2026-07-25).
+     * Record a customer return against a sale (design 2026-07-25; opened to
+     * staff 2026-09-21 as a shared sale-desk action — staff get the cost-redacted
+     * response).
      *
      * Restores stock at the original FIFO cost and reverses the sale's margin
      * contribution in the RETURN month. Refund is fixed at the original line price.
      * @param data The data for the request.
      * @param data.saleId
      * @param data.requestBody
-     * @returns SaleReturnPublic Successful Response
+     * @returns unknown Successful Response
      * @throws ApiError
      */
     public static createSaleReturn(data: SalesCreateSaleReturnData): CancelablePromise<SalesCreateSaleReturnResponse> {
@@ -1408,7 +1410,7 @@ export class SalesService {
     /**
      * Read Returnable Sales
      * Recent sales with still-returnable lines for one unit or one SKU.
-     * Admin-only — it feeds the return flow and exposes line prices.
+     * Staff + admin — it exposes only sale prices, which staff already see.
      * @param data The data for the request.
      * @param data.castranovaBarcode
      * @param data.sku

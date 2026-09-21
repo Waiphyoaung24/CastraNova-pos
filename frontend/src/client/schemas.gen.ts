@@ -3310,6 +3310,33 @@ export const SaleReturnLinePublicSchema = {
     title: 'SaleReturnLinePublic'
 } as const;
 
+export const SaleReturnLineStaffPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_line_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Line Id'
+        },
+        quantity: {
+            type: 'integer',
+            title: 'Quantity'
+        },
+        unit_price_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Unit Price Thb'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_line_id', 'quantity', 'unit_price_thb'],
+    title: 'SaleReturnLineStaffPublic'
+} as const;
+
 export const SaleReturnPublicSchema = {
     properties: {
         id: {
@@ -3357,6 +3384,50 @@ export const SaleReturnPublicSchema = {
     type: 'object',
     required: ['id', 'sale_id', 'reason', 'returned_at', 'total_refund_thb', 'total_cogs_restored_thb', 'created_by_user_id', 'lines'],
     title: 'SaleReturnPublic'
+} as const;
+
+export const SaleReturnStaffPublicSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sale_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Sale Id'
+        },
+        reason: {
+            type: 'string',
+            title: 'Reason'
+        },
+        returned_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Returned At'
+        },
+        total_refund_thb: {
+            type: 'string',
+            pattern: '^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$',
+            title: 'Total Refund Thb'
+        },
+        created_by_user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Created By User Id'
+        },
+        lines: {
+            items: {
+                '$ref': '#/components/schemas/SaleReturnLineStaffPublic'
+            },
+            type: 'array',
+            title: 'Lines'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sale_id', 'reason', 'returned_at', 'total_refund_thb', 'created_by_user_id', 'lines'],
+    title: 'SaleReturnStaffPublic'
 } as const;
 
 export const SaleStaffPublicSchema = {

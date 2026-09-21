@@ -662,6 +662,13 @@ export type SaleReturnLinePublic = {
     cogs_restored_thb: string;
 };
 
+export type SaleReturnLineStaffPublic = {
+    id: string;
+    sale_line_id: string;
+    quantity: number;
+    unit_price_thb: string;
+};
+
 export type SaleReturnPublic = {
     id: string;
     sale_id: string;
@@ -671,6 +678,16 @@ export type SaleReturnPublic = {
     total_cogs_restored_thb: string;
     created_by_user_id: string;
     lines: Array<SaleReturnLinePublic>;
+};
+
+export type SaleReturnStaffPublic = {
+    id: string;
+    sale_id: string;
+    reason: string;
+    returned_at: string;
+    total_refund_thb: string;
+    created_by_user_id: string;
+    lines: Array<SaleReturnLineStaffPublic>;
 };
 
 export type SaleStaffPublic = {
@@ -1502,7 +1519,7 @@ export type SalesCreateSaleReturnData = {
     saleId: string;
 };
 
-export type SalesCreateSaleReturnResponse = (SaleReturnPublic);
+export type SalesCreateSaleReturnResponse = ((SaleReturnPublic | SaleReturnStaffPublic));
 
 export type SalesReadReturnableSalesData = {
     castranovaBarcode?: (string | null);

@@ -3015,7 +3015,7 @@ def create_sale_return(
     payload: SaleReturnCreateRequest,
     created_by_user_id: uuid.UUID,
 ) -> SaleReturn:
-    """Record a customer return of one or more sale lines, admin-only.
+    """Record a customer return of one or more sale lines (staff or admin).
 
     Restores stock by APPENDING reversal movements (never mutating the ledgers):
     PART lines re-credit the exact batches the sale consumed at the original
@@ -3168,8 +3168,7 @@ def list_returnable_sales(
     """Recent sales holding still-returnable lines for one unit or one SKU.
 
     Fully-returned lines are omitted, so an empty result means "nothing here can
-    be returned" — which is exactly what the UI needs to decide between offering
-    a return and offering a write-off.
+    be returned" — which is exactly what the Returns page needs.
     """
     if (castranova_barcode is None) == (sku is None):
         raise HTTPException(
