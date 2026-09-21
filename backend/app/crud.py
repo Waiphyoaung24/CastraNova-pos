@@ -4123,10 +4123,11 @@ def cancel_project_pull(
     pull_id: uuid.UUID,
     actor_user_id: uuid.UUID,
 ) -> ProjectPull:
-    """Admin cancels a PENDING or SHORT pull (Flow D.3): mark CANCELLED, flip
-    still-PENDING lines to CANCELLED, write no movements. The pull is locked FOR
-    UPDATE; an already-CANCELLED pull returns unchanged (idempotent); a FULFILLED
-    pull raises 409."""
+    """Admin cancels a PENDING or SHORT pull (Flow D.3). A PENDING pull whose
+    stock already left gets it back via RETURNED movements; a SHORT pull's
+    given-out stock stays out (return it explicitly). The pull is locked FOR
+    UPDATE; an already-CANCELLED pull returns unchanged (idempotent); a
+    FULFILLED pull raises 409."""
     pull = session.exec(
         select(ProjectPull)
         .where(ProjectPull.id == pull_id)
@@ -4140,15 +4141,27 @@ def cancel_project_pull(
         raise HTTPException(
             status_code=409, detail="Cannot cancel a fulfilled pull"
         )
-    # Stock left at create and there is no reversal movement: cancelling would
-    # lose it silently. Only a pull that has not deducted yet (created before
-    # create started deducting) can still be cancelled while PENDING.
+
+    # Stock left at create: put every line's balance back before the flip,
+    # in this same transaction. Deterministic key — a cancel happens once
+    # (the CANCELLED early-return above makes a repeat a no-op).
     if pull.state == ProjectPullState.PENDING and pull_stock_deducted(
         session=session, pull_id=pull.id
     ):
-        raise HTTPException(
-            status_code=409,
-            detail="Stock was already taken for this request — it cannot be cancelled",
+        pull_lines = session.exec(
+            select(ProjectPullLine)
+            .where(ProjectPullLine.project_pull_id == pull.id)
+            .order_by(col(ProjectPullLine.id))
+        ).all()
+        _return_pull_lines(
+            session=session,
+            pull=pull,
+            lines=pull_lines,
+            qty_by_line=pull_line_returnable(
+                session=session, pull_id=pull.id, lines=pull_lines
+            ),
+            key=uuid.uuid5(pull.id, "cancel"),
+            actor_user_id=actor_user_id,
         )
 
     pull.state = assert_pull_transition(pull.state, ProjectPullState.CANCELLED)
