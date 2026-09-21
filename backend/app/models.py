@@ -1849,6 +1849,29 @@ class ProjectPullsPublic(SQLModel):
     count: int
 
 
+class ReturnablePullLinePublic(SQLModel):
+    line_id: uuid.UUID
+    line_kind: SaleLineKind
+    product_id: uuid.UUID
+    label: str  # "SKU — Model name"
+    quantity_out: int  # the line's cap: 1 for UNIT, requested_qty for PART
+    quantity_returnable: int
+
+
+class ReturnablePullPublic(SQLModel):
+    pull_id: uuid.UUID
+    project_code: str
+    project_name: str
+    customer_name: str
+    created_at: datetime
+    lines: list[ReturnablePullLinePublic]
+
+
+class ReturnablePullsPublic(SQLModel):
+    # Cost-free on purpose: the Returns page is a staff surface.
+    pulls: list[ReturnablePullPublic]
+
+
 # --- Notifications (FR-018; M007/M019) ----------------------------------------
 
 

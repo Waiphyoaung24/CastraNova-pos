@@ -76,6 +76,9 @@ from app.models import (
     ProjectUpdate,
     ReceivePiece,
     ReturnableLinePublic,
+    ReturnablePullLinePublic,
+    ReturnablePullPublic,
+    ReturnablePullsPublic,
     ReturnableSalePublic,
     ReturnableSalesPublic,
     Sale,
@@ -3722,6 +3725,101 @@ def pull_line_returnable(
         else:
             out[line.id] = max(0, part_net.pop(line.product_id, 0))
     return out
+
+
+_RETURNABLE_PULL_LIMIT = 20  # bounded, newest-first (same shape as sales)
+
+
+def list_returnable_pulls(
+    *,
+    session: Session,
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+    limit: int = _RETURNABLE_PULL_LIMIT,
+) -> ReturnablePullsPublic:
+    """Settled pulls (FULFILLED / SHORT / CANCELLED) that still have stock out
+    for one unit or one SKU — the Returns page's project-request source.
+    PENDING pulls are omitted: their stock comes back via admin Cancel. Lines
+    with nothing left to return are dropped, so an empty result means "nothing
+    here can be returned". Mirrors ``list_returnable_sales``."""
+    if (castranova_barcode is None) == (sku is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide exactly one of castranova_barcode or sku",
+        )
+    stmt = (
+        select(ProjectPullLine, ProjectPull)
+        .join(ProjectPull, col(ProjectPullLine.project_pull_id) == col(ProjectPull.id))
+        .where(ProjectPull.state != ProjectPullState.PENDING)
+        .order_by(col(ProjectPull.created_at).desc(), col(ProjectPull.id))
+    )
+    if castranova_barcode is not None:
+        stmt = stmt.where(ProjectPullLine.unit_serial == castranova_barcode)
+    else:
+        product = session.exec(select(Product).where(Product.sku == sku)).first()
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        stmt = stmt.where(
+            ProjectPullLine.product_id == product.id,
+            ProjectPullLine.line_kind == SaleLineKind.PART,
+        )
+    # Over-fetch: fully-returned lines are filtered out below.
+    rows = session.exec(stmt.limit(limit * 4)).all()
+
+    lines_by_pull: dict[uuid.UUID, list[ProjectPullLine]] = {}
+    pulls: dict[uuid.UUID, ProjectPull] = {}
+    for line, pull in rows:
+        lines_by_pull.setdefault(pull.id, []).append(line)
+        pulls[pull.id] = pull
+    labels = _product_labels(session, list({ln.product_id for ln, _ in rows}))
+    projects = (
+        {
+            p.id: p
+            for p in session.exec(
+                select(Project).where(
+                    col(Project.id).in_([p.project_id for p in pulls.values()])
+                )
+            ).all()
+        }
+        if pulls
+        else {}
+    )
+    customers = _customer_labels(session, [p.customer_id for p in pulls.values()])
+
+    out: list[ReturnablePullPublic] = []
+    for pull_id, lines in lines_by_pull.items():  # insertion order == newest first
+        # Whole-pull lines feed the netting so per-product caps are exact.
+        all_lines = list_project_pull_lines(session=session, pull_id=pull_id)
+        returnable = pull_line_returnable(session=session, pull_id=pull_id, lines=all_lines)
+        offered = [
+            ReturnablePullLinePublic(
+                line_id=ln.id,
+                line_kind=ln.line_kind,
+                product_id=ln.product_id,
+                label=labels.get(ln.product_id, ""),
+                quantity_out=_pull_line_cap(ln),
+                quantity_returnable=returnable.get(ln.id, 0),
+            )
+            for ln in lines
+            if returnable.get(ln.id, 0) > 0
+        ]
+        if not offered:
+            continue
+        pull = pulls[pull_id]
+        project = projects.get(pull.project_id)
+        out.append(
+            ReturnablePullPublic(
+                pull_id=pull.id,
+                project_code=project.code if project else "",
+                project_name=project.name if project else "",
+                customer_name=customers.get(pull.customer_id, ""),
+                created_at=pull.created_at,
+                lines=offered,
+            )
+        )
+        if len(out) >= limit:
+            break
+    return ReturnablePullsPublic(pulls=out)
 
 
 def _pull_line_cap(line: ProjectPullLine) -> int:

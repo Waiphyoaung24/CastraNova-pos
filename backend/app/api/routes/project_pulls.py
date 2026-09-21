@@ -14,6 +14,7 @@ from app.models import (
     ProjectPullReturnCreate,
     ProjectPullsPublic,
     ProjectPullState,
+    ReturnablePullsPublic,
 )
 from app.services import notify
 
@@ -97,6 +98,26 @@ def read_project_pulls(
     return ProjectPullsPublic(
         data=[_to_public(session=session, pull=p) for p in pulls],
         count=crud.count_project_pulls(session=session, state=state),
+    )
+
+
+# Declared before /{pull_id}: a literal segment must win over the parameterized
+# one, or "returnable" is parsed as a pull id.
+@router.get(
+    "/returnable",
+    response_model=ReturnablePullsPublic,
+    dependencies=[Depends(get_current_user)],
+)
+def read_returnable_pulls(
+    *,
+    session: SessionDep,
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+) -> ReturnablePullsPublic:
+    """Settled pulls with stock still out for one unit or one SKU. Staff +
+    admin — the payload carries no cost."""
+    return crud.list_returnable_pulls(
+        session=session, castranova_barcode=castranova_barcode, sku=sku
     )
 
 
