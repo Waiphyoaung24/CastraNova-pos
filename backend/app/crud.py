@@ -3578,6 +3578,14 @@ def create_project_pull(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    # Movements carry the pull but not the line, so a return nets PART stock
+    # per product. Two PART lines for one product would make that ambiguous.
+    part_products = [ln.product_id for ln in pull_in.lines if ln.line_kind == SaleLineKind.PART]
+    if len(part_products) != len(set(part_products)):
+        raise HTTPException(
+            status_code=422, detail="One PART line per product; merge the quantities"
+        )
+
     pull = ProjectPull(
         project_id=project.id,
         customer_id=project.customer_id,
@@ -3662,6 +3670,51 @@ def pull_stock_deducted(*, session: Session, pull_id: uuid.UUID) -> bool:
         .limit(1)
     ).first()
     return part_hit is not None
+
+
+def pull_line_returnable(
+    *, session: Session, pull_id: uuid.UUID, lines: Sequence[ProjectPullLine]
+) -> dict[uuid.UUID, int]:
+    """Per line, how much of this pull is still out and can come back:
+    PROJECT_OUT minus RETURNED, read from the ledgers (never a flag).
+
+    Movements carry the pull but not the line, so PART lines net per product.
+    Create allows one PART line per product; a legacy pull that repeats one
+    gets the whole product balance on its first line (by id)."""
+    events = (MovementType.PROJECT_OUT, MovementType.RETURNED)
+
+    part_net: dict[uuid.UUID, int] = {}
+    for product_id, event, qty in session.exec(
+        select(PartMovement.product_id, PartMovement.event_type, func.sum(PartMovement.quantity))
+        .where(
+            PartMovement.project_pull_id == pull_id,
+            col(PartMovement.event_type).in_(events),
+        )
+        .group_by(col(PartMovement.product_id), col(PartMovement.event_type))
+    ).all():
+        sign = -1 if event == MovementType.RETURNED else 1
+        part_net[product_id] = part_net.get(product_id, 0) + sign * int(qty)
+
+    unit_net: dict[str, int] = {}
+    for barcode, event, n in session.exec(
+        select(Unit.castranova_barcode, UnitMovement.event_type, func.count())
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.project_pull_id == pull_id,
+            col(UnitMovement.event_type).in_(events),
+        )
+        .group_by(col(Unit.castranova_barcode), col(UnitMovement.event_type))
+    ).all():
+        sign = -1 if event == MovementType.RETURNED else 1
+        unit_net[barcode] = unit_net.get(barcode, 0) + sign * int(n)
+
+    out: dict[uuid.UUID, int] = {}
+    for line in sorted(lines, key=lambda ln: str(ln.id)):
+        if line.line_kind == SaleLineKind.UNIT:
+            out[line.id] = max(0, unit_net.get(line.unit_serial or "", 0))
+        else:
+            out[line.id] = max(0, part_net.pop(line.product_id, 0))
+    return out
 
 
 def _pull_line_cap(line: ProjectPullLine) -> int:

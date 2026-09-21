@@ -1798,6 +1798,8 @@ class ProjectPullLinePublic(SQLModel):
     requested_qty: int | None
     fulfilled_qty: int
     line_state: LineState
+    # Still out and can come back: PROJECT_OUT minus RETURNED for this line.
+    returnable_qty: int = 0
 
 
 class ProjectPullPublic(SQLModel):

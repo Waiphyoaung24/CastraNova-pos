@@ -1001,3 +1001,50 @@ def test_fulfill_duplicate_line_id_422(
     )
     assert r.status_code == 422
     _assert_pull_untouched(db, pull["id"], pull_ctx["part_product_id"])
+
+
+def test_create_rejects_two_part_lines_for_one_product_422(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
+) -> None:
+    before = len(db.exec(select(ProjectPull)).all())
+    part = {
+        "line_kind": "PART",
+        "product_id": str(pull_ctx["part_product_id"]),
+        "requested_qty": 1,
+    }
+    r = client.post(
+        f"{PREFIX}/project-pulls",
+        headers=superuser_token_headers,
+        json={"project_id": str(pull_ctx["project_id"]), "lines": [part, part]},
+    )
+    assert r.status_code == 422, r.text
+    db.expire_all()
+    assert len(db.exec(select(ProjectPull)).all()) == before
+
+
+def test_new_pull_lines_are_fully_returnable(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+) -> None:
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=2)
+    by_kind = {ln["line_kind"]: ln for ln in pull["lines"]}
+    assert by_kind["UNIT"]["returnable_qty"] == 1
+    assert by_kind["PART"]["returnable_qty"] == 2
+
+
+def test_legacy_pending_pull_has_nothing_returnable(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
+) -> None:
+    pull = _legacy_pull(db, pull_ctx)
+    r = client.get(
+        f"{PREFIX}/project-pulls/{pull.id}", headers=superuser_token_headers
+    )
+    assert r.status_code == 200, r.text
+    assert all(ln["returnable_qty"] == 0 for ln in r.json()["lines"])
