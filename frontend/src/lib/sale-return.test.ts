@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest"
 
+import { ApiError } from "@/client"
 import {
   buildReturnPayload,
   canSubmitReturn,
   clampReturnQuantity,
   emptyReturnDraft,
+  lookupErrorMessage,
   type ReturnDraft,
 } from "./sale-return"
+
+function apiError(status: number, body: unknown): ApiError {
+  return new ApiError(
+    { method: "GET", url: "/api/v1/sales/returnable" },
+    { url: "", ok: false, status, statusText: "", body },
+    "boom",
+  )
+}
 
 const KEY = "11111111-1111-1111-1111-111111111111"
 
@@ -122,5 +132,37 @@ describe("sale return form logic", () => {
       reason: "faulty",
       lines: [{ sale_line_id: "L", quantity: 3 }],
     })
+  })
+})
+
+describe("lookupErrorMessage", () => {
+  it("names an unknown SKU on a 404", () => {
+    expect(
+      lookupErrorMessage(apiError(404, { detail: "Product not found" })),
+    ).toBe("No product with this SKU.")
+  })
+
+  it("surfaces the server reason on any other API error", () => {
+    expect(
+      lookupErrorMessage(
+        apiError(422, {
+          detail: "Provide exactly one of castranova_barcode or sku",
+        }),
+      ),
+    ).toBe("Provide exactly one of castranova_barcode or sku")
+  })
+
+  it("does not render a validation array as [object Object]", () => {
+    expect(
+      lookupErrorMessage(
+        apiError(422, { detail: [{ loc: ["query", "sku"], msg: "bad sku" }] }),
+      ),
+    ).toBe("bad sku")
+  })
+
+  it("falls back to a generic message for non-API failures", () => {
+    expect(lookupErrorMessage(new Error("network down"))).toBe(
+      "Could not look up returnable sales.",
+    )
   })
 })

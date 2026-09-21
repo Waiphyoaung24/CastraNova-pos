@@ -114,3 +114,27 @@ def test_staff_can_use_the_lookup(
     )
     # Past the auth gate: an unknown SKU is the usual 404, not a 403.
     assert r.status_code == 404
+
+
+def test_staff_lookup_shows_sale_price_but_no_cost(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    _seed(db)
+    product_id, sku = _part_product(db)
+    _receive(db, product_id=product_id, qty=2, cost="10.00")
+    sale = _sell_parts(db, sku=sku, qty=2, customer_id=_customer(db))
+
+    r = client.get(
+        f"{PREFIX}/sales/returnable",
+        headers=normal_user_token_headers,
+        params={"sku": sku},
+    )
+
+    assert r.status_code == 200
+    sales = r.json()["sales"]
+    assert len(sales) == 1
+    assert sales[0]["sale_id"] == str(sale.id)
+    line = sales[0]["lines"][0]
+    assert Decimal(line["unit_price_thb"]) == Decimal("100.00")
+    assert line["quantity_returnable"] == 2
+    assert not [k for k in line if "cost" in k or "cogs" in k]

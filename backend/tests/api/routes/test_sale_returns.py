@@ -10,6 +10,7 @@ from decimal import Decimal
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlmodel import Session, select
 
 from app import crud
@@ -492,5 +493,88 @@ def test_unknown_sale_is_404(
             "reason": "x",
             "lines": [{"sale_line_id": str(uuid.uuid4()), "quantity": 1}],
         },
+    )
+    assert r.status_code == 404
+
+
+# --- staff error paths (returns opened to staff 2026-09-21) -------------------
+
+
+def _post_return(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    sale_id: uuid.UUID,
+    line_id: uuid.UUID,
+    quantity: int,
+    key: uuid.UUID | None = None,
+) -> Response:
+    return client.post(
+        f"{PREFIX}/sales/{sale_id}/returns",
+        headers=headers,
+        json={
+            "idempotency_key": str(key or uuid.uuid4()),
+            "reason": "test",
+            "lines": [{"sale_line_id": str(line_id), "quantity": quantity}],
+        },
+    )
+
+
+def test_staff_replaying_an_admins_key_is_409(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    normal_user_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    _seed(db)
+    product_id, sku = _part_product(db)
+    batch = _receive(db, product_id=product_id, qty=1, cost="10.00")
+    sale = _sell_parts(db, sku=sku, qty=1, customer_id=_customer(db))
+    line_id = _line_of(db, sale).id
+    key = uuid.uuid4()
+
+    first = _post_return(
+        client, superuser_token_headers, sale_id=sale.id, line_id=line_id, quantity=1, key=key
+    )
+    assert first.status_code == 200
+
+    replay = _post_return(
+        client, normal_user_token_headers, sale_id=sale.id, line_id=line_id, quantity=1, key=key
+    )
+    assert replay.status_code == 409
+    db.refresh(batch)
+    assert batch.remaining_qty == 1  # restocked once, by the admin only
+
+
+def test_staff_over_return_is_409_and_restores_nothing(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    _seed(db)
+    product_id, sku = _part_product(db)
+    batch = _receive(db, product_id=product_id, qty=1, cost="10.00")
+    sale = _sell_parts(db, sku=sku, qty=1, customer_id=_customer(db))
+
+    r = _post_return(
+        client,
+        normal_user_token_headers,
+        sale_id=sale.id,
+        line_id=_line_of(db, sale).id,
+        quantity=2,
+    )
+    assert r.status_code == 409
+    assert isinstance(r.json()["detail"], str)
+    db.refresh(batch)
+    assert batch.remaining_qty == 0
+
+
+def test_staff_unknown_sale_is_404(
+    client: TestClient, normal_user_token_headers: dict[str, str]
+) -> None:
+    r = _post_return(
+        client,
+        normal_user_token_headers,
+        sale_id=uuid.uuid4(),
+        line_id=uuid.uuid4(),
+        quantity=1,
     )
     assert r.status_code == 404

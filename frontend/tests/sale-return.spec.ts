@@ -176,6 +176,19 @@ test("a quantity sale line can be partially returned via the sale picker", async
   expect(sales[0].lines[0].quantity_returned).toBe(2)
 })
 
+test("an unknown SKU says so instead of showing an empty picker", async ({
+  page,
+}) => {
+  await page.goto("/returns")
+  await page.getByRole("tab", { name: "Quantity SKU" }).click()
+  await page
+    .getByRole("textbox", { name: "Scan barcode" })
+    .fill(`NOPE-${rand()}`)
+
+  await expect(page.getByText("No product with this SKU.")).toBeVisible()
+  await expect(page.getByRole("combobox")).toHaveCount(0)
+})
+
 test.describe("Returns page access (staff browser)", () => {
   // Fresh browser context, NOT the superuser storageState — a real staff
   // session must reach the Returns page (shared sale-desk action, 2026-09-21).

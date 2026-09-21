@@ -20,11 +20,13 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import useCustomToast from "@/hooks/useCustomToast"
+import { extractErrorMessage } from "@/utils"
 import {
   buildReturnPayload,
   canSubmitReturn,
   clampReturnQuantity,
   emptyReturnDraft,
+  lookupErrorMessage,
   type ReturnDraft,
 } from "@/lib/sale-return"
 
@@ -97,12 +99,10 @@ function Returns() {
       setDraft(emptyReturnDraft)
       setCode("")
     },
-    onError: (err) => {
-      const detail =
-        err instanceof ApiError && err.body && typeof err.body === "object"
-          ? (err.body as { detail?: string }).detail
-          : undefined
-      showErrorToast(detail ?? "Could not record the return.")
+    // Surface the server reason (already returned, over-return, sale not
+    // found); the shared helper also copes with 422 validation arrays.
+    onError: (err: ApiError) => {
+      showErrorToast(extractErrorMessage(err), "Return not recorded")
     },
   })
 
@@ -204,6 +204,10 @@ function Returns() {
                     {mutation.isPending ? "Returning…" : "Return to stock"}
                   </Button>
                 </div>
+              ) : scanned.length > 0 && lookup.isError ? (
+                <p className="text-destructive text-sm">
+                  {lookupErrorMessage(lookup.error)}
+                </p>
               ) : scanned.length > 0 && lookup.data ? (
                 <p className="text-muted-foreground text-sm">
                   Nothing to return — this unit has no recent sale that can
@@ -233,8 +237,8 @@ function Returns() {
               {/* Nothing to pick from until a SKU has been entered, so the
                   label and the picker stay hidden until then. */}
               {scanned.length === 0 ? null : lookup.isError ? (
-                <p className="text-muted-foreground text-sm">
-                  No product with this SKU.
+                <p className="text-destructive text-sm">
+                  {lookupErrorMessage(lookup.error)}
                 </p>
               ) : lookup.data && lookup.data.sales.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
