@@ -4,7 +4,7 @@ Strategy: no PDF-text-extraction library is in the project deps, so we use
 structural assertions on the function interface rather than parsing PDF bytes.
 
 The function signature is the contract: ``render_sale_receipt`` accepts only
-(sale_id, sold_at, lines, total_thb) where ``lines`` is a list of
+(sale_id, sold_at, customer_name, sold_by, lines, total_thb) where ``lines`` is a list of
 (label, qty, unit_price_thb) tuples.  There is no parameter that can carry
 cost/COGS data.  We lock this contract with an ``inspect``-based test, which
 will fail if a cost field is ever accidentally added to the signature.
@@ -135,7 +135,7 @@ def test_receipt_pdf_embeds_logo_image() -> None:
 
 
 def test_receipt_pdf_empty_lines_does_not_crash() -> None:
-    """A sale with no resolvable lines still renders header + GRAND TOTAL."""
+    """A sale with no resolvable lines still renders header + Total Amount."""
     pdf_bytes = render_sale_receipt(
         sale_id="test-sale-empty",
         sold_at="2026-06-25T14:02:00",
@@ -145,3 +145,31 @@ def test_receipt_pdf_empty_lines_does_not_crash() -> None:
         total_thb=Decimal("0.00"),
     )
     assert pdf_bytes[:4] == b"%PDF"
+
+
+def test_receipt_pdf_embeds_footer_wave_and_paginates() -> None:
+    """The black & gold redesign (2026-09-22) draws the wave on every page and a
+    long sale flows onto a second page with the header repeated."""
+    from app.services.receipt_pdf import _FOOTER_WAVE
+
+    assert _FOOTER_WAVE.exists()
+    pdf_bytes = render_sale_receipt(
+        sale_id="test-sale-long",
+        sold_at="2026-09-22T01:08:54",
+        customer_name="Thiri Trading",
+        sold_by="admin@example.com",
+        lines=[(f"CBL-USBC-2M — USB-C Cable 2m #{i}", 3, Decimal("195.00")) for i in range(30)],
+        total_thb=Decimal("17550.00"),
+    )
+    # "/Type /Pages" (the page tree) also matches "/Type /Page" — net it out.
+    pages = pdf_bytes.count(b"/Type /Page") - pdf_bytes.count(b"/Type /Pages")
+    assert pages >= 2
+    assert b"/DCTDecode" in pdf_bytes  # the wave is the only JPEG on the page
+
+
+def test_receipt_pdf_date_is_shop_local() -> None:
+    """The DB stores UTC; the invoice prints the shop's wall clock (Bangkok)."""
+    from app.services.receipt_pdf import _fmt_date
+
+    assert _fmt_date("2026-09-22T01:08:54+00:00") == "22 Sep 2026, 08:08"
+    assert _fmt_date("not-a-date") == "not-a-date"

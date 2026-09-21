@@ -22,6 +22,7 @@ import {
  * `SalePublic`; parse with `Number(...)` at the display boundary.
  */
 export type SaleResultSummary = {
+  saleId: string
   totalThb: string
   totalCogsThb?: string
 }

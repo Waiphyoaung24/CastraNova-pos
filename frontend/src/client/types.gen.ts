@@ -383,7 +383,8 @@ export type ProductUpdate = {
 };
 
 /**
- * One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+ * One PROJECT_OUT or pull RETURNED movement against a project (FR-020
+ * consumed-items list).
  * ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
  * is physically absent from the staff payload.
  *
@@ -392,6 +393,7 @@ export type ProductUpdate = {
  */
 export type ProjectConsumptionRowPublic = {
     line_kind: SaleLineKind;
+    event_type: MovementType;
     product_id: string;
     product_sku: string;
     model_name: string;
@@ -430,6 +432,7 @@ export type ProjectOption = {
     id: string;
     code: string;
     name: string;
+    customer_name: string;
 };
 
 export type ProjectPublic = {
@@ -475,6 +478,7 @@ export type ProjectPullLinePublic = {
     requested_qty: (number | null);
     fulfilled_qty: number;
     line_state: LineState;
+    returnable_qty?: number;
 };
 
 export type ProjectPullPublic = {
@@ -492,7 +496,18 @@ export type ProjectPullPublic = {
     fulfilled_by_user_id: (string | null);
     cancelled_at: (string | null);
     cancelled_by_user_id: (string | null);
+    stock_deducted: boolean;
     lines: Array<ProjectPullLinePublic>;
+};
+
+export type ProjectPullReturnCreate = {
+    idempotency_key: string;
+    lines: Array<ProjectPullReturnLine>;
+};
+
+export type ProjectPullReturnLine = {
+    line_id: string;
+    quantity: number;
 };
 
 export type ProjectPullsPublic = {
@@ -584,6 +599,28 @@ export type ReturnableLinePublic = {
     quantity_returned: number;
     quantity_returnable: number;
     unit_price_thb: string;
+};
+
+export type ReturnablePullLinePublic = {
+    line_id: string;
+    line_kind: SaleLineKind;
+    product_id: string;
+    label: string;
+    quantity_out: number;
+    quantity_returnable: number;
+};
+
+export type ReturnablePullPublic = {
+    pull_id: string;
+    project_code: string;
+    project_name: string;
+    customer_name: string;
+    created_at: string;
+    lines: Array<ReturnablePullLinePublic>;
+};
+
+export type ReturnablePullsPublic = {
+    pulls: Array<ReturnablePullPublic>;
 };
 
 export type ReturnableSalePublic = {
@@ -1354,6 +1391,13 @@ export type ProjectPullsReadProjectPullsData = {
 
 export type ProjectPullsReadProjectPullsResponse = (ProjectPullsPublic);
 
+export type ProjectPullsReadReturnablePullsData = {
+    castranovaBarcode?: (string | null);
+    sku?: (string | null);
+};
+
+export type ProjectPullsReadReturnablePullsResponse = (ReturnablePullsPublic);
+
 export type ProjectPullsReadProjectPullData = {
     pullId: string;
 };
@@ -1366,6 +1410,13 @@ export type ProjectPullsFulfillProjectPullData = {
 };
 
 export type ProjectPullsFulfillProjectPullResponse = (ProjectPullPublic);
+
+export type ProjectPullsReturnProjectPullData = {
+    pullId: string;
+    requestBody: ProjectPullReturnCreate;
+};
+
+export type ProjectPullsReturnProjectPullResponse = (ProjectPullPublic);
 
 export type ProjectPullsCancelProjectPullData = {
     pullId: string;

@@ -127,3 +127,25 @@ def test_create_project_unknown_customer_404(
     }
     r = client.post(f"{PREFIX}/projects/", headers=superuser_token_headers, json=body)
     assert r.status_code == 404
+
+
+def test_project_options_carry_customer_name(
+    client: TestClient, superuser_token_headers: dict[str, str]
+) -> None:
+    # The pull-create picker labels each project with its customer: a pull's
+    # customer is copied from its project, so the admin must see it there.
+    cust = client.post(
+        f"{PREFIX}/customers/",
+        headers=superuser_token_headers,
+        json={"name": "OptsCust"},
+    )
+    code = f"PRJ-{uuid.uuid4().hex[:8]}"
+    client.post(
+        f"{PREFIX}/projects/",
+        headers=superuser_token_headers,
+        json={"code": code, "name": "Opts Proj", "customer_id": cust.json()["id"]},
+    )
+    r = client.get(f"{PREFIX}/projects/options", headers=superuser_token_headers)
+    assert r.status_code == 200
+    option = next(o for o in r.json() if o["code"] == code)
+    assert option["customer_name"] == "OptsCust"

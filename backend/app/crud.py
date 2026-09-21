@@ -1,6 +1,6 @@
 import secrets
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -70,11 +70,15 @@ from app.models import (
     ProjectPullCreate,
     ProjectPullFulfillLine,
     ProjectPullLine,
+    ProjectPullReturnCreate,
     ProjectPullState,
     ProjectStatus,
     ProjectUpdate,
     ReceivePiece,
     ReturnableLinePublic,
+    ReturnablePullLinePublic,
+    ReturnablePullPublic,
+    ReturnablePullsPublic,
     ReturnableSalePublic,
     ReturnableSalesPublic,
     Sale,
@@ -541,11 +545,15 @@ def list_projects(
 
 def list_project_options(*, session: Session) -> list[ProjectOption]:
     rows = session.exec(
-        select(col(Project.id), col(Project.code), col(Project.name))
+        select(col(Project.id), col(Project.code), col(Project.name), col(Customer.name))
+        .join(Customer, col(Project.customer_id) == col(Customer.id))
         .where(Project.status == ProjectStatus.ACTIVE)
         .order_by(col(Project.code))
     ).all()
-    return [ProjectOption(id=row[0], code=row[1], name=row[2]) for row in rows]
+    return [
+        ProjectOption(id=row[0], code=row[1], name=row[2], customer_name=row[3])
+        for row in rows
+    ]
 
 
 def count_projects(
@@ -2822,6 +2830,45 @@ def _returned_so_far(*, session: Session, sale_line_id: uuid.UUID) -> int:
     return int(total)
 
 
+def _reverse_unit_out(
+    *,
+    session: Session,
+    unit: Unit,
+    back_to: uuid.UUID,
+    idempotency_key: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    sale_id: uuid.UUID | None = None,
+    project_pull_id: uuid.UUID | None = None,
+) -> Decimal:
+    """Walk a SOLD or PROJECT_OUT unit back to IN_STOCK at ``back_to`` and
+    return its cost. The caller holds ``unit`` FOR UPDATE and picks
+    ``back_to`` (where the unit stood before it left)."""
+    try:
+        new_state = assert_unit_transition(unit.current_state, MovementType.RETURNED)
+    except IllegalTransition:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unit cannot be returned from {unit.current_state.value}",
+        )
+    session.add(
+        UnitMovement(
+            unit_id=unit.id,
+            event_type=MovementType.RETURNED,
+            from_location_id=unit.current_location_id,
+            to_location_id=back_to,
+            sale_id=sale_id,
+            project_pull_id=project_pull_id,
+            actor_user_id=actor_user_id,
+            idempotency_key=idempotency_key,
+        )
+    )
+    unit.current_state = new_state
+    unit.current_location_id = back_to
+    unit.updated_at = get_datetime_utc()
+    session.add(unit)
+    return unit.purchase_cost_thb
+
+
 def _return_unit_line(
     *,
     session: Session,
@@ -2847,13 +2894,6 @@ def _return_unit_line(
     ).first()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-    try:
-        new_state = assert_unit_transition(unit.current_state, MovementType.RETURNED)
-    except IllegalTransition:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Unit cannot be returned from {unit.current_state.value}",
-        )
 
     sold = session.exec(
         select(UnitMovement)
@@ -2870,65 +2910,46 @@ def _return_unit_line(
         else fallback_location_id
     )
 
-    session.add(
-        UnitMovement(
-            unit_id=unit.id,
-            event_type=MovementType.RETURNED,
-            from_location_id=unit.current_location_id,
-            to_location_id=back_to,
-            sale_id=sale_line.sale_id,
-            actor_user_id=actor_user_id,
-            idempotency_key=uuid.uuid5(ret.idempotency_key, f"unit:{sale_line.id}"),
-        )
+    return _reverse_unit_out(
+        session=session,
+        unit=unit,
+        back_to=back_to,
+        idempotency_key=uuid.uuid5(ret.idempotency_key, f"unit:{sale_line.id}"),
+        actor_user_id=actor_user_id,
+        sale_id=sale_line.sale_id,
     )
-    unit.current_state = new_state
-    unit.current_location_id = back_to
-    unit.updated_at = get_datetime_utc()
-    session.add(unit)
-    return unit.purchase_cost_thb
 
 
-def _return_part_line(
+def _reverse_part_out(
     *,
     session: Session,
-    ret: SaleReturn,
-    sale_line: SaleLine,
+    source: PartMovement,
     already_returned: int,
     quantity: int,
+    idempotency_key: uuid.UUID,
     actor_user_id: uuid.UUID,
     from_location_id: uuid.UUID,
     to_location_id: uuid.UUID,
 ) -> Decimal:
-    """Roll back ``quantity`` units of a PART sale line onto the exact batches
-    the sale consumed, at the exact cost, and return the cost restored.
+    """Roll back ``quantity`` of a consuming movement (SOLD or PROJECT_OUT)
+    onto the exact batches it drew, at the exact cost, and return the cost
+    restored.
 
-    The sale's cost_lines record which batch supplied each unit. We walk them in
-    REVERSE consumption order (newest-received batch first) and skip the units a
-    prior partial return already restored, so repeated partial returns are
-    deterministic and never restore the same unit twice. The batch is a cost
-    bucket, not a physical bin: nobody knows which piece came back, and FIFO was
-    itself an accounting convention — the return reverses that convention.
+    ``source``'s cost_lines record which batch supplied each unit. We walk them
+    in REVERSE consumption order (newest-received batch first) and skip the
+    units a prior partial return already restored, so repeated partial returns
+    are deterministic and never restore the same unit twice. The batch is a
+    cost bucket, not a physical bin: nobody knows which piece came back, and
+    FIFO was itself an accounting convention — the return reverses that
+    convention.
     """
-    assert sale_line.product_id is not None  # PART lines always carry a product
-    sold = session.exec(
-        select(PartMovement).where(
-            PartMovement.sale_id == sale_line.sale_id,
-            PartMovement.product_id == sale_line.product_id,
-            PartMovement.event_type == MovementType.SOLD,
-        )
-    ).first()
-    if sold is None:
-        raise HTTPException(
-            status_code=409, detail="Original consumption movement not found"
-        )
-
     # Reverse consumption order == reverse FIFO. Ordering by the batch's
     # (received_at, id) is deterministic across re-reads; cost_line.created_at
     # is not (same-transaction inserts).
     consumed = session.exec(
         select(CostLine, PartBatch)
         .join(PartBatch, col(CostLine.part_batch_id) == col(PartBatch.id))
-        .where(CostLine.part_movement_id == sold.id)
+        .where(CostLine.part_movement_id == source.id)
         .order_by(col(PartBatch.received_at).desc(), col(PartBatch.id).desc())
     ).all()
 
@@ -2975,14 +2996,15 @@ def _return_part_line(
     }
 
     movement = PartMovement(
-        product_id=sale_line.product_id,
+        product_id=source.product_id,
         event_type=MovementType.RETURNED,
         quantity=quantity,
         from_location_id=from_location_id,
         to_location_id=to_location_id,
-        sale_id=sale_line.sale_id,
+        sale_id=source.sale_id,
+        project_pull_id=source.project_pull_id,
         actor_user_id=actor_user_id,
-        idempotency_key=uuid.uuid5(ret.idempotency_key, f"part:{sale_line.id}"),
+        idempotency_key=idempotency_key,
     )
     session.add(movement)
     session.flush()
@@ -3006,6 +3028,52 @@ def _return_part_line(
         )
         restored += qty * unit_cost
     return restored
+
+
+def _return_part_line(
+    *,
+    session: Session,
+    ret: SaleReturn,
+    sale_line: SaleLine,
+    already_returned: int,
+    quantity: int,
+    actor_user_id: uuid.UUID,
+    from_location_id: uuid.UUID,
+    to_location_id: uuid.UUID,
+) -> Decimal:
+    """Roll back ``quantity`` units of a PART sale line onto the exact batches
+    the sale consumed, at the exact cost, and return the cost restored.
+
+    The sale's cost_lines record which batch supplied each unit. We walk them in
+    REVERSE consumption order (newest-received batch first) and skip the units a
+    prior partial return already restored, so repeated partial returns are
+    deterministic and never restore the same unit twice. The batch is a cost
+    bucket, not a physical bin: nobody knows which piece came back, and FIFO was
+    itself an accounting convention — the return reverses that convention.
+    """
+    assert sale_line.product_id is not None  # PART lines always carry a product
+    sold = session.exec(
+        select(PartMovement).where(
+            PartMovement.sale_id == sale_line.sale_id,
+            PartMovement.product_id == sale_line.product_id,
+            PartMovement.event_type == MovementType.SOLD,
+        )
+    ).first()
+    if sold is None:
+        raise HTTPException(
+            status_code=409, detail="Original consumption movement not found"
+        )
+
+    return _reverse_part_out(
+        session=session,
+        source=sold,
+        already_returned=already_returned,
+        quantity=quantity,
+        idempotency_key=uuid.uuid5(ret.idempotency_key, f"part:{sale_line.id}"),
+        actor_user_id=actor_user_id,
+        from_location_id=from_location_id,
+        to_location_id=to_location_id,
+    )
 
 
 def create_sale_return(
@@ -3518,6 +3586,14 @@ def create_project_pull(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    # Movements carry the pull but not the line, so a return nets PART stock
+    # per product. Two PART lines for one product would make that ambiguous.
+    part_products = [ln.product_id for ln in pull_in.lines if ln.line_kind == SaleLineKind.PART]
+    if len(part_products) != len(set(part_products)):
+        raise HTTPException(
+            status_code=422, detail="One PART line per product; merge the quantities"
+        )
+
     pull = ProjectPull(
         project_id=project.id,
         customer_id=project.customer_id,
@@ -3563,41 +3639,210 @@ def create_project_pull(
             )
         )
 
+    # Stock leaves the system now, in this same transaction, so the request
+    # reflects real availability from the moment it exists. Any line that
+    # cannot be fully moved raises 409 and rolls the whole create back.
+    session.flush()
+    lines = session.exec(
+        select(ProjectPullLine)
+        .where(ProjectPullLine.project_pull_id == pull.id)
+        .order_by(col(ProjectPullLine.id))
+    ).all()
+    _move_pull_stock(
+        session=session,
+        pull=pull,
+        lines=lines,
+        qty_by_line={},
+        actor_user_id=created_by_user_id,
+        strict=True,
+    )
+
     session.commit()
     session.refresh(pull)
     return pull
 
 
-def fulfill_project_pull(
+def pull_stock_deducted(*, session: Session, pull_id: uuid.UUID) -> bool:
+    """Whether PROJECT_OUT movements already exist for this pull. Read from the
+    append-only ledgers rather than a flag on the pull so it cannot drift."""
+    unit_hit = session.exec(
+        select(UnitMovement.id)
+        .where(UnitMovement.project_pull_id == pull_id)
+        .limit(1)
+    ).first()
+    if unit_hit is not None:
+        return True
+    part_hit = session.exec(
+        select(PartMovement.id)
+        .where(PartMovement.project_pull_id == pull_id)
+        .limit(1)
+    ).first()
+    return part_hit is not None
+
+
+def pull_line_returnable(
+    *, session: Session, pull_id: uuid.UUID, lines: Sequence[ProjectPullLine]
+) -> dict[uuid.UUID, int]:
+    """Per line, how much of this pull is still out and can come back:
+    PROJECT_OUT minus RETURNED, read from the ledgers (never a flag).
+
+    Movements carry the pull but not the line, so PART lines net per product.
+    Create allows one PART line per product; a legacy pull that repeats one
+    gets the whole product balance on its first line (by id), so every return
+    goes through that line's own PROJECT_OUT movement — capped at what it drew
+    (``_reverse_part_out`` 409s past that); the other lines show 0."""
+    events = (MovementType.PROJECT_OUT, MovementType.RETURNED)
+
+    part_net: dict[uuid.UUID, int] = {}
+    for product_id, event, qty in session.exec(
+        select(PartMovement.product_id, PartMovement.event_type, func.sum(PartMovement.quantity))
+        .where(
+            PartMovement.project_pull_id == pull_id,
+            col(PartMovement.event_type).in_(events),
+        )
+        .group_by(col(PartMovement.product_id), col(PartMovement.event_type))
+    ).all():
+        sign = -1 if event == MovementType.RETURNED else 1
+        part_net[product_id] = part_net.get(product_id, 0) + sign * int(qty)
+
+    unit_net: dict[str, int] = {}
+    for barcode, event, n in session.exec(
+        select(Unit.castranova_barcode, UnitMovement.event_type, func.count())
+        .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
+        .where(
+            UnitMovement.project_pull_id == pull_id,
+            col(UnitMovement.event_type).in_(events),
+        )
+        .group_by(col(Unit.castranova_barcode), col(UnitMovement.event_type))
+    ).all():
+        sign = -1 if event == MovementType.RETURNED else 1
+        unit_net[barcode] = unit_net.get(barcode, 0) + sign * int(n)
+
+    out: dict[uuid.UUID, int] = {}
+    for line in sorted(lines, key=lambda ln: str(ln.id)):
+        if line.line_kind == SaleLineKind.UNIT:
+            out[line.id] = max(0, unit_net.get(line.unit_serial or "", 0))
+        else:
+            out[line.id] = max(0, part_net.pop(line.product_id, 0))
+    return out
+
+
+_RETURNABLE_PULL_LIMIT = 20  # bounded, newest-first (same shape as sales)
+
+
+def list_returnable_pulls(
     *,
     session: Session,
-    pull_id: uuid.UUID,
-    fulfill_lines: list[ProjectPullFulfillLine],
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+    limit: int = _RETURNABLE_PULL_LIMIT,
+) -> ReturnablePullsPublic:
+    """Settled pulls (FULFILLED / SHORT / CANCELLED) that still have stock out
+    for one unit or one SKU — the Returns page's project-request source.
+    PENDING pulls are omitted: their stock comes back via admin Cancel. Lines
+    with nothing left to return are dropped, so an empty result means "nothing
+    here can be returned". Mirrors ``list_returnable_sales``."""
+    if (castranova_barcode is None) == (sku is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide exactly one of castranova_barcode or sku",
+        )
+    stmt = (
+        select(ProjectPullLine, ProjectPull)
+        .join(ProjectPull, col(ProjectPullLine.project_pull_id) == col(ProjectPull.id))
+        .where(ProjectPull.state != ProjectPullState.PENDING)
+        .order_by(col(ProjectPull.created_at).desc(), col(ProjectPull.id))
+    )
+    if castranova_barcode is not None:
+        stmt = stmt.where(ProjectPullLine.unit_serial == castranova_barcode)
+    else:
+        product = session.exec(select(Product).where(Product.sku == sku)).first()
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        stmt = stmt.where(
+            ProjectPullLine.product_id == product.id,
+            ProjectPullLine.line_kind == SaleLineKind.PART,
+        )
+    # Over-fetch: fully-returned lines are filtered out below.
+    rows = session.exec(stmt.limit(limit * 4)).all()
+
+    lines_by_pull: dict[uuid.UUID, list[ProjectPullLine]] = {}
+    pulls: dict[uuid.UUID, ProjectPull] = {}
+    for line, pull in rows:
+        lines_by_pull.setdefault(pull.id, []).append(line)
+        pulls[pull.id] = pull
+    labels = _product_labels(session, list({ln.product_id for ln, _ in rows}))
+    projects = (
+        {
+            p.id: p
+            for p in session.exec(
+                select(Project).where(
+                    col(Project.id).in_([p.project_id for p in pulls.values()])
+                )
+            ).all()
+        }
+        if pulls
+        else {}
+    )
+    customers = _customer_labels(session, [p.customer_id for p in pulls.values()])
+
+    out: list[ReturnablePullPublic] = []
+    for pull_id, lines in lines_by_pull.items():  # insertion order == newest first
+        # Whole-pull lines feed the netting so per-product caps are exact.
+        all_lines = list_project_pull_lines(session=session, pull_id=pull_id)
+        returnable = pull_line_returnable(session=session, pull_id=pull_id, lines=all_lines)
+        offered = [
+            ReturnablePullLinePublic(
+                line_id=ln.id,
+                line_kind=ln.line_kind,
+                product_id=ln.product_id,
+                label=labels.get(ln.product_id, ""),
+                quantity_out=_pull_line_cap(ln),
+                quantity_returnable=returnable.get(ln.id, 0),
+            )
+            for ln in lines
+            if returnable.get(ln.id, 0) > 0
+        ]
+        if not offered:
+            continue
+        pull = pulls[pull_id]
+        project = projects.get(pull.project_id)
+        out.append(
+            ReturnablePullPublic(
+                pull_id=pull.id,
+                project_code=project.code if project else "",
+                project_name=project.name if project else "",
+                customer_name=customers.get(pull.customer_id, ""),
+                created_at=pull.created_at,
+                lines=offered,
+            )
+        )
+        if len(out) >= limit:
+            break
+    return ReturnablePullsPublic(pulls=out)
+
+
+def _pull_line_cap(line: ProjectPullLine) -> int:
+    return 1 if line.line_kind == SaleLineKind.UNIT else (line.requested_qty or 0)
+
+
+def _move_pull_stock(
+    *,
+    session: Session,
+    pull: ProjectPull,
+    lines: Sequence[ProjectPullLine],
+    qty_by_line: dict[uuid.UUID, int],
     actor_user_id: uuid.UUID,
-) -> ProjectPull:
-    """Staff fulfills a PENDING pull at the warehouse (Flow D.2), consuming
-    SERIALIZED units (PROJECT_OUT) and QUANTITY parts (FIFO), cost-only.
+    strict: bool,
+) -> dict[uuid.UUID, int]:
+    """Write the PROJECT_OUT movements for a pull's lines — SERIALIZED units and
+    QUANTITY parts (FIFO), cost-only — and return the quantity moved per line.
 
-    One-shot and PENDING-only: the pull is locked FOR UPDATE; a FULFILLED/SHORT
-    pull returns unchanged (idempotent — never re-consume), a CANCELLED pull
-    raises 409. Per line the requested amount defaults from the line (UNIT->1,
-    PART->requested_qty) unless overridden in ``fulfill_lines``. UNIT lines that
-    lost the race (missing/not IN_STOCK) become SHORT with no movement; PART
-    lines fulfilled below request become SHORT. The pull settles FULFILLED iff
-    every line is FULFILLED, else SHORT — all atomic with the movement writes
-    (409 on insufficient stock rolls the whole thing back)."""
-    pull = session.exec(
-        select(ProjectPull)
-        .where(ProjectPull.id == pull_id)
-        .with_for_update()
-    ).first()
-    if not pull:
-        raise HTTPException(status_code=404, detail="Project pull not found")
-    if pull.state == ProjectPullState.CANCELLED:
-        raise HTTPException(status_code=409, detail="Project pull is cancelled")
-    if pull.state != ProjectPullState.PENDING:
-        return pull  # idempotent: already settled (FULFILLED/SHORT), do not re-consume
-
+    Per line the amount defaults to its cap (UNIT->1, PART->requested_qty)
+    unless overridden in ``qty_by_line``. ``strict`` (create) raises 409 on a
+    unit that is missing/not IN_STOCK; lenient (legacy fulfill) records 0 for
+    it instead. Insufficient part stock always raises 409 (FIFO). Line states
+    are left to the caller. Nothing here commits."""
     customer_loc = session.exec(
         select(Location).where(Location.code == "CUSTOMER")
     ).first()
@@ -3606,28 +3851,6 @@ def fulfill_project_pull(
     ).first()
     if not customer_loc or not ygn_loc:
         raise HTTPException(status_code=500, detail="Locations not seeded")
-
-    lines = session.exec(
-        select(ProjectPullLine)
-        .where(ProjectPullLine.project_pull_id == pull.id)
-        .order_by(col(ProjectPullLine.id))
-    ).all()
-
-    # Validate payload line_ids before any write so a bad payload aborts the
-    # whole transaction cleanly (nothing consumed/moved).
-    payload_ids = [fl.line_id for fl in fulfill_lines]
-    if len(payload_ids) != len(set(payload_ids)):
-        dupes = {lid for lid in payload_ids if payload_ids.count(lid) > 1}
-        raise HTTPException(
-            status_code=422, detail=f"Duplicate line_id in payload: {dupes}"
-        )
-    known_ids = {ln.id for ln in lines}
-    unknown = set(payload_ids) - known_ids
-    if unknown:
-        raise HTTPException(
-            status_code=422, detail=f"Unknown line_id for this pull: {unknown}"
-        )
-    qty_by_line = {fl.line_id: fl.fulfilled_qty for fl in fulfill_lines}
 
     # Lock all target units up front in a single canonical (id-ordered) query so
     # concurrent sales/pulls touching overlapping units acquire locks in the same
@@ -3654,24 +3877,27 @@ def fulfill_project_pull(
         (ln for ln in lines if ln.line_kind == SaleLineKind.PART),
         key=lambda ln: str(ln.product_id),
     )
+    moved: dict[uuid.UUID, int] = {}
 
     for line in unit_lines:
         requested = qty_by_line.get(line.id, 1)
         unit = unit_by_barcode.get(line.unit_serial) if line.unit_serial else None
-        if requested < 1 or unit is None:
-            line.line_state = LineState.SHORT
-            line.fulfilled_qty = 0
-            session.add(line)
-            continue
-        try:
-            new_state = assert_unit_transition(
-                unit.current_state, MovementType.PROJECT_OUT
-            )
-        except IllegalTransition:
-            # Lost the race (already SOLD/PROJECT_OUT/etc.) — first-write-wins.
-            line.line_state = LineState.SHORT
-            line.fulfilled_qty = 0
-            session.add(line)
+        new_state = None
+        if unit is not None and requested >= 1:
+            try:
+                new_state = assert_unit_transition(
+                    unit.current_state, MovementType.PROJECT_OUT
+                )
+            except IllegalTransition:
+                # Lost the race (already SOLD/PROJECT_OUT/etc.) — first-write-wins.
+                new_state = None
+        if unit is None or new_state is None:
+            if strict:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Unit {line.unit_serial} is not in stock",
+                )
+            moved[line.id] = 0
             continue
         session.add(
             UnitMovement(
@@ -3688,18 +3914,14 @@ def fulfill_project_pull(
         unit.current_location_id = customer_loc.id
         unit.updated_at = get_datetime_utc()
         session.add(unit)
-        line.line_state = LineState.FULFILLED
-        line.fulfilled_qty = 1
-        session.add(line)
+        moved[line.id] = 1
 
     for line in part_lines:
         requested_qty = line.requested_qty or 0
         wanted = qty_by_line.get(line.id, requested_qty)
         actual = min(wanted, requested_qty)
         if actual <= 0:
-            line.line_state = LineState.SHORT
-            line.fulfilled_qty = 0
-            session.add(line)
+            moved[line.id] = 0
             continue
         cost_lines = consume_quantity_fifo(
             session=session, product_id=line.product_id, quantity_needed=actual
@@ -3719,10 +3941,93 @@ def fulfill_project_pull(
         for cost_line in cost_lines:
             cost_line.part_movement_id = movement.id
             session.add(cost_line)
-        line.line_state = (
-            LineState.FULFILLED if actual == requested_qty else LineState.SHORT
+        moved[line.id] = actual
+
+    return moved
+
+
+def fulfill_project_pull(
+    *,
+    session: Session,
+    pull_id: uuid.UUID,
+    fulfill_lines: list[ProjectPullFulfillLine],
+    actor_user_id: uuid.UUID,
+) -> ProjectPull:
+    """Staff confirms the hand-out of a PENDING pull at the warehouse (Flow D.2).
+
+    Stock normally left at create (see ``create_project_pull``), so this only
+    records what went out per line. A pull with no PROJECT_OUT movements yet
+    (created before create started deducting) is consumed here instead —
+    SERIALIZED units (PROJECT_OUT) and QUANTITY parts (FIFO), cost-only — so
+    stock is deducted exactly once either way.
+
+    One-shot and PENDING-only: the pull is locked FOR UPDATE; a FULFILLED/SHORT
+    pull returns unchanged (idempotent — never re-consume), a CANCELLED pull
+    raises 409. Per line the requested amount defaults from the line (UNIT->1,
+    PART->requested_qty) unless overridden in ``fulfill_lines``. UNIT lines that
+    lost the race (missing/not IN_STOCK) become SHORT with no movement; PART
+    lines fulfilled below request become SHORT. The pull settles FULFILLED iff
+    every line is FULFILLED, else SHORT — all atomic with the movement writes
+    (409 on insufficient stock rolls the whole thing back)."""
+    pull = session.exec(
+        select(ProjectPull)
+        .where(ProjectPull.id == pull_id)
+        .with_for_update()
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="Project pull not found")
+    if pull.state == ProjectPullState.CANCELLED:
+        raise HTTPException(status_code=409, detail="Project pull is cancelled")
+    if pull.state != ProjectPullState.PENDING:
+        return pull  # idempotent: already settled (FULFILLED/SHORT), do not re-consume
+
+    lines = session.exec(
+        select(ProjectPullLine)
+        .where(ProjectPullLine.project_pull_id == pull.id)
+        .order_by(col(ProjectPullLine.id))
+    ).all()
+
+    # Validate payload line_ids before any write so a bad payload aborts the
+    # whole transaction cleanly (nothing consumed/moved).
+    payload_ids = [fl.line_id for fl in fulfill_lines]
+    if len(payload_ids) != len(set(payload_ids)):
+        dupes = {lid for lid in payload_ids if payload_ids.count(lid) > 1}
+        raise HTTPException(
+            status_code=422, detail=f"Duplicate line_id in payload: {dupes}"
         )
-        line.fulfilled_qty = actual
+    known_ids = {ln.id for ln in lines}
+    unknown = set(payload_ids) - known_ids
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown line_id for this pull: {unknown}"
+        )
+    qty_by_line = {fl.line_id: fl.fulfilled_qty for fl in fulfill_lines}
+
+    if pull_stock_deducted(session=session, pull_id=pull.id):
+        # Stock already left at create: just record the hand-out, capped at
+        # what was deducted. A short hand-out leaves the surplus deducted —
+        # it can be put back with a pull Return.
+        given = {
+            ln.id: max(0, min(qty_by_line.get(ln.id, _pull_line_cap(ln)), _pull_line_cap(ln)))
+            for ln in lines
+        }
+    else:
+        given = _move_pull_stock(
+            session=session,
+            pull=pull,
+            lines=lines,
+            qty_by_line=qty_by_line,
+            actor_user_id=actor_user_id,
+            strict=False,
+        )
+
+    for line in lines:
+        line.fulfilled_qty = given[line.id]
+        line.line_state = (
+            LineState.FULFILLED
+            if line.fulfilled_qty == _pull_line_cap(line)
+            else LineState.SHORT
+        )
         session.add(line)
 
     all_fulfilled = all(ln.line_state == LineState.FULFILLED for ln in lines)
@@ -3738,16 +4043,218 @@ def fulfill_project_pull(
     return pull
 
 
+def _return_pull_lines(
+    *,
+    session: Session,
+    pull: ProjectPull,
+    lines: Sequence[ProjectPullLine],
+    qty_by_line: dict[uuid.UUID, int],
+    key: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> None:
+    """Put pulled stock back by appending RETURNED movements that reverse this
+    pull's own PROJECT_OUT ones: units walk back to where they left from,
+    parts re-credit the exact batches, newest first. The caller holds the pull
+    FOR UPDATE (the serialization point) and commits."""
+    returnable = pull_line_returnable(session=session, pull_id=pull.id, lines=lines)
+    for line_id, qty in qty_by_line.items():
+        if qty > returnable[line_id]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Over-return: {returnable[line_id]} returnable, requested {qty}",
+            )
+    ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
+    customer_loc = session.exec(
+        select(Location).where(Location.code == "CUSTOMER")
+    ).first()
+    if not ygn or not customer_loc:
+        raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    by_id = {ln.id: ln for ln in lines}
+    wanted = [by_id[lid] for lid, qty in qty_by_line.items() if qty > 0]
+
+    # All units in one id-ordered lock, same order as _move_pull_stock.
+    unit_lines = [ln for ln in wanted if ln.line_kind == SaleLineKind.UNIT]
+    serials = [ln.unit_serial for ln in unit_lines if ln.unit_serial]
+    units = {
+        u.castranova_barcode: u
+        for u in session.exec(
+            select(Unit)
+            .where(col(Unit.castranova_barcode).in_(serials))
+            .order_by(col(Unit.id))
+            .with_for_update()
+        ).all()
+    } if serials else {}
+    for line in unit_lines:
+        unit = units.get(line.unit_serial or "")
+        if unit is None:
+            raise HTTPException(
+                status_code=409, detail=f"Unit {line.unit_serial} not found"
+            )
+        # The PROJECT_OUT movement's key is deterministic (see _move_pull_stock).
+        out = session.exec(
+            select(UnitMovement).where(
+                UnitMovement.idempotency_key == uuid.uuid5(pull.id, f"unit:{line.id}")
+            )
+        ).first()
+        _reverse_unit_out(
+            session=session,
+            unit=unit,
+            back_to=(out.from_location_id if out and out.from_location_id else ygn.id),
+            idempotency_key=uuid.uuid5(key, f"return-unit:{line.id}"),
+            actor_user_id=actor_user_id,
+            project_pull_id=pull.id,
+        )
+
+    # PART lines in product order, same as _move_pull_stock, so batch locks
+    # are taken in one global order.
+    part_lines = sorted(
+        (ln for ln in wanted if ln.line_kind == SaleLineKind.PART),
+        key=lambda ln: str(ln.product_id),
+    )
+    for line in part_lines:
+        out_part = session.exec(
+            select(PartMovement).where(
+                PartMovement.idempotency_key == uuid.uuid5(pull.id, f"part:{line.id}")
+            )
+        ).first()
+        if out_part is None:
+            raise HTTPException(
+                status_code=409, detail="Original consumption movement not found"
+            )
+        # Everything this pull already returned for the product came back
+        # through this line's movement (see pull_line_returnable), so skip it.
+        already_returned = session.exec(
+            select(func.coalesce(func.sum(PartMovement.quantity), 0)).where(
+                PartMovement.project_pull_id == pull.id,
+                PartMovement.product_id == line.product_id,
+                PartMovement.event_type == MovementType.RETURNED,
+            )
+        ).one()
+        _reverse_part_out(
+            session=session,
+            source=out_part,
+            already_returned=int(already_returned),
+            quantity=qty_by_line[line.id],
+            idempotency_key=uuid.uuid5(key, f"return-part:{line.id}"),
+            actor_user_id=actor_user_id,
+            from_location_id=customer_loc.id,
+            to_location_id=ygn.id,
+        )
+
+
+def _pull_return_replay(
+    *, session: Session, keys: list[uuid.UUID]
+) -> UnitMovement | PartMovement | None:
+    unit_hit = session.exec(
+        select(UnitMovement).where(
+            col(UnitMovement.idempotency_key).in_(keys),
+            UnitMovement.event_type == MovementType.RETURNED,
+        )
+    ).first()
+    if unit_hit is not None:
+        return unit_hit
+    # RETURNED only: a key equal to the pull id derives the pull's own
+    # PROJECT_OUT keys, which must not read as an earlier return.
+    return session.exec(
+        select(PartMovement).where(
+            col(PartMovement.idempotency_key).in_(keys),
+            PartMovement.event_type == MovementType.RETURNED,
+        )
+    ).first()
+
+
+def _replayed_pull(
+    *, hit: UnitMovement | PartMovement, pull: ProjectPull, actor_user_id: uuid.UUID
+) -> ProjectPull:
+    _assert_replay_actor(stored_user_id=hit.actor_user_id, caller_user_id=actor_user_id)
+    if hit.project_pull_id != pull.id:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key already used for a different request",
+        )
+    return pull
+
+
+def return_project_pull(
+    *,
+    session: Session,
+    pull_id: uuid.UUID,
+    payload: ProjectPullReturnCreate,
+    actor_user_id: uuid.UUID,
+) -> ProjectPull:
+    """Staff or admin puts items from a pull back into stock (design
+    2026-09-21). FULFILLED / SHORT / CANCELLED pulls only — a waiting pull is
+    undone with cancel. The pull's state and hand-out record are unchanged;
+    only stock and Project COGS move. Idempotent on idempotency_key."""
+    pull = session.exec(
+        select(ProjectPull).where(ProjectPull.id == pull_id).with_for_update()
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="Project pull not found")
+
+    # Checked AFTER the pull lock: a concurrent same-key request on this pull
+    # has committed by now, so its movements are visible here. The "return-"
+    # prefix keeps these keys apart from the pull's own PROJECT_OUT keys
+    # (uuid5(pull.id, "part:<line>")), even when the caller's key IS the pull id.
+    keys = [
+        uuid.uuid5(payload.idempotency_key, f"{kind}:{ln.line_id}")
+        for ln in payload.lines
+        for kind in ("return-unit", "return-part")
+    ]
+    hit = _pull_return_replay(session=session, keys=keys)
+    if hit is not None:
+        return _replayed_pull(hit=hit, pull=pull, actor_user_id=actor_user_id)
+
+    if pull.state == ProjectPullState.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail="This request is still waiting — an admin can cancel it to put the stock back",
+        )
+
+    lines = session.exec(
+        select(ProjectPullLine)
+        .where(ProjectPullLine.project_pull_id == pull.id)
+        .order_by(col(ProjectPullLine.id))
+    ).all()
+    payload_ids = [ln.line_id for ln in payload.lines]
+    if len(payload_ids) != len(set(payload_ids)):
+        raise HTTPException(status_code=422, detail="Duplicate line_id in payload")
+    if set(payload_ids) - {ln.id for ln in lines}:
+        raise HTTPException(status_code=422, detail="Unknown line_id for this pull")
+
+    try:
+        _return_pull_lines(
+            session=session,
+            pull=pull,
+            lines=lines,
+            qty_by_line={ln.line_id: ln.quantity for ln in payload.lines},
+            key=payload.idempotency_key,
+            actor_user_id=actor_user_id,
+        )
+        session.commit()
+    except IntegrityError:
+        # A same-key request on ANOTHER pull won the race (different lock).
+        session.rollback()
+        winner = _pull_return_replay(session=session, keys=keys)
+        if winner is None:
+            raise
+        return _replayed_pull(hit=winner, pull=pull, actor_user_id=actor_user_id)
+    session.refresh(pull)
+    return pull
+
+
 def cancel_project_pull(
     *,
     session: Session,
     pull_id: uuid.UUID,
     actor_user_id: uuid.UUID,
 ) -> ProjectPull:
-    """Admin cancels a PENDING or SHORT pull (Flow D.3): mark CANCELLED, flip
-    still-PENDING lines to CANCELLED, write no movements. The pull is locked FOR
-    UPDATE; an already-CANCELLED pull returns unchanged (idempotent); a FULFILLED
-    pull raises 409."""
+    """Admin cancels a PENDING or SHORT pull (Flow D.3). A PENDING pull whose
+    stock already left gets it back via RETURNED movements; a SHORT pull's
+    given-out stock stays out (return it explicitly). The pull is locked FOR
+    UPDATE; an already-CANCELLED pull returns unchanged (idempotent); a
+    FULFILLED pull raises 409."""
     pull = session.exec(
         select(ProjectPull)
         .where(ProjectPull.id == pull_id)
@@ -3760,6 +4267,28 @@ def cancel_project_pull(
     if pull.state == ProjectPullState.FULFILLED:
         raise HTTPException(
             status_code=409, detail="Cannot cancel a fulfilled pull"
+        )
+
+    # Stock left at create: put every line's balance back before the flip,
+    # in this same transaction. Deterministic key — a cancel happens once
+    # (the CANCELLED early-return above makes a repeat a no-op).
+    if pull.state == ProjectPullState.PENDING and pull_stock_deducted(
+        session=session, pull_id=pull.id
+    ):
+        pull_lines = session.exec(
+            select(ProjectPullLine)
+            .where(ProjectPullLine.project_pull_id == pull.id)
+            .order_by(col(ProjectPullLine.id))
+        ).all()
+        _return_pull_lines(
+            session=session,
+            pull=pull,
+            lines=pull_lines,
+            qty_by_line=pull_line_returnable(
+                session=session, pull_id=pull.id, lines=pull_lines
+            ),
+            key=uuid.uuid5(pull.id, "cancel"),
+            actor_user_id=actor_user_id,
         )
 
     pull.state = assert_pull_transition(pull.state, ProjectPullState.CANCELLED)
@@ -4218,6 +4747,17 @@ def _sale_return_totals(
     return refund, cogs
 
 
+# Project COGS nets pull returns (design 2026-09-21): a RETURNED movement with
+# a project_pull_id gives its cost back, in the month it came back. Every
+# project query inner-joins ProjectPull, which already drops sale returns
+# (their project_pull_id is NULL).
+_PROJECT_COST_EVENTS = (MovementType.PROJECT_OUT, MovementType.RETURNED)
+
+
+def _project_cost(amount: Any, event_type: Any) -> Any:
+    return case((event_type == MovementType.RETURNED, -amount), else_=amount)
+
+
 def _channel_rows(
     session: Session,
     start: datetime,
@@ -4263,26 +4803,39 @@ def _channel_rows(
         )
     ).one()
 
-    # --- PROJECT (cost-only): pulls fulfilled in window. ---
+    # --- PROJECT (cost-only): stock that left for projects in window. Windowed
+    # on the movement date, not ProjectPull.fulfilled_at: a pull deducts at
+    # create, so its COGS belongs to the month the stock left, whether or not
+    # staff have handed it out yet. ---
     proj_part_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
-            col(ProjectPull.fulfilled_at) >= start,
-            col(ProjectPull.fulfilled_at) < end,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
+            col(PartMovement.occurred_at) >= start,
+            col(PartMovement.occurred_at) < end,
         )
     ).one()
     proj_unit_cogs = session.exec(
-        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
-            col(ProjectPull.fulfilled_at) >= start,
-            col(ProjectPull.fulfilled_at) < end,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
+            col(UnitMovement.occurred_at) >= start,
+            col(UnitMovement.occurred_at) < end,
         )
     ).one()
 
@@ -4458,35 +5011,41 @@ def _product_rows(
             _merge(acc, product_id, Decimal("0"), cogs)
 
     if channel in (None, Channel.PROJECT):
-        # part COGS by PartMovement.product_id (PROJECT_OUT)
+        # part COGS by PartMovement.product_id (PROJECT_OUT − pull RETURNED)
         for product_id, cogs in session.exec(
             select(
                 PartMovement.product_id,
-                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
-                PartMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
+                col(PartMovement.occurred_at) >= start,
+                col(PartMovement.occurred_at) < end,
             )
             .group_by(col(PartMovement.product_id))
         ).all():
             _merge(acc, product_id, Decimal("0"), cogs)
-        # unit COGS by Unit.product_id (PROJECT_OUT)
+        # unit COGS by Unit.product_id (PROJECT_OUT − pull RETURNED)
         for product_id, cogs in session.exec(
             select(
                 Unit.product_id,
-                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .select_from(UnitMovement)
             .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
-                UnitMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
+                col(UnitMovement.occurred_at) >= start,
+                col(UnitMovement.occurred_at) < end,
             )
             .group_by(col(Unit.product_id))
         ).all():
@@ -4586,14 +5145,17 @@ def _customer_rows(
         for cust_id, cogs in session.exec(
             select(
                 ProjectPull.customer_id,
-                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
-                PartMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
+                col(PartMovement.occurred_at) >= start,
+                col(PartMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.customer_id))
         ).all():
@@ -4601,15 +5163,18 @@ def _customer_rows(
         for cust_id, cogs in session.exec(
             select(
                 ProjectPull.customer_id,
-                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .select_from(UnitMovement)
             .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
-                UnitMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
+                col(UnitMovement.occurred_at) >= start,
+                col(UnitMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.customer_id))
         ).all():
@@ -4643,7 +5208,7 @@ def _project_rows(
     session: Session, start: datetime, end: datetime, channel: Channel | None
 ) -> list[MarginBreakdownRow]:
     """Revenue/COGS per project (cost-only, mirroring the PROJECT channel).
-    Only PROJECT_OUT movements carry a project, so SALE + MAINTENANCE money
+    Only PROJECT_OUT and pull RETURNED movements carry a project, so SALE + MAINTENANCE money
     has no project home; when ``channel`` is unscoped, that remainder is
     rolled into a single reconciling ``(not project work)`` bucket so totals
     still match the channel view."""
@@ -4653,14 +5218,17 @@ def _project_rows(
         for proj_id, cogs in session.exec(
             select(
                 ProjectPull.project_id,
-                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
-                PartMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
+                col(PartMovement.occurred_at) >= start,
+                col(PartMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.project_id))
         ).all():
@@ -4668,15 +5236,18 @@ def _project_rows(
         for proj_id, cogs in session.exec(
             select(
                 ProjectPull.project_id,
-                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .select_from(UnitMovement)
             .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
-                UnitMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
+                col(UnitMovement.occurred_at) >= start,
+                col(UnitMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.project_id))
         ).all():
@@ -4810,21 +5381,31 @@ def get_customer_dashboard(
     ).one()
 
     proj_part_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.customer_id) == customer_id,
         )
     ).one()
     proj_unit_cogs = session.exec(
-        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.customer_id) == customer_id,
         )
     ).one()
@@ -4880,12 +5461,15 @@ def _project_consumed_costs(
     part_rows = session.exec(
         select(
             col(ProjectPull.project_id),
-            func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            ),
         )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id).in_(project_ids),
         )
         .group_by(col(ProjectPull.project_id))
@@ -4896,13 +5480,16 @@ def _project_consumed_costs(
     unit_rows = session.exec(
         select(
             col(ProjectPull.project_id),
-            func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            ),
         )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id).in_(project_ids),
         )
         .group_by(col(ProjectPull.project_id))
@@ -4915,21 +5502,31 @@ def _project_consumed_costs(
 
 def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decimal:
     part_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).one()
     unit_cogs = session.exec(
-        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).one()
@@ -4939,7 +5536,7 @@ def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decima
 def _project_consumed_items(
     *, session: Session, project_id: uuid.UUID
 ) -> list[ProjectConsumptionRowPublic]:
-    """Every PROJECT_OUT movement against this project, newest first, with the
+    """Every PROJECT_OUT and pull RETURNED movement against this project, newest first, with the
     FIFO batch draws behind each PART row (FR-020 batch attribution).
 
     Two legs because consumption spans both ledgers: QUANTITY parts draw from
@@ -4959,7 +5556,7 @@ def _project_consumed_items(
         select(PartMovement)
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).all()
@@ -4990,13 +5587,14 @@ def _project_consumed_items(
         rows.append(
             ProjectConsumptionRowPublic(
                 line_kind=SaleLineKind.PART,
+                event_type=movement.event_type,
                 product_id=movement.product_id,
                 product_sku=(product.sku if product else "—"),
                 model_name=(product.model_name if product else "—"),
                 unit_serial=None,
                 quantity=movement.quantity,
                 occurred_at=movement.occurred_at,
-                # PROJECT_OUT always carries its pull; the guard satisfies mypy.
+                # project movements always carry their pull; the guard satisfies mypy.
                 project_pull_id=cast(uuid.UUID, movement.project_pull_id),
                 total_cost_thb=_q(
                     sum((d.total_cost_thb for d in draws), Decimal("0"))
@@ -5011,7 +5609,7 @@ def _project_consumed_items(
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).all()
@@ -5022,6 +5620,7 @@ def _project_consumed_items(
         rows.append(
             ProjectConsumptionRowPublic(
                 line_kind=SaleLineKind.UNIT,
+                event_type=unit_movement.event_type,
                 product_id=unit.product_id,
                 product_sku=(unit_product.sku if unit_product else "—"),
                 model_name=(unit_product.model_name if unit_product else "—"),

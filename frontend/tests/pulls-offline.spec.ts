@@ -211,41 +211,8 @@ test.describe("Project-pull offline", () => {
     expect(await hasConflictItemFor(seeded.pullId)).toBe(false)
   })
 
-  // The producer's conflict path. fulfill_project_pull is idempotent for an
-  // already-settled pull (returns 200), so a re-fulfill is NOT a conflict — a
-  // genuine 409 comes from the pull being CANCELLED underneath the queued
-  // fulfill (crud.py: "Project pull is cancelled", 409). That is the real
-  // collision: admin cancels while staff's fulfill waits offline. On reconnect
-  // the replay 409s and the producer diverts it to the admin review queue.
-  test("pull cancelled online while queued offline → CONFLICT in review queue", async ({
-    page,
-  }) => {
-    const seeded = await seedPendingPartPull()
-
-    await openAndStageFulfill(page, seeded)
-
-    await page.evaluate(() => window.dispatchEvent(new Event("offline")))
-    await page.getByRole("button", { name: "Done — give out parts" }).click()
-    await expect(page.getByText(/Offline — 1 change queued/i)).toBeVisible()
-    await waitForPersistedPausedMutation(page)
-
-    // Cancel the pull online (admin), so the queued fulfill will 409 on replay.
-    await ProjectPullsService.cancelProjectPull({ pullId: seeded.pullId })
-    await expect
-      .poll(() => pullStateById(seeded.pullId), {
-        timeout: 10_000,
-        intervals: [500, 1_000],
-      })
-      .toBe("CANCELLED")
-
-    // Reconnect → replay 409s → the producer posts a CONFLICT review item.
-    await page.reload()
-
-    await expect
-      .poll(() => hasConflictItemFor(seeded.pullId), {
-        timeout: 15_000,
-        intervals: [500, 1_000],
-      })
-      .toBe(true)
-  })
+  // No offline CONFLICT scenario here any more: a fulfill only 409s on a
+  // CANCELLED pull, and a pull created via the API has already deducted its
+  // stock, so cancelling it while PENDING is itself refused (409). The
+  // producer's CONFLICT branch is covered in sync-producer.spec.ts.
 })

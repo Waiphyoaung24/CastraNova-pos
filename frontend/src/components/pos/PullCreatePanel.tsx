@@ -79,7 +79,11 @@ export function PullCreatePanel({
           value={projectId}
           onChange={(id) => onProjectChange(id ?? "")}
           getKey={(project) => project.id}
-          getLabel={(project) => `${project.name} (${project.code})`}
+          // The pull's customer comes from its project, so show it here. The
+          // guard covers options cached (persisted 24h) before this field existed.
+          getLabel={(project) =>
+            `${project.name} (${project.code})${project.customer_name ? ` — ${project.customer_name}` : ""}`
+          }
           placeholder="Select a project"
           searchPlaceholder="Search projects…"
           emptyText="No projects available"

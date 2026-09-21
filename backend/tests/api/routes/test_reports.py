@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -8,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app import crud
+from app import crud, models
 from app.core.config import settings
 from app.models import (
     Channel,
@@ -140,11 +141,32 @@ def _pin_ticket(db: Session, ticket_id: uuid.UUID, when: datetime) -> None:
     db.commit()
 
 
+@contextmanager
+def _clock_at(when: datetime) -> Iterator[None]:
+    """Freeze ``app.models.get_datetime_utc`` at ``when``. PROJECT COGS is
+    windowed on the movement's occurred_at (stock leaves at create) and the
+    ledgers are append-only (m021 trigger), so a pull's movements must be born
+    in the month a report test wants them in — they cannot be pinned after."""
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:  # type: ignore[override]
+            return when
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(models, "datetime", _Frozen)
+    try:
+        yield
+    finally:
+        mp.undo()
+
+
 def _pin_pull(db: Session, pull_id: uuid.UUID, when: datetime) -> None:
     row = db.get(ProjectPull, pull_id)
     assert row is not None
-    row.fulfilled_at = when
-    db.add(row)
+    if row.fulfilled_at is not None:
+        row.fulfilled_at = when
+        db.add(row)
     db.commit()
 
 
@@ -202,36 +224,37 @@ def test_mixed_channel_hand_calc(
             customer_id=customer.id,
         ),
     )
-    pull = crud.create_project_pull(
-        session=db,
-        pull_in=ProjectPullCreate(
-            project_id=project.id,
-            lines=[
-                ProjectPullLineCreate(
-                    line_kind=SaleLineKind.UNIT,
-                    product_id=seed["serialized"].id,
-                    unit_serial=proj_barcode,
-                ),
-                ProjectPullLineCreate(
-                    line_kind=SaleLineKind.PART,
-                    product_id=proj_part.id,
-                    requested_qty=3,
-                ),
+    with _clock_at(TARGET):
+        pull = crud.create_project_pull(
+            session=db,
+            pull_in=ProjectPullCreate(
+                project_id=project.id,
+                lines=[
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.UNIT,
+                        product_id=seed["serialized"].id,
+                        unit_serial=proj_barcode,
+                    ),
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.PART,
+                        product_id=proj_part.id,
+                        requested_qty=3,
+                    ),
+                ],
+            ),
+            created_by_user_id=admin.id,
+        )
+        line_ids = {ln.line_kind: ln.id for ln in _pull_lines(db, pull.id)}
+        crud.fulfill_project_pull(
+            session=db,
+            pull_id=pull.id,
+            fulfill_lines=[
+                ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.UNIT], fulfilled_qty=1),
+                ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.PART], fulfilled_qty=3),
             ],
-        ),
-        created_by_user_id=admin.id,
-    )
-    line_ids = {ln.line_kind: ln.id for ln in _pull_lines(db, pull.id)}
-    crud.fulfill_project_pull(
-        session=db,
-        pull_id=pull.id,
-        fulfill_lines=[
-            ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.UNIT], fulfilled_qty=1),
-            ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.PART], fulfilled_qty=3),
-        ],
-        actor_user_id=admin.id,
-    )
-    _pin_pull(db, pull.id, TARGET)
+            actor_user_id=admin.id,
+        )
+        _pin_pull(db, pull.id, TARGET)
     # revenue = 0 ; cogs = 100 (unit) + 3 @ 10 = 30 => 130
     proj_rev = Decimal("0.00")
     proj_cogs = Decimal("130.00")
@@ -370,8 +393,10 @@ def test_short_pull_counted(
 ) -> None:
     admin = seed["admin"]
     customer = seed["customer"]
-    # Request 5 but only 3 in stock -> SHORT, consumes 3 @ 10 = 30 COGS.
-    part = seed["make_part"]("100.00", "20.00", [(3, "10.00")])
+    # Create deducts the full 5 @ 10 = 50 COGS; staff then hand out only 3 of
+    # them -> pull SHORT. The report counts what left stock, not what was
+    # handed over.
+    part = seed["make_part"]("100.00", "20.00", [(5, "10.00")])
     project = crud.create_project(
         session=db,
         project_in=ProjectCreate(
@@ -380,42 +405,91 @@ def test_short_pull_counted(
             customer_id=customer.id,
         ),
     )
-    pull = crud.create_project_pull(
-        session=db,
-        pull_in=ProjectPullCreate(
-            project_id=project.id,
-            lines=[
-                ProjectPullLineCreate(
-                    line_kind=SaleLineKind.PART,
-                    product_id=part.id,
-                    requested_qty=5,
-                ),
-            ],
-        ),
-        created_by_user_id=admin.id,
-    )
-    line_id = _pull_lines(db, pull.id)[0].id
-    # Fulfill 3 of the 5 requested -> partial consumption -> line+pull SHORT.
-    settled = crud.fulfill_project_pull(
-        session=db,
-        pull_id=pull.id,
-        fulfill_lines=[ProjectPullFulfillLine(line_id=line_id, fulfilled_qty=3)],
-        actor_user_id=admin.id,
-    )
-    assert settled.state.value == "SHORT"
-    # Dedicated month so the session-scoped DB's other PROJECT activity (the
-    # hand-calc test pins to March) doesn't float this assertion.
-    _pin_pull(db, pull.id, datetime(2026, 9, 10, tzinfo=timezone.utc))
+    with _clock_at(datetime(2026, 2, 10, tzinfo=timezone.utc)):
+        pull = crud.create_project_pull(
+            session=db,
+            pull_in=ProjectPullCreate(
+                project_id=project.id,
+                lines=[
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.PART,
+                        product_id=part.id,
+                        requested_qty=5,
+                    ),
+                ],
+            ),
+            created_by_user_id=admin.id,
+        )
+        line_id = _pull_lines(db, pull.id)[0].id
+        # Hand out 3 of the 5 requested -> line+pull SHORT (stock already moved).
+        settled = crud.fulfill_project_pull(
+            session=db,
+            pull_id=pull.id,
+            fulfill_lines=[ProjectPullFulfillLine(line_id=line_id, fulfilled_qty=3)],
+            actor_user_id=admin.id,
+        )
+        assert settled.state.value == "SHORT"
+        # Dedicated month so the session-scoped DB's other PROJECT activity (the
+        # hand-calc test pins to March; unpinned pulls land in the wall-clock
+        # month) doesn't float this assertion.
+        _pin_pull(db, pull.id, datetime(2026, 2, 10, tzinfo=timezone.utc))
 
     r = client.get(
-        f"{PREFIX}/reports/channel-margin?month=2026-09",
+        f"{PREFIX}/reports/channel-margin?month=2026-02",
         headers=superuser_token_headers,
     )
     assert r.status_code == 200, r.text
     proj_row = _channel(r.json(), "PROJECT")
-    # 3 @ 10 consumed = 30 COGS, revenue 0.
-    assert Decimal(proj_row["cogs_thb"]) == Decimal("30.00")
+    # 5 @ 10 left stock at create = 50 COGS, revenue 0.
+    assert Decimal(proj_row["cogs_thb"]) == Decimal("50.00")
     assert Decimal(proj_row["revenue_thb"]) == Decimal("0.00")
+
+
+def test_pending_pull_counted_in_month_stock_left(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    seed: dict[str, Any],
+) -> None:
+    admin = seed["admin"]
+    customer = seed["customer"]
+    # Created (stock deducted) but never handed out: fulfilled_at stays NULL,
+    # yet 2 @ 10 = 20 COGS really left stock and must show in that month.
+    part = seed["make_part"]("100.00", "20.00", [(2, "10.00")])
+    project = crud.create_project(
+        session=db,
+        project_in=ProjectCreate(
+            code=f"PRJ-{uuid.uuid4().hex[:8]}",
+            name="Pending Site",
+            customer_id=customer.id,
+        ),
+    )
+    with _clock_at(datetime(2026, 8, 10, tzinfo=timezone.utc)):
+        pull = crud.create_project_pull(
+            session=db,
+            pull_in=ProjectPullCreate(
+                project_id=project.id,
+                lines=[
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.PART,
+                        product_id=part.id,
+                        requested_qty=2,
+                    ),
+                ],
+            ),
+            created_by_user_id=admin.id,
+        )
+        assert pull.fulfilled_at is None
+        # Dedicated month (2026-08): unused by every other reports/margin test.
+        _pin_pull(db, pull.id, datetime(2026, 8, 10, tzinfo=timezone.utc))
+
+    r = client.get(
+        f"{PREFIX}/reports/channel-margin?month=2026-08",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    proj_row = _channel(r.json(), "PROJECT")
+    assert Decimal(proj_row["cogs_thb"]) == Decimal("20.00")
 
 
 def test_http_reconciles_across_groupings(

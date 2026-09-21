@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest"
 
 import { ApiError } from "@/client"
+import type {
+  ReturnablePullsPublic,
+  ReturnableSalesPublic,
+} from "@/client/types.gen"
 import {
+  buildPullReturnPayload,
   buildReturnPayload,
   canSubmitReturn,
   clampReturnQuantity,
   emptyReturnDraft,
   lookupErrorMessage,
+  pickerOptions,
   type ReturnDraft,
 } from "./sale-return"
 
@@ -164,5 +170,102 @@ describe("lookupErrorMessage", () => {
     expect(lookupErrorMessage(new Error("network down"))).toBe(
       "Could not look up returnable sales.",
     )
+  })
+})
+
+const sales: ReturnableSalesPublic = {
+  sales: [
+    {
+      sale_id: "s1",
+      sold_at: "2026-09-20T10:00:00Z",
+      customer_id: "c1",
+      customer_name: "Thiri Trading",
+      lines: [
+        {
+          sale_line_id: "sl1",
+          line_kind: "PART",
+          product_id: "p1",
+          unit_id: null,
+          label: "BAT — Battery",
+          quantity_sold: 2,
+          quantity_returned: 0,
+          quantity_returnable: 2,
+          unit_price_thb: "1900.00",
+        },
+      ],
+    },
+  ],
+}
+const pulls: ReturnablePullsPublic = {
+  pulls: [
+    {
+      pull_id: "pu1",
+      project_code: "PRJ-9",
+      project_name: "Refit",
+      customer_name: "Ko Min",
+      created_at: "2026-09-21T10:00:00Z",
+      lines: [
+        {
+          line_id: "pl1",
+          line_kind: "PART",
+          product_id: "p1",
+          label: "BAT — Battery",
+          quantity_out: 7,
+          quantity_returnable: 5,
+        },
+      ],
+    },
+  ],
+}
+
+describe("returns picker with project pulls", () => {
+  it("merges newest first across sales and pulls with prefixed values", () => {
+    const opts = pickerOptions(sales, pulls)
+    expect(opts.map((o) => o.value)).toEqual(["pull:pl1", "sale:sl1"])
+    expect(opts[0].label).toContain("Refit (PRJ-9)")
+    expect(opts[0].label).toContain("Ko Min")
+    expect(opts[0].label).toContain("5 of 7 returnable")
+    expect(opts[0]).toMatchObject({
+      source: "pull",
+      pullId: "pu1",
+      lineId: "pl1",
+      quantityReturnable: 5,
+    })
+    expect(opts[1]).toMatchObject({
+      source: "sale",
+      saleId: "s1",
+      lineId: "sl1",
+      quantityReturnable: 2,
+    })
+  })
+
+  it("does not require a reason for a pull return", () => {
+    const d = draft({
+      source: "pull",
+      pullId: "pu1",
+      saleLineId: "pl1",
+      quantity: "3",
+      reason: "",
+    })
+    expect(canSubmitReturn(d, 5)).toBe(true)
+    expect(
+      canSubmitReturn(
+        draft({ source: "sale", saleLineId: "sl1", quantity: "1", reason: "" }),
+        2,
+      ),
+    ).toBe(false)
+  })
+
+  it("pull payload has no reason", () => {
+    const d = draft({
+      source: "pull",
+      pullId: "pu1",
+      saleLineId: "pl1",
+      quantity: "3",
+    })
+    expect(buildPullReturnPayload(d, KEY)).toEqual({
+      idempotency_key: KEY,
+      lines: [{ line_id: "pl1", quantity: 3 }],
+    })
   })
 })

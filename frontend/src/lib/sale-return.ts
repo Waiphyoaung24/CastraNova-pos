@@ -1,5 +1,10 @@
 import { ApiError } from "@/client"
-import type { SaleReturnCreateRequest } from "@/client/types.gen"
+import type {
+  ProjectPullReturnCreate,
+  ReturnablePullsPublic,
+  ReturnableSalesPublic,
+  SaleReturnCreateRequest,
+} from "@/client/types.gen"
 import { extractErrorMessage } from "@/utils"
 
 // ---------------------------------------------------------------------------
@@ -8,24 +13,77 @@ import { extractErrorMessage } from "@/utils"
 // the server will reject:
 //   - a sale line must be picked
 //   - quantity is a positive integer, capped at what is still returnable
-//   - a reason is required, like every stock adjustment
+//   - a reason is required for a sale return; a project-pull return has none
 // The refund is NOT part of the draft: it is fixed at the original sale price
 // and is display-only.
 // ---------------------------------------------------------------------------
 
 export interface ReturnDraft {
+  /** Where the stock is coming back from. */
+  source: "sale" | "pull"
   saleId: string
+  pullId: string
+  /** sale_line_id (sale) or pull line_id (pull) — the picker's line. */
   saleLineId: string
   /** Positive integer as typed; parsed at submit. */
   quantity: string
+  /** Required for a sale return; a pull return has no reason field. */
   reason: string
 }
 
 export const emptyReturnDraft: ReturnDraft = {
+  source: "sale",
   saleId: "",
+  pullId: "",
   saleLineId: "",
   quantity: "1",
   reason: "",
+}
+
+export interface PickerOption {
+  /** "sale:<sale_line_id>" | "pull:<line_id>" */
+  value: string
+  label: string
+  source: "sale" | "pull"
+  saleId?: string
+  pullId?: string
+  lineId: string
+  quantityReturnable: number
+  unitPriceThb?: string
+  /** Sort key: when the sale/pull was made. */
+  at: string
+}
+
+/** One list for the picker: sales and project requests, newest first. */
+export function pickerOptions(
+  sales: ReturnableSalesPublic | undefined,
+  pulls: ReturnablePullsPublic | undefined,
+): PickerOption[] {
+  const day = (iso: string) => new Date(iso).toLocaleDateString()
+  const fromSales: PickerOption[] = (sales?.sales ?? []).flatMap((s) =>
+    s.lines.map((l) => ({
+      value: `sale:${l.sale_line_id}`,
+      label: `${day(s.sold_at)} · ${s.customer_name} · ${l.quantity_returnable} of ${l.quantity_sold} returnable`,
+      source: "sale" as const,
+      saleId: s.sale_id,
+      lineId: l.sale_line_id,
+      quantityReturnable: l.quantity_returnable,
+      unitPriceThb: l.unit_price_thb,
+      at: s.sold_at,
+    })),
+  )
+  const fromPulls: PickerOption[] = (pulls?.pulls ?? []).flatMap((p) =>
+    p.lines.map((l) => ({
+      value: `pull:${l.line_id}`,
+      label: `${day(p.created_at)} · ${p.project_name} (${p.project_code}) · ${p.customer_name} · ${l.quantity_returnable} of ${l.quantity_out} returnable`,
+      source: "pull" as const,
+      pullId: p.pull_id,
+      lineId: l.line_id,
+      quantityReturnable: l.quantity_returnable,
+      at: p.created_at,
+    })),
+  )
+  return [...fromSales, ...fromPulls].sort((a, b) => b.at.localeCompare(a.at))
 }
 
 /** Parsed positive integer, or null if not a valid one. */
@@ -49,7 +107,7 @@ export function clampReturnQuantity(raw: string, maxQuantity: number): string {
 
 export function canSubmitReturn(d: ReturnDraft, maxQuantity: number): boolean {
   if (d.saleLineId.trim() === "") return false
-  if (d.reason.trim() === "") return false
+  if (d.source === "sale" && d.reason.trim() === "") return false
   const qty = parseQuantity(d.quantity)
   if (qty === null) return false
   return qty <= maxQuantity
@@ -79,6 +137,21 @@ export function buildReturnPayload(
     lines: [
       {
         sale_line_id: d.saleLineId.trim(),
+        quantity: parseQuantity(d.quantity) ?? 0,
+      },
+    ],
+  }
+}
+
+export function buildPullReturnPayload(
+  d: ReturnDraft,
+  idempotencyKey: string,
+): ProjectPullReturnCreate {
+  return {
+    idempotency_key: idempotencyKey,
+    lines: [
+      {
+        line_id: d.saleLineId.trim(),
         quantity: parseQuantity(d.quantity) ?? 0,
       },
     ],

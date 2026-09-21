@@ -62,6 +62,8 @@ function PullActions({
   PullQueueProps,
   "isAdmin" | "isCancelling" | "onSelect" | "onCancel"
 > & { pull: ProjectPullPublic }) {
+  // Cancel on a waiting request puts its stock back; on a SHORT one it only
+  // closes the request (given-out stock stays out — use Return for that).
   const cancellable =
     isAdmin && (pull.state === "PENDING" || pull.state === "SHORT")
   return (
@@ -72,7 +74,7 @@ function PullActions({
         size="sm"
         onClick={() => onSelect(pull)}
       >
-        Give out parts
+        {pull.state === "PENDING" ? "Give out parts" : "Open"}
       </Button>
       {cancellable ? (
         <Button

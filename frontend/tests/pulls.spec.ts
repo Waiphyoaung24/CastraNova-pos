@@ -36,7 +36,7 @@ test.describe("Pulls screen", () => {
     await authSeedClient()
   })
 
-  test("pull fulfill with short: 2 of 3 fulfilled → pull settles SHORT, stock decremented", async ({
+  test("pull fulfill with short: 2 of 3 handed out → pull settles SHORT, stock deducted at create", async ({
     page,
   }) => {
     const r = rand()
@@ -90,6 +90,11 @@ test.describe("Pulls screen", () => {
       },
     })
     expect(pull.state).toBe("PENDING")
+    // Stock left the system at create, before anyone handed anything out.
+    expect(pull.stock_deducted).toBe(true)
+    expect(
+      (await SearchService.searchSku({ sku: product.sku })).total_on_hand,
+    ).toBe(onHand - requested)
 
     await page.goto("/pulls")
     await expect(
@@ -123,7 +128,8 @@ test.describe("Pulls screen", () => {
     ).toBeVisible()
 
     // Authoritative backend assertions: the pull settled SHORT with the
-    // partial quantity recorded, and stock dropped by exactly what was pulled.
+    // partial quantity recorded; stock stays at the create-time deduction (the
+    // short hand-out does not put the remainder back).
     await expect
       .poll(
         async () => {
@@ -150,7 +156,7 @@ test.describe("Pulls screen", () => {
         },
         { timeout: 10_000, intervals: [500, 1_000] },
       )
-      .toBe(onHand - fulfilled)
+      .toBe(onHand - requested)
   })
 
   test("create via dropdown: QUANTITY + SERIALIZED → PENDING pull with PART and UNIT lines", async ({
@@ -243,7 +249,9 @@ test.describe("Pulls screen", () => {
     await expect(page.getByText("Scan with camera")).toHaveCount(0)
 
     await page.getByRole("button", { name: "Create request" }).click()
-    await expect(page.getByText("Request created.")).toBeVisible()
+    await expect(
+      page.getByText("Request created — stock deducted."),
+    ).toBeVisible()
 
     // Backend: the seeded project now has a PENDING pull with 1 PART (qty 2)
     // and 2 UNIT lines bound to the two oldest serials.
@@ -262,6 +270,13 @@ test.describe("Pulls screen", () => {
       .toBeGreaterThan(0)
 
     expect(created).toBeTruthy()
+
+    const row = page.getByRole("row").filter({ hasText: `Drop Project ${r}` })
+    await expect(
+      row.getByRole("button", { name: "Give out parts" }),
+    ).toBeVisible()
+    // Cancel is offered: cancelling a waiting request now puts its stock back.
+    await expect(row.getByRole("button", { name: "Cancel" })).toBeVisible()
     const partLines = created!.lines.filter((l) => l.line_kind === "PART")
     const unitLines = created!.lines.filter((l) => l.line_kind === "UNIT")
     expect(partLines).toHaveLength(1)

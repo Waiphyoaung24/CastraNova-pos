@@ -20,6 +20,7 @@ from app.models import (
 )
 from tests.api.routes.test_reports import (  # noqa: F401  (seed is a pytest fixture)
     TARGET,
+    _clock_at,
     _pin_pull,
     _pin_sale,
     _pin_ticket,
@@ -119,36 +120,37 @@ def _seed_full_month(db: Session, seed: dict[str, Any], when: datetime = TARGET)
             customer_id=customer.id,
         ),
     )
-    pull = crud.create_project_pull(
-        session=db,
-        pull_in=ProjectPullCreate(
-            project_id=project.id,
-            lines=[
-                ProjectPullLineCreate(
-                    line_kind=SaleLineKind.UNIT,
-                    product_id=seed["serialized"].id,
-                    unit_serial=proj_barcode,
-                ),
-                ProjectPullLineCreate(
-                    line_kind=SaleLineKind.PART,
-                    product_id=proj_part.id,
-                    requested_qty=3,
-                ),
+    with _clock_at(when):
+        pull = crud.create_project_pull(
+            session=db,
+            pull_in=ProjectPullCreate(
+                project_id=project.id,
+                lines=[
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.UNIT,
+                        product_id=seed["serialized"].id,
+                        unit_serial=proj_barcode,
+                    ),
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.PART,
+                        product_id=proj_part.id,
+                        requested_qty=3,
+                    ),
+                ],
+            ),
+            created_by_user_id=admin.id,
+        )
+        line_ids = {ln.line_kind: ln.id for ln in _pull_lines(db, pull.id)}
+        crud.fulfill_project_pull(
+            session=db,
+            pull_id=pull.id,
+            fulfill_lines=[
+                ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.UNIT], fulfilled_qty=1),
+                ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.PART], fulfilled_qty=3),
             ],
-        ),
-        created_by_user_id=admin.id,
-    )
-    line_ids = {ln.line_kind: ln.id for ln in _pull_lines(db, pull.id)}
-    crud.fulfill_project_pull(
-        session=db,
-        pull_id=pull.id,
-        fulfill_lines=[
-            ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.UNIT], fulfilled_qty=1),
-            ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.PART], fulfilled_qty=3),
-        ],
-        actor_user_id=admin.id,
-    )
-    _pin_pull(db, pull.id, when)
+            actor_user_id=admin.id,
+        )
+        _pin_pull(db, pull.id, when)
 
 
 def test_product_grouping_reconciles_to_channel(db: Session, seed: dict[str, Any]) -> None:  # noqa: F811
@@ -558,3 +560,64 @@ def test_a_serialized_return_nets_into_its_product_row(
     # Sold for 500 (cost 300) then fully returned: both sides cancel.
     assert row.revenue_thb == Decimal("0.00")
     assert row.cogs_thb == Decimal("0.00")
+
+
+# 2027-08/09 are already claimed above (_RET_SALE_FILTER/_RET_PRODUCT) and
+# 2028-01 by test_report_exports; this test owns 2028-02/03.
+_PULL_OUT = datetime(2028, 2, 10, 12, 0, tzinfo=timezone.utc)
+_PULL_BACK = datetime(2028, 3, 10, 12, 0, tzinfo=timezone.utc)
+
+
+def test_pull_return_nets_project_cogs_in_the_return_month(
+    db: Session, seed: dict[str, Any]  # noqa: F811
+) -> None:
+    from app.models import (
+        ProjectCreate,
+        ProjectPullCreate,
+        ProjectPullLineCreate,
+        ProjectPullReturnCreate,
+        ProjectPullReturnLine,
+    )
+
+    admin = seed["admin"]
+    part = seed["make_part"]("100.00", "20.00", [(3, "10.00"), (4, "12.00")])
+    project = crud.create_project(
+        session=db,
+        project_in=ProjectCreate(
+            code=f"PRJ-{uuid.uuid4().hex[:8]}", name="Site", customer_id=seed["customer"].id
+        ),
+    )
+    with _clock_at(_PULL_OUT):
+        pull = crud.create_project_pull(
+            session=db,
+            pull_in=ProjectPullCreate(
+                project_id=project.id,
+                lines=[ProjectPullLineCreate(line_kind=SaleLineKind.PART, product_id=part.id, requested_qty=5)],
+            ),
+            created_by_user_id=admin.id,
+        )
+        crud.fulfill_project_pull(session=db, pull_id=pull.id, fulfill_lines=[], actor_user_id=admin.id)
+    line = crud.list_project_pull_lines(session=db, pull_id=pull.id)[0]
+    with _clock_at(_PULL_BACK):
+        crud.return_project_pull(
+            session=db,
+            pull_id=pull.id,
+            payload=ProjectPullReturnCreate(
+                idempotency_key=uuid.uuid4(),
+                lines=[ProjectPullReturnLine(line_id=line.id, quantity=3)],
+            ),
+            actor_user_id=admin.id,
+        )
+
+    def _project_cogs(year: int, month: int) -> Decimal:
+        report = crud.margin_report(session=db, year=year, month=month, channel=Channel.PROJECT)
+        return report.total_cogs_thb
+
+    # Out in February: 3@10 + 2@12 = 54. Back in March: 2@12 + 1@10 = 34.
+    assert _project_cogs(2028, 2) == Decimal("54.00")  # February never changes
+    assert _project_cogs(2028, 3) == Decimal("-34.00")
+
+    by_project = crud.margin_report(
+        session=db, year=2028, month=3, group_by=MarginDimension.PROJECT, channel=Channel.PROJECT
+    )
+    assert {r.key: r.cogs_thb for r in by_project.rows}[str(project.id)] == Decimal("-34.00")
