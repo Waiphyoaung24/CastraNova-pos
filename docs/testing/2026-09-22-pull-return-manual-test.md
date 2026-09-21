@@ -138,12 +138,21 @@ These live in the automated tests too. Try them if you're curious, with the admi
 
 ## H. Returns page
 
+> Assumes a fresh seed — run this section before A–F, or reseed first (see "Starting state" above).
+
 1. Log in as **ygn.staff@example.com** (or admin) and open **Sell → Return**.
-2. Stay on the **Quantity SKU** tab and scan `BAT-SG23-STD`.
-   - [ ] The picker lists the Test/seed project requests for this SKU alongside any sale, not just sales.
+2. Stay on the **Quantity SKU** tab and scan `CBL-USBC-2M` (the settled "Thiri Store Refit" pull, 5 out — a
+   **Waiting** pull's request is never offered on the Returns page, so `BAT-SG23-STD` won't show one).
+   - [ ] The picker lists "… · Thiri Store Refit (PRJ-2026-01) · Thiri Trading · 5 of 5 returnable" alongside the
+     seeded sale, not just the sale.
 3. Pick the project-request option and return **2**.
    - [ ] There is **no** reason field for a project-request return (only sale returns ask for one).
-   - [ ] On success, on hand goes up by **2**, and the toast says "Return recorded. The stock is back on hand."
-4. Switch to the **Serialized unit** tab and scan a barcode that was pulled by a project request but never sold.
-   - [ ] The card reads "This unit went out on a project request…" with a **Return to stock** button and no reason field.
-   - [ ] Clicking it returns the unit; a re-scan no longer offers it back.
+   - [ ] On success, on hand goes from **71** to **73**, and the toast says "Return recorded. The stock is back on
+     hand."
+4. Switch to the **Serialized unit** tab. As admin, click **New request**: project **PRJ-2026-01**, add
+   **Galaxy S23 Ultra × 1** (this auto-claims an in-stock unit — note its barcode from the request lines), click
+   **Give out parts**, and finish it so the request is **Done**. Then, on **Sell → Return** (Serialized unit tab),
+   scan that barcode.
+   - [ ] The card reads "This unit went out on a project request…" with a **Return to stock** button and no reason
+     field.
+   - [ ] Clicking it returns the unit to **IN_STOCK** — check Search → the SKU; a re-scan no longer offers it back.
