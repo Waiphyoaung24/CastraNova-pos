@@ -4,6 +4,8 @@
 **Status:** Approved design, pending implementation plan
 **Scope:** Customer returns of sale lines (UNIT and PART), restocked as sellable, admin-only.
 
+> **Superseded 2026-09-21 (role change only):** returns are now a shared sale-desk action on their own `/returns` page under Sell, for staff and admin. `GET /sales/returnable` and `POST /sales/{sale_id}/returns` take `get_current_user`; staff receive `SaleReturnStaffPublic` (COGS fields redacted). Stock adjustment (Found / Lost) remains admin-only. Every "admin-only" / `get_admin` / "403 non-admin" statement below describes the original gate, not the current one. The ledger, FIFO restore and refund rules are unchanged.
+
 ## Problem
 
 CastraNova-POS has no way to record a customer returning a purchased item. A return must:
