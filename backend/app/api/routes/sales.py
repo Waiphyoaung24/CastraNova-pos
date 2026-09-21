@@ -5,10 +5,8 @@ from sqlmodel import select
 
 from app import crud
 from app.api.deps import (
-    AdminUser,
     CurrentUser,
     SessionDep,
-    get_admin,
     get_current_user,
     is_admin,
 )
@@ -24,7 +22,9 @@ from app.models import (
     SaleReturnCreateRequest,
     SaleReturnLine,
     SaleReturnLinePublic,
+    SaleReturnLineStaffPublic,
     SaleReturnPublic,
+    SaleReturnStaffPublic,
     SaleStaffPublic,
     User,
 )
@@ -76,31 +76,47 @@ def create_sale(
     return _to_public(session=session, sale=sale, user=current_user)
 
 
-def _return_to_public(*, session: SessionDep, ret: SaleReturn) -> SaleReturnPublic:
+def _return_to_public(
+    *, session: SessionDep, ret: SaleReturn, user: User
+) -> SaleReturnPublic | SaleReturnStaffPublic:
     lines = session.exec(
         select(SaleReturnLine).where(SaleReturnLine.sale_return_id == ret.id)
     ).all()
-    return SaleReturnPublic(
+    if is_admin(user):
+        return SaleReturnPublic(
+            id=ret.id,
+            sale_id=ret.sale_id,
+            reason=ret.reason,
+            returned_at=ret.returned_at,
+            total_refund_thb=ret.total_refund_thb,
+            total_cogs_restored_thb=ret.total_cogs_restored_thb,
+            created_by_user_id=ret.created_by_user_id,
+            lines=[SaleReturnLinePublic.model_validate(line) for line in lines],
+        )
+    return SaleReturnStaffPublic(
         id=ret.id,
         sale_id=ret.sale_id,
         reason=ret.reason,
         returned_at=ret.returned_at,
         total_refund_thb=ret.total_refund_thb,
-        total_cogs_restored_thb=ret.total_cogs_restored_thb,
         created_by_user_id=ret.created_by_user_id,
-        lines=[SaleReturnLinePublic.model_validate(line) for line in lines],
+        lines=[SaleReturnLineStaffPublic.model_validate(line) for line in lines],
     )
 
 
-@router.post("/{sale_id}/returns", response_model=SaleReturnPublic)
+@router.post(
+    "/{sale_id}/returns", response_model=SaleReturnPublic | SaleReturnStaffPublic
+)
 def create_sale_return(
     *,
     session: SessionDep,
-    admin: AdminUser,
+    current_user: CurrentUser,
     sale_id: uuid.UUID,
     payload: SaleReturnCreateRequest,
-) -> SaleReturnPublic:
-    """Record a customer return against a sale (admin-only, design 2026-07-25).
+) -> SaleReturnPublic | SaleReturnStaffPublic:
+    """Record a customer return against a sale (design 2026-07-25; opened to
+    staff 2026-09-21 as a shared sale-desk action — staff get the cost-redacted
+    response).
 
     Restores stock at the original FIFO cost and reverses the sale's margin
     contribution in the RETURN month. Refund is fixed at the original line price.
@@ -109,9 +125,9 @@ def create_sale_return(
         session=session,
         sale_id=sale_id,
         payload=payload,
-        created_by_user_id=admin.id,
+        created_by_user_id=current_user.id,
     )
-    return _return_to_public(session=session, ret=ret)
+    return _return_to_public(session=session, ret=ret, user=current_user)
 
 
 # Declared before the /{sale_id} routes: a literal path segment must win over the
@@ -119,7 +135,7 @@ def create_sale_return(
 @router.get(
     "/returnable",
     response_model=ReturnableSalesPublic,
-    dependencies=[Depends(get_admin)],
+    dependencies=[Depends(get_current_user)],
 )
 def read_returnable_sales(
     *,
@@ -128,7 +144,7 @@ def read_returnable_sales(
     sku: str | None = None,
 ) -> ReturnableSalesPublic:
     """Recent sales with still-returnable lines for one unit or one SKU.
-    Admin-only — it feeds the return flow and exposes line prices."""
+    Staff + admin — it exposes only sale prices, which staff already see."""
     return crud.list_returnable_sales(
         session=session, castranova_barcode=castranova_barcode, sku=sku
     )

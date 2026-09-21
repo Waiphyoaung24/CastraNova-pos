@@ -1,7 +1,9 @@
+import { ApiError } from "@/client"
 import type { SaleReturnCreateRequest } from "@/client/types.gen"
+import { extractErrorMessage } from "@/utils"
 
 // ---------------------------------------------------------------------------
-// Pure form logic for recording a sale return from the Stock Adjustment screen
+// Pure form logic for recording a sale return from the Returns screen
 // (design 2026-07-25). Mirrors the backend guards so the UI never POSTs a body
 // the server will reject:
 //   - a sale line must be picked
@@ -51,6 +53,20 @@ export function canSubmitReturn(d: ReturnDraft, maxQuantity: number): boolean {
   const qty = parseQuantity(d.quantity)
   if (qty === null) return false
   return qty <= maxQuantity
+}
+
+/**
+ * What the Returns page shows when the returnable-sales lookup fails. The
+ * only 404 the endpoint raises is "Product not found" (unknown SKU); every
+ * other API error carries a user-actionable server reason.
+ */
+export function lookupErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    return err.status === 404
+      ? "No product with this SKU."
+      : extractErrorMessage(err)
+  }
+  return "Could not look up returnable sales."
 }
 
 export function buildReturnPayload(

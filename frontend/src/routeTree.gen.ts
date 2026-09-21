@@ -22,6 +22,7 @@ import { Route as LayoutStockRouteImport } from './routes/_layout/stock'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutSearchRouteImport } from './routes/_layout/search'
 import { Route as LayoutSaleRouteImport } from './routes/_layout/sale'
+import { Route as LayoutReturnsRouteImport } from './routes/_layout/returns'
 import { Route as LayoutReceiveRouteImport } from './routes/_layout/receive'
 import { Route as LayoutPullsRouteImport } from './routes/_layout/pulls'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
@@ -100,6 +101,11 @@ const LayoutSearchRoute = LayoutSearchRouteImport.update({
 const LayoutSaleRoute = LayoutSaleRouteImport.update({
   id: '/sale',
   path: '/sale',
+  getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutReturnsRoute = LayoutReturnsRouteImport.update({
+  id: '/returns',
+  path: '/returns',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutReceiveRoute = LayoutReceiveRouteImport.update({
@@ -198,6 +204,7 @@ export interface FileRoutesByFullPath {
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
+  '/returns': typeof LayoutReturnsRoute
   '/sale': typeof LayoutSaleRoute
   '/search': typeof LayoutSearchRoute
   '/settings': typeof LayoutSettingsRoute
@@ -226,6 +233,7 @@ export interface FileRoutesByTo {
   '/projects': typeof LayoutProjectsRoute
   '/pulls': typeof LayoutPullsRoute
   '/receive': typeof LayoutReceiveRoute
+  '/returns': typeof LayoutReturnsRoute
   '/sale': typeof LayoutSaleRoute
   '/search': typeof LayoutSearchRoute
   '/settings': typeof LayoutSettingsRoute
@@ -257,6 +265,7 @@ export interface FileRoutesById {
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/pulls': typeof LayoutPullsRoute
   '/_layout/receive': typeof LayoutReceiveRoute
+  '/_layout/returns': typeof LayoutReturnsRoute
   '/_layout/sale': typeof LayoutSaleRoute
   '/_layout/search': typeof LayoutSearchRoute
   '/_layout/settings': typeof LayoutSettingsRoute
@@ -289,6 +298,7 @@ export interface FileRouteTypes {
     | '/projects'
     | '/pulls'
     | '/receive'
+    | '/returns'
     | '/sale'
     | '/search'
     | '/settings'
@@ -317,6 +327,7 @@ export interface FileRouteTypes {
     | '/projects'
     | '/pulls'
     | '/receive'
+    | '/returns'
     | '/sale'
     | '/search'
     | '/settings'
@@ -347,6 +358,7 @@ export interface FileRouteTypes {
     | '/_layout/projects'
     | '/_layout/pulls'
     | '/_layout/receive'
+    | '/_layout/returns'
     | '/_layout/sale'
     | '/_layout/search'
     | '/_layout/settings'
@@ -458,6 +470,13 @@ declare module '@tanstack/react-router' {
       path: '/sale'
       fullPath: '/sale'
       preLoaderRoute: typeof LayoutSaleRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/returns': {
+      id: '/_layout/returns'
+      path: '/returns'
+      fullPath: '/returns'
+      preLoaderRoute: typeof LayoutReturnsRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/receive': {
@@ -582,6 +601,7 @@ interface LayoutRouteChildren {
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutPullsRoute: typeof LayoutPullsRoute
   LayoutReceiveRoute: typeof LayoutReceiveRoute
+  LayoutReturnsRoute: typeof LayoutReturnsRoute
   LayoutSaleRoute: typeof LayoutSaleRoute
   LayoutSearchRoute: typeof LayoutSearchRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
@@ -609,6 +629,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutPullsRoute: LayoutPullsRoute,
   LayoutReceiveRoute: LayoutReceiveRoute,
+  LayoutReturnsRoute: LayoutReturnsRoute,
   LayoutSaleRoute: LayoutSaleRoute,
   LayoutSearchRoute: LayoutSearchRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
