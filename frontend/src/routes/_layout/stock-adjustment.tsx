@@ -142,7 +142,8 @@ function StockAdjustment() {
                 placeholder="Scan or type the unit barcode…"
               />
               <p className="text-muted-foreground text-sm">
-                The unit moves to the terminal ADJUSTED_OUT state.
+                The unit moves to the terminal ADJUSTED_OUT state. Sold units
+                are taken back on Sell → Return, not written off here.
               </p>
             </div>
           ) : (

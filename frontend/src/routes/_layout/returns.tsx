@@ -71,6 +71,8 @@ function Returns() {
         ? SalesService.readReturnableSales({ castranovaBarcode: scanned })
         : SalesService.readReturnableSales({ sku: scanned }),
     enabled: scanned.length > 0,
+    // An unknown SKU is a 404 — show it, don't retry it.
+    retry: false,
   })
   const unitSale = lookup.data?.sales[0]
   const unitLine = unitSale?.lines[0]
@@ -230,8 +232,11 @@ function Returns() {
 
               {/* Nothing to pick from until a SKU has been entered, so the
                   label and the picker stay hidden until then. */}
-              {scanned.length === 0 ? null : lookup.data &&
-                lookup.data.sales.length === 0 ? (
+              {scanned.length === 0 ? null : lookup.isError ? (
+                <p className="text-muted-foreground text-sm">
+                  No product with this SKU.
+                </p>
+              ) : lookup.data && lookup.data.sales.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
                   Nothing from this SKU can be returned — no recent sale of it
                   still has returnable stock.
