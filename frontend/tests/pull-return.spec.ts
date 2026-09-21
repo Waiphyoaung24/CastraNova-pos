@@ -46,7 +46,11 @@ async function seedPull() {
     requestBody: { name: `Return Customer ${r}` },
   })
   const project = await ProjectsService.createProject({
-    requestBody: { code: `PRJ-${r}`, name: `Return Project ${r}`, customer_id: customer.id },
+    requestBody: {
+      code: `PRJ-${r}`,
+      name: `Return Project ${r}`,
+      customer_id: customer.id,
+    },
   })
   await ReceiptsService.receiveQuantity({
     requestBody: {
@@ -60,7 +64,9 @@ async function seedPull() {
   const pull = await ProjectPullsService.createProjectPull({
     requestBody: {
       project_id: project.id,
-      lines: [{ line_kind: "PART", product_id: product.id, requested_qty: REQUESTED }],
+      lines: [
+        { line_kind: "PART", product_id: product.id, requested_qty: REQUESTED },
+      ],
     },
   })
   return { r, product, pull }
@@ -74,7 +80,9 @@ test.describe("Pull returns", () => {
     OpenAPI.TOKEN = tok.access_token
   })
 
-  test("return 2 of 3 from a handed-out pull puts them back on hand", async ({ page }) => {
+  test("return 2 of 3 from a handed-out pull puts them back on hand", async ({
+    page,
+  }) => {
     const { r, product, pull } = await seedPull()
     await ProjectPullsService.fulfillProjectPull({
       pullId: pull.id,
@@ -84,11 +92,13 @@ test.describe("Pull returns", () => {
 
     await page.goto("/pulls")
     // The queue defaults to waiting requests; a done one needs "Show all".
-    await page.getByRole("button", { name: "Show all (incl. completed)" }).click()
+    await page
+      .getByRole("button", { name: "Show all (incl. completed)" })
+      .click()
     await page
       .getByRole("row")
       .filter({ hasText: `Return Project ${r}` })
-      .getByRole("button", { name: "Give out parts" })
+      .getByRole("button", { name: "Open" })
       .click()
 
     await page.getByRole("button", { name: "Return items to stock" }).click()
@@ -112,7 +122,9 @@ test.describe("Pull returns", () => {
       .filter({ hasText: `Return Project ${r}` })
       .getByRole("button", { name: "Cancel" })
       .click()
-    await expect(page.getByText("Request cancelled — stock put back.")).toBeVisible()
+    await expect(
+      page.getByText("Request cancelled — stock put back."),
+    ).toBeVisible()
     await expect.poll(() => onHand(product.sku)).toBe(ON_HAND)
   })
 })

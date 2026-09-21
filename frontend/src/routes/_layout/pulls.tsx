@@ -203,9 +203,15 @@ function Pulls() {
   const cancelMutation = useMutation<ProjectPullPublic, ApiError, string>({
     mutationFn: (pullId: string) =>
       ProjectPullsService.cancelProjectPull({ pullId }),
-    onSuccess: () => {
+    onSuccess: (_data, pullId) => {
+      // Pre-cancel state: a SHORT pull's given-out stock stays out.
+      const wasShort = pulls.find((p) => p.id === pullId)?.state === "SHORT"
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
-      showSuccessToast("Request cancelled — stock put back.")
+      showSuccessToast(
+        wasShort
+          ? "Request closed. Items already given out stay out — use Return to bring them back."
+          : "Request cancelled — stock put back.",
+      )
     },
     onError: (err: ApiError) =>
       showErrorToast(extractErrorMessage(err), "Request not cancelled"),
@@ -213,8 +219,9 @@ function Pulls() {
 
   const [returnOpen, setReturnOpen] = useState(false)
   // One key per return attempt: reused on retry so a lost response can't
-  // return twice; replaced only after a success.
+  // return twice; replaced after a success or when opening another pull.
   const returnKeyRef = useRef<string>(crypto.randomUUID())
+  const returnKeyPullRef = useRef<string | null>(null)
   const returnMutation = useMutation<
     ProjectPullPublic,
     ApiError,
@@ -227,8 +234,11 @@ function Pulls() {
       showSuccessToast("Items returned to stock.")
       setReturnOpen(false)
     },
-    onError: (err: ApiError) =>
-      showErrorToast(extractErrorMessage(err), "Items not returned"),
+    onError: (err: ApiError) => {
+      // Refresh caps: a 409 often means someone else returned first.
+      queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
+      showErrorToast(extractErrorMessage(err), "Items not returned")
+    },
   })
 
   const handleSelect = useCallback((pull: ProjectPullPublic) => {
@@ -376,7 +386,13 @@ function Pulls() {
             onBack={handleBackToQueue}
             isPending={fulfillMutation.isPending}
             canReturn={canReturnPull(selectedPull)}
-            onReturn={() => setReturnOpen(true)}
+            onReturn={() => {
+              if (returnKeyPullRef.current !== selectedPull.id) {
+                returnKeyRef.current = crypto.randomUUID()
+                returnKeyPullRef.current = selectedPull.id
+              }
+              setReturnOpen(true)
+            }}
           />
           <PullReturnDialog
             pull={selectedPull}

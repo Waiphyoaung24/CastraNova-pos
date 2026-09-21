@@ -230,13 +230,15 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
                             {d.batch_no}
                           </TableCell>
                           <TableCell className="num text-muted-foreground text-right text-xs">
-                            {d.quantity}
+                            {returned ? `−${d.quantity}` : d.quantity}
                           </TableCell>
                           <TableCell className="text-muted-foreground text-xs">
                             @ {formatThb(d.unit_cost_thb)}
                           </TableCell>
                           <TableCell className="num text-muted-foreground text-right text-xs">
-                            {formatThb(d.total_cost_thb)}
+                            {returned
+                              ? `−${formatThb(d.total_cost_thb)}`
+                              : formatThb(d.total_cost_thb)}
                           </TableCell>
                         </TableRow>
                       ))

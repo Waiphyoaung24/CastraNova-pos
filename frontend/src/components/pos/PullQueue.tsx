@@ -74,7 +74,7 @@ function PullActions({
         size="sm"
         onClick={() => onSelect(pull)}
       >
-        Give out parts
+        {pull.state === "PENDING" ? "Give out parts" : "Open"}
       </Button>
       {cancellable ? (
         <Button
