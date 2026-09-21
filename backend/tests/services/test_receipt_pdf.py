@@ -145,3 +145,21 @@ def test_receipt_pdf_empty_lines_does_not_crash() -> None:
         total_thb=Decimal("0.00"),
     )
     assert pdf_bytes[:4] == b"%PDF"
+
+
+def test_receipt_pdf_embeds_footer_wave_and_paginates() -> None:
+    """The black & gold redesign (2026-09-22) draws the wave on every page and a
+    long sale flows onto a second page with the header repeated."""
+    from app.services.receipt_pdf import _FOOTER_WAVE
+
+    assert _FOOTER_WAVE.exists()
+    pdf_bytes = render_sale_receipt(
+        sale_id="test-sale-long",
+        sold_at="2026-09-22T01:08:54",
+        customer_name="Thiri Trading",
+        sold_by="admin@example.com",
+        lines=[(f"CBL-USBC-2M — USB-C Cable 2m #{i}", 3, Decimal("195.00")) for i in range(30)],
+        total_thb=Decimal("17550.00"),
+    )
+    assert pdf_bytes.count(b"/Type /Page") >= 2  # two pages (+ the /Pages node)
+    assert b"/Image" in pdf_bytes

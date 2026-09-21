@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { ShoppingCart } from "lucide-react"
+import { FileText, ShoppingCart } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
@@ -14,6 +14,7 @@ import type {
 import { PricingOverridesService } from "@/client"
 import { EntityCombobox } from "@/components/Common/EntityCombobox"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { DownloadInvoiceButton } from "@/components/DownloadInvoiceButton"
 import { CustomerCreateDialog } from "@/components/pos/CustomerCreateDialog"
 import { PriceOverrideDialog } from "@/components/pos/PriceOverrideDialog"
 import { type SaleResultSummary, ScanCart } from "@/components/pos/ScanCart"
@@ -27,6 +28,7 @@ import { useProductOptions } from "@/hooks/useProductOptions"
 import { useRole } from "@/hooks/useRole"
 import { useScanLookup } from "@/hooks/useScanLookup"
 import { queued } from "@/lib/query-client"
+import { formatThb } from "@/lib/reports"
 import { requireAuth } from "@/lib/route-guards"
 import {
   addScanToCart,
@@ -178,6 +180,7 @@ function Sale() {
     mutationKey: ["sales"],
     onSuccess: (data) => {
       setSaleResult({
+        saleId: data.id,
         totalThb: data.total_thb,
         totalCogsThb:
           "total_cogs_thb" in data ? data.total_cogs_thb : undefined,
@@ -300,6 +303,20 @@ function Sale() {
             Scan the shop barcode on a unit, or a product code (SKU) for counted
             items.
           </p>
+
+          {saleResult ? (
+            <Alert>
+              <FileText />
+              <AlertTitle>Sale completed</AlertTitle>
+              <AlertDescription className="flex flex-wrap items-center gap-3">
+                <span>
+                  Total {formatThb(saleResult.totalThb)} THB. Give the customer
+                  their invoice:
+                </span>
+                <DownloadInvoiceButton saleId={saleResult.saleId} />
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
           <ScanCart
             lines={lines}

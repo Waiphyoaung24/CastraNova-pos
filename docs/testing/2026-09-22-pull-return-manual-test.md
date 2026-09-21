@@ -156,3 +156,19 @@ These live in the automated tests too. Try them if you're curious, with the admi
    - [ ] The card reads "This unit went out on a project request…" with a **Return to stock** button and no reason
      field.
    - [ ] Clicking it returns the unit to **IN_STOCK** — check Search → the SKU; a re-scan no longer offers it back.
+
+
+## I. Invoice download (staff or admin)
+
+1. Sell → **Sale**: pick any customer, scan `CBL-USBC-2M`, set qty 2, complete the sale.
+   - [ ] A "Sale completed" box appears above the cart with the total and a **Download invoice** button.
+2. Click **Download invoice**.
+   - [ ] A new tab opens with the PDF: CastraNova logo top-left, gold rule, an **INVOICE** pill, gold **Sold To** and **Invoice No / Date / Sold by** boxes, a gold-headed table, **Sub Total** and a gold **Total Amount** row, and the gold-and-black wave along the foot. No cost or margin anywhere.
+   - [ ] The invoice number is the first 8 characters of the sale id, in capitals.
+3. Customers → open that customer → **Transactions**.
+   - [ ] Every SALE row has a **Download invoice** button; other rows (maintenance, project) don't.
+   - [ ] Clicking it opens the same PDF.
+4. As **ygn.staff**, repeat step 3.
+   - [ ] Staff can download too.
+5. Long sale: make a sale with 25+ lines (or 25 different products).
+   - [ ] The PDF runs to a second page; the header, table header row and wave repeat on it.

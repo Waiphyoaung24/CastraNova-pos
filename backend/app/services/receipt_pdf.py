@@ -1,9 +1,10 @@
-"""Sale receipt PDF rendering (FR-007).
+"""Sale invoice PDF rendering (FR-007; black & gold redesign 2026-09-22).
 
-A4 invoice-style receipt: CastraNova logo header, sale metadata, a bordered
-line-item table (NO / DESCRIPTION / QTY / PER UNIT / TOTAL AMOUNT), a GRAND
-TOTAL row, and a faint logo watermark behind the table. Rendered on demand
-from the persisted sale + sale_line rows.
+A4 invoice on CastraNova letterhead: logo header over a gold rule, an INVOICE
+pill, two gold boxes (Sold To / Invoice No + Date + Sold by), a gold-headed
+line-item table (No / Description / Qty / Price per Unit / Amount), Sub Total
+and a gold Total Amount row, and the gold-and-black wave along the foot.
+Rendered on demand from the persisted sale + sale_line rows; carries no cost.
 """
 
 import io
@@ -31,7 +32,21 @@ from reportlab.platypus import (  # type: ignore[import-untyped]
 
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
 _LOGO_HEADER = _ASSETS / "castranova-logo-header.png"
-_LOGO_WATERMARK = _ASSETS / "castranova-logo-watermark.png"
+_FOOTER_WAVE = _ASSETS / "invoice-footer-wave.jpg"
+
+GOLD = colors.HexColor("#C9A227")
+GOLD_DARK = colors.HexColor("#8A6D1F")
+INK = colors.HexColor("#111111")
+
+# Lines printed under the table (bank account, KPay, ...). Empty until the
+# owner supplies CastraNova's details; the sample form's were another company's.
+FOOTER_LINES: tuple[str, ...] = ()
+
+_MARGIN = 16 * mm
+_CONTENT_W = A4[0] - 2 * _MARGIN  # 178 mm
+_HEADER_H = 40 * mm  # logo + rule + INVOICE pill
+_WAVE_W = A4[0]
+_WAVE_H = _WAVE_W * 192 / 1130  # asset aspect (1130x192)
 
 
 def _fmt_amount(value: Decimal) -> str:
@@ -49,41 +64,63 @@ def _fmt_date(sold_at: str) -> str:
 
 
 def _draw_page_furniture(canvas: Any, doc: Any) -> None:
-    """onPage callback: paint the faint watermark (behind the flowables) and the
-    logo header + title in the top margin. Missing assets are skipped so the
-    table still renders (belt-and-suspenders; the assets are committed)."""
+    """onPage callback: logo + gold rule + INVOICE pill in the top margin, the
+    wave along the foot. Missing assets are skipped so the table still renders."""
     page_w, page_h = A4
-    if _LOGO_WATERMARK.exists():
-        wm_w = 120 * mm
-        img = ImageReader(str(_LOGO_WATERMARK))
-        iw, ih = img.getSize()
-        wm_h = wm_w * ih / iw
-        canvas.drawImage(
-            img,
-            (page_w - wm_w) / 2,
-            (page_h - wm_h) / 2,
-            width=wm_w,
-            height=wm_h,
-            mask="auto",
-            preserveAspectRatio=True,
-        )
+    top = page_h - 12 * mm
     if _LOGO_HEADER.exists():
-        logo_w = 60 * mm
+        logo_w = 52 * mm
         img = ImageReader(str(_LOGO_HEADER))
         iw, ih = img.getSize()
         logo_h = logo_w * ih / iw
-        top = page_h - 12 * mm - logo_h
         canvas.drawImage(
-            img,
-            (page_w - logo_w) / 2,
-            top,
-            width=logo_w,
-            height=logo_h,
-            mask="auto",
+            img, _MARGIN, top - logo_h, width=logo_w, height=logo_h,
+            mask="auto", preserveAspectRatio=True,
+        )
+    rule_y = page_h - _HEADER_H + 4 * mm  # clear of the wings above it
+    canvas.setStrokeColor(GOLD_DARK)
+    canvas.setLineWidth(1.2)
+    canvas.line(_MARGIN, rule_y, page_w - _MARGIN, rule_y)
+    # INVOICE pill, centred on the rule like the paper form.
+    pill_w, pill_h = 40 * mm, 8 * mm
+    canvas.setFillColor(GOLD)
+    canvas.setStrokeColor(GOLD)
+    canvas.roundRect(
+        (page_w - pill_w) / 2, rule_y - pill_h / 2, pill_w, pill_h, 2 * mm, fill=1, stroke=0
+    )
+    canvas.setFillColor(INK)
+    canvas.setFont("Helvetica-Bold", 11)
+    canvas.drawCentredString(page_w / 2, rule_y - 1.4 * mm, "INVOICE")
+    if _FOOTER_WAVE.exists():
+        canvas.drawImage(
+            ImageReader(str(_FOOTER_WAVE)), 0, 0, width=_WAVE_W, height=_WAVE_H,
             preserveAspectRatio=True,
         )
-        canvas.setFont("Helvetica", 11)
-        canvas.drawCentredString(page_w / 2, top - 6 * mm, "Sales Receipt")
+    canvas.setFillColor(colors.HexColor("#777777"))
+    canvas.setFont("Helvetica", 7.5)
+    canvas.drawRightString(page_w - _MARGIN, _WAVE_H + 3 * mm, f"Page {doc.page}")
+
+
+def _gold_box(rows: list[tuple[str, str]], width: float) -> Table:
+    """A rounded gold box of bold label / value rows (Sold To, Invoice No...)."""
+    label = ParagraphStyle("box-label", fontName="Helvetica-Bold", fontSize=10, leading=14, textColor=INK)
+    value = ParagraphStyle("box-value", fontName="Helvetica", fontSize=10, leading=14, textColor=INK)
+    data = [[Paragraph(escape(k), label), Paragraph(escape(v), value)] for k, v in rows]
+    box = Table(data, colWidths=[26 * mm, width - 26 * mm])
+    box.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), GOLD),
+                ("ROUNDEDCORNERS", [8, 8, 8, 8]),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, 0), 8),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 8),
+            ]
+        )
+    )
+    return box
 
 
 def render_sale_receipt(
@@ -95,81 +132,102 @@ def render_sale_receipt(
     lines: list[tuple[str, int, Decimal]],
     total_thb: Decimal,
 ) -> bytes:
-    """Return a one-page A4 receipt PDF. ``lines`` are (label, qty, price)."""
+    """Return an A4 invoice PDF. ``lines`` are (label, qty, price)."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
         pagesize=A4,
-        topMargin=46 * mm,  # clears the logo header band drawn in the margin
-        bottomMargin=18 * mm,
-        leftMargin=18 * mm,
-        rightMargin=18 * mm,
-        title="Sales Receipt",
+        topMargin=_HEADER_H + 4 * mm,
+        bottomMargin=_WAVE_H + 8 * mm,
+        leftMargin=_MARGIN,
+        rightMargin=_MARGIN,
+        title=f"Invoice {sale_id[:8].upper()}",
     )
-
     styles = getSampleStyleSheet()
-    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=12)
-    meta = ParagraphStyle("meta", parent=styles["Normal"], fontSize=9, leading=15)
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9.5, leading=12.5, textColor=INK)
+    foot = ParagraphStyle("foot", parent=styles["Normal"], fontSize=9, leading=13, textColor=INK)
 
-    story: list[Any] = []
-    for label, value in (
-        ("Sale #", sale_id[:8]),
-        ("Date", _fmt_date(sold_at)),
-        ("Customer", customer_name),
-        ("Sold by", sold_by),
-    ):
-        story.append(Paragraph(f"<b>{label}</b>&nbsp;&nbsp;{escape(value)}", meta))
-    story.append(Spacer(1, 8 * mm))
-
-    data: list[Any] = [["NO", "DESCRIPTION", "QTY", "PER UNIT", "TOTAL AMOUNT"]]
-    for i, (label, qty, price) in enumerate(lines, start=1):
-        data.append(
+    gap = 8 * mm
+    box_w = (_CONTENT_W - gap) / 2
+    header = Table(
+        [
             [
-                str(i),
-                Paragraph(escape(label), cell),
-                str(qty),
-                _fmt_amount(price),
-                _fmt_amount(Decimal(qty) * price),
+                _gold_box([("Sold To", ""), ("Name", customer_name)], box_w),
+                _gold_box(
+                    [
+                        ("Invoice No", sale_id[:8].upper()),
+                        ("Date", _fmt_date(sold_at)),
+                        ("Sold by", sold_by),
+                    ],
+                    box_w,
+                ),
+            ]
+        ],
+        colWidths=[box_w + gap, box_w],
+    )
+    header.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
             ]
         )
-    data.append(["GRAND TOTAL", "", "", "", f"{_fmt_amount(total_thb)} THB"])
-    last = len(data) - 1
+    )
+    story: list[Any] = [header, Spacer(1, 7 * mm)]
+
+    data: list[Any] = [["No", "Description", "Qty", "Price per Unit", "Amount"]]
+    for i, (label, qty, price) in enumerate(lines, start=1):
+        data.append(
+            [str(i), Paragraph(escape(label), cell), str(qty), _fmt_amount(price), _fmt_amount(Decimal(qty) * price)]
+        )
+    subtotal = sum((Decimal(q) * p for _, q, p in lines), Decimal("0"))
+    data.append(["", "", "", "Sub Total", _fmt_amount(subtotal)])
+    data.append(["Total Amount", "", "", "THB", _fmt_amount(total_thb)])
+    sub, last = len(data) - 2, len(data) - 1
 
     table = Table(
         data,
-        # Sum = 174 mm = A4 width (210) minus left+right margins (18+18); any
-        # wider overflows the printable frame and clips the TOTAL column.
-        colWidths=[11 * mm, 75 * mm, 14 * mm, 36 * mm, 38 * mm],
+        # Sum = 178 mm = A4 width (210) minus the 16 mm margins.
+        colWidths=[12 * mm, 84 * mm, 14 * mm, 34 * mm, 34 * mm],
         repeatRows=1,
     )
     table.setStyle(
         TableStyle(
             [
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                ("TEXTCOLOR", (0, 0), (-1, -1), INK),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("TOPPADDING", (0, 0), (-1, -1), 5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("ALIGN", (0, 0), (0, -1), "CENTER"),  # NO
-                ("ALIGN", (2, 0), (2, -1), "CENTER"),  # QTY
-                ("ALIGN", (3, 0), (4, -1), "RIGHT"),  # PER UNIT, TOTAL AMOUNT
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),  # No
+                ("ALIGN", (2, 0), (2, -1), "CENTER"),  # Qty
+                ("ALIGN", (3, 0), (4, -1), "RIGHT"),  # money
+                ("INNERGRID", (0, 0), (-1, sub - 1), 0.5, GOLD),
+                ("BOX", (0, 0), (-1, -1), 0.9, GOLD_DARK),
                 # Header row
-                ("BACKGROUND", (0, 0), (-1, 0), colors.Color(0.9, 0.9, 0.9)),
+                ("BACKGROUND", (0, 0), (-1, 0), GOLD),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                # GRAND TOTAL row: merge first four cells, bold, right-aligned label
-                ("SPAN", (0, last), (3, last)),
+                # Sub Total: label + amount boxed like the paper form
+                ("FONTNAME", (3, sub), (4, sub), "Helvetica-Bold"),
+                ("LINEABOVE", (3, sub), (4, sub), 0.5, GOLD),
+                ("LINEBEFORE", (3, sub), (3, sub), 0.5, GOLD),
+                # Total Amount: gold band, label spans to the currency cell
+                ("SPAN", (0, last), (2, last)),
+                ("BACKGROUND", (0, last), (-1, last), GOLD),
                 ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
-                ("ALIGN", (0, last), (3, last), "RIGHT"),
-                ("ALIGN", (4, last), (4, last), "RIGHT"),
+                ("ALIGN", (0, last), (2, last), "CENTER"),
+                ("LINEABOVE", (0, last), (-1, last), 0.9, GOLD_DARK),
             ]
         )
     )
     story.append(table)
+    if FOOTER_LINES:
+        story.append(Spacer(1, 6 * mm))
+        story.extend(Paragraph(escape(line), foot) for line in FOOTER_LINES)
 
-    doc.build(
-        story,
-        onFirstPage=_draw_page_furniture,
-        onLaterPages=_draw_page_furniture,
-    )
+    doc.build(story, onFirstPage=_draw_page_furniture, onLaterPages=_draw_page_furniture)
     return buf.getvalue()
