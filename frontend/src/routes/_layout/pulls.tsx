@@ -8,6 +8,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
+  type ApiError,
   DashboardsService,
   type ProjectPullCreate,
   type ProjectPullFulfill,
@@ -45,6 +46,7 @@ import {
 import { queued } from "@/lib/query-client"
 import { requireAuth } from "@/lib/route-guards"
 import type { Queued } from "@/lib/sync-producer"
+import { extractErrorMessage } from "@/utils"
 
 export const Route = createFileRoute("/_layout/pulls")({
   component: Pulls,
@@ -171,22 +173,24 @@ function Pulls() {
 
   const createMutation = useMutation<
     ProjectPullPublic,
-    Error,
+    ApiError,
     ProjectPullCreate
   >({
     mutationFn: (payload) =>
       ProjectPullsService.createProjectPull({ requestBody: payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-pulls"] })
-      showSuccessToast("Request created.")
+      showSuccessToast("Request created — stock deducted.")
       setMode("queue")
       setCreateLines([])
       setProjectId("")
       setAdminNotes("")
       setScanNotice("")
     },
-    onError: () =>
-      showErrorToast("Could not create the request. Please try again."),
+    // Create deducts stock, so the server reason matters (not enough of a
+    // part, a unit no longer in stock); the helper copes with 422 arrays too.
+    onError: (err: ApiError) =>
+      showErrorToast(extractErrorMessage(err), "Request not created"),
   })
 
   const cancelMutation = useMutation({

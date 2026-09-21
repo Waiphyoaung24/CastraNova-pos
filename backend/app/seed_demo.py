@@ -13,7 +13,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import create_engine, text
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app import crud
 from app.core.config import settings
@@ -47,6 +47,7 @@ from app.models import (
     SyncReviewReason,
     TrackingMode,
     Unit,
+    UnitState,
     User,
     UserCreate,
     UserRole,
@@ -390,6 +391,17 @@ def seed(s: Session) -> None:
     print(f"service tickets: {len(tickets)}")
 
     # --- project pulls: one fulfilled, two pending --------------------------
+    # Create deducts stock, so the UNIT line must name a unit that is really
+    # IN_STOCK by its shop barcode (unit_serial is the castranova_barcode).
+    pull_unit = s.exec(
+        select(Unit)
+        .where(
+            Unit.product_id == ser_products[1].id,
+            Unit.current_state == UnitState.IN_STOCK,
+        )
+        .order_by(col(Unit.supplier_serial))
+    ).first()
+    assert pull_unit is not None, "no IN_STOCK unit left for the demo pull"
     pulls = [
         crud.create_project_pull(
             session=s,
@@ -415,7 +427,7 @@ def seed(s: Session) -> None:
                     ProjectPullLineCreate(
                         line_kind=SaleLineKind.UNIT,
                         product_id=ser_products[1].id,
-                        unit_serial=f"{ser_products[1].sku}-SN002",
+                        unit_serial=pull_unit.castranova_barcode,
                     ),
                 ],
             ),

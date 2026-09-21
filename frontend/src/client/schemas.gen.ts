@@ -2438,6 +2438,10 @@ export const ProjectPullPublicSchema = {
             ],
             title: 'Cancelled By User Id'
         },
+        stock_deducted: {
+            type: 'boolean',
+            title: 'Stock Deducted'
+        },
         lines: {
             items: {
                 '$ref': '#/components/schemas/ProjectPullLinePublic'
@@ -2447,7 +2451,7 @@ export const ProjectPullPublicSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'project_id', 'project_name', 'project_code', 'customer_id', 'customer_name', 'state', 'admin_notes', 'created_by_user_id', 'created_at', 'fulfilled_at', 'fulfilled_by_user_id', 'cancelled_at', 'cancelled_by_user_id', 'lines'],
+    required: ['id', 'project_id', 'project_name', 'project_code', 'customer_id', 'customer_name', 'state', 'admin_notes', 'created_by_user_id', 'created_at', 'fulfilled_at', 'fulfilled_by_user_id', 'cancelled_at', 'cancelled_by_user_id', 'stock_deducted', 'lines'],
     title: 'ProjectPullPublic'
 } as const;
 

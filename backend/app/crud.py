@@ -1,6 +1,6 @@
 import secrets
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -3564,41 +3564,68 @@ def create_project_pull(
             )
         )
 
+    # Stock leaves the system now, in this same transaction, so the request
+    # reflects real availability from the moment it exists. Any line that
+    # cannot be fully moved raises 409 and rolls the whole create back.
+    session.flush()
+    lines = session.exec(
+        select(ProjectPullLine)
+        .where(ProjectPullLine.project_pull_id == pull.id)
+        .order_by(col(ProjectPullLine.id))
+    ).all()
+    _move_pull_stock(
+        session=session,
+        pull=pull,
+        lines=lines,
+        qty_by_line={},
+        actor_user_id=created_by_user_id,
+        strict=True,
+    )
+
     session.commit()
     session.refresh(pull)
     return pull
 
 
-def fulfill_project_pull(
+def pull_stock_deducted(*, session: Session, pull_id: uuid.UUID) -> bool:
+    """Whether PROJECT_OUT movements already exist for this pull. Read from the
+    append-only ledgers rather than a flag on the pull so it cannot drift."""
+    unit_hit = session.exec(
+        select(UnitMovement.id)
+        .where(UnitMovement.project_pull_id == pull_id)
+        .limit(1)
+    ).first()
+    if unit_hit is not None:
+        return True
+    part_hit = session.exec(
+        select(PartMovement.id)
+        .where(PartMovement.project_pull_id == pull_id)
+        .limit(1)
+    ).first()
+    return part_hit is not None
+
+
+def _pull_line_cap(line: ProjectPullLine) -> int:
+    return 1 if line.line_kind == SaleLineKind.UNIT else (line.requested_qty or 0)
+
+
+def _move_pull_stock(
     *,
     session: Session,
-    pull_id: uuid.UUID,
-    fulfill_lines: list[ProjectPullFulfillLine],
+    pull: ProjectPull,
+    lines: Sequence[ProjectPullLine],
+    qty_by_line: dict[uuid.UUID, int],
     actor_user_id: uuid.UUID,
-) -> ProjectPull:
-    """Staff fulfills a PENDING pull at the warehouse (Flow D.2), consuming
-    SERIALIZED units (PROJECT_OUT) and QUANTITY parts (FIFO), cost-only.
+    strict: bool,
+) -> dict[uuid.UUID, int]:
+    """Write the PROJECT_OUT movements for a pull's lines — SERIALIZED units and
+    QUANTITY parts (FIFO), cost-only — and return the quantity moved per line.
 
-    One-shot and PENDING-only: the pull is locked FOR UPDATE; a FULFILLED/SHORT
-    pull returns unchanged (idempotent — never re-consume), a CANCELLED pull
-    raises 409. Per line the requested amount defaults from the line (UNIT->1,
-    PART->requested_qty) unless overridden in ``fulfill_lines``. UNIT lines that
-    lost the race (missing/not IN_STOCK) become SHORT with no movement; PART
-    lines fulfilled below request become SHORT. The pull settles FULFILLED iff
-    every line is FULFILLED, else SHORT — all atomic with the movement writes
-    (409 on insufficient stock rolls the whole thing back)."""
-    pull = session.exec(
-        select(ProjectPull)
-        .where(ProjectPull.id == pull_id)
-        .with_for_update()
-    ).first()
-    if not pull:
-        raise HTTPException(status_code=404, detail="Project pull not found")
-    if pull.state == ProjectPullState.CANCELLED:
-        raise HTTPException(status_code=409, detail="Project pull is cancelled")
-    if pull.state != ProjectPullState.PENDING:
-        return pull  # idempotent: already settled (FULFILLED/SHORT), do not re-consume
-
+    Per line the amount defaults to its cap (UNIT->1, PART->requested_qty)
+    unless overridden in ``qty_by_line``. ``strict`` (create) raises 409 on a
+    unit that is missing/not IN_STOCK; lenient (legacy fulfill) records 0 for
+    it instead. Insufficient part stock always raises 409 (FIFO). Line states
+    are left to the caller. Nothing here commits."""
     customer_loc = session.exec(
         select(Location).where(Location.code == "CUSTOMER")
     ).first()
@@ -3607,28 +3634,6 @@ def fulfill_project_pull(
     ).first()
     if not customer_loc or not ygn_loc:
         raise HTTPException(status_code=500, detail="Locations not seeded")
-
-    lines = session.exec(
-        select(ProjectPullLine)
-        .where(ProjectPullLine.project_pull_id == pull.id)
-        .order_by(col(ProjectPullLine.id))
-    ).all()
-
-    # Validate payload line_ids before any write so a bad payload aborts the
-    # whole transaction cleanly (nothing consumed/moved).
-    payload_ids = [fl.line_id for fl in fulfill_lines]
-    if len(payload_ids) != len(set(payload_ids)):
-        dupes = {lid for lid in payload_ids if payload_ids.count(lid) > 1}
-        raise HTTPException(
-            status_code=422, detail=f"Duplicate line_id in payload: {dupes}"
-        )
-    known_ids = {ln.id for ln in lines}
-    unknown = set(payload_ids) - known_ids
-    if unknown:
-        raise HTTPException(
-            status_code=422, detail=f"Unknown line_id for this pull: {unknown}"
-        )
-    qty_by_line = {fl.line_id: fl.fulfilled_qty for fl in fulfill_lines}
 
     # Lock all target units up front in a single canonical (id-ordered) query so
     # concurrent sales/pulls touching overlapping units acquire locks in the same
@@ -3655,24 +3660,27 @@ def fulfill_project_pull(
         (ln for ln in lines if ln.line_kind == SaleLineKind.PART),
         key=lambda ln: str(ln.product_id),
     )
+    moved: dict[uuid.UUID, int] = {}
 
     for line in unit_lines:
         requested = qty_by_line.get(line.id, 1)
         unit = unit_by_barcode.get(line.unit_serial) if line.unit_serial else None
-        if requested < 1 or unit is None:
-            line.line_state = LineState.SHORT
-            line.fulfilled_qty = 0
-            session.add(line)
-            continue
-        try:
-            new_state = assert_unit_transition(
-                unit.current_state, MovementType.PROJECT_OUT
-            )
-        except IllegalTransition:
-            # Lost the race (already SOLD/PROJECT_OUT/etc.) — first-write-wins.
-            line.line_state = LineState.SHORT
-            line.fulfilled_qty = 0
-            session.add(line)
+        new_state = None
+        if unit is not None and requested >= 1:
+            try:
+                new_state = assert_unit_transition(
+                    unit.current_state, MovementType.PROJECT_OUT
+                )
+            except IllegalTransition:
+                # Lost the race (already SOLD/PROJECT_OUT/etc.) — first-write-wins.
+                new_state = None
+        if unit is None or new_state is None:
+            if strict:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Unit {line.unit_serial} is not in stock",
+                )
+            moved[line.id] = 0
             continue
         session.add(
             UnitMovement(
@@ -3689,18 +3697,14 @@ def fulfill_project_pull(
         unit.current_location_id = customer_loc.id
         unit.updated_at = get_datetime_utc()
         session.add(unit)
-        line.line_state = LineState.FULFILLED
-        line.fulfilled_qty = 1
-        session.add(line)
+        moved[line.id] = 1
 
     for line in part_lines:
         requested_qty = line.requested_qty or 0
         wanted = qty_by_line.get(line.id, requested_qty)
         actual = min(wanted, requested_qty)
         if actual <= 0:
-            line.line_state = LineState.SHORT
-            line.fulfilled_qty = 0
-            session.add(line)
+            moved[line.id] = 0
             continue
         cost_lines = consume_quantity_fifo(
             session=session, product_id=line.product_id, quantity_needed=actual
@@ -3720,10 +3724,93 @@ def fulfill_project_pull(
         for cost_line in cost_lines:
             cost_line.part_movement_id = movement.id
             session.add(cost_line)
-        line.line_state = (
-            LineState.FULFILLED if actual == requested_qty else LineState.SHORT
+        moved[line.id] = actual
+
+    return moved
+
+
+def fulfill_project_pull(
+    *,
+    session: Session,
+    pull_id: uuid.UUID,
+    fulfill_lines: list[ProjectPullFulfillLine],
+    actor_user_id: uuid.UUID,
+) -> ProjectPull:
+    """Staff confirms the hand-out of a PENDING pull at the warehouse (Flow D.2).
+
+    Stock normally left at create (see ``create_project_pull``), so this only
+    records what went out per line. A pull with no PROJECT_OUT movements yet
+    (created before create started deducting) is consumed here instead —
+    SERIALIZED units (PROJECT_OUT) and QUANTITY parts (FIFO), cost-only — so
+    stock is deducted exactly once either way.
+
+    One-shot and PENDING-only: the pull is locked FOR UPDATE; a FULFILLED/SHORT
+    pull returns unchanged (idempotent — never re-consume), a CANCELLED pull
+    raises 409. Per line the requested amount defaults from the line (UNIT->1,
+    PART->requested_qty) unless overridden in ``fulfill_lines``. UNIT lines that
+    lost the race (missing/not IN_STOCK) become SHORT with no movement; PART
+    lines fulfilled below request become SHORT. The pull settles FULFILLED iff
+    every line is FULFILLED, else SHORT — all atomic with the movement writes
+    (409 on insufficient stock rolls the whole thing back)."""
+    pull = session.exec(
+        select(ProjectPull)
+        .where(ProjectPull.id == pull_id)
+        .with_for_update()
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="Project pull not found")
+    if pull.state == ProjectPullState.CANCELLED:
+        raise HTTPException(status_code=409, detail="Project pull is cancelled")
+    if pull.state != ProjectPullState.PENDING:
+        return pull  # idempotent: already settled (FULFILLED/SHORT), do not re-consume
+
+    lines = session.exec(
+        select(ProjectPullLine)
+        .where(ProjectPullLine.project_pull_id == pull.id)
+        .order_by(col(ProjectPullLine.id))
+    ).all()
+
+    # Validate payload line_ids before any write so a bad payload aborts the
+    # whole transaction cleanly (nothing consumed/moved).
+    payload_ids = [fl.line_id for fl in fulfill_lines]
+    if len(payload_ids) != len(set(payload_ids)):
+        dupes = {lid for lid in payload_ids if payload_ids.count(lid) > 1}
+        raise HTTPException(
+            status_code=422, detail=f"Duplicate line_id in payload: {dupes}"
         )
-        line.fulfilled_qty = actual
+    known_ids = {ln.id for ln in lines}
+    unknown = set(payload_ids) - known_ids
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown line_id for this pull: {unknown}"
+        )
+    qty_by_line = {fl.line_id: fl.fulfilled_qty for fl in fulfill_lines}
+
+    if pull_stock_deducted(session=session, pull_id=pull.id):
+        # Stock already left at create: just record the hand-out, capped at
+        # what was deducted. A short hand-out leaves the surplus deducted —
+        # admin reconciles it via Stock adjustment (Found).
+        given = {
+            ln.id: max(0, min(qty_by_line.get(ln.id, _pull_line_cap(ln)), _pull_line_cap(ln)))
+            for ln in lines
+        }
+    else:
+        given = _move_pull_stock(
+            session=session,
+            pull=pull,
+            lines=lines,
+            qty_by_line=qty_by_line,
+            actor_user_id=actor_user_id,
+            strict=False,
+        )
+
+    for line in lines:
+        line.fulfilled_qty = given[line.id]
+        line.line_state = (
+            LineState.FULFILLED
+            if line.fulfilled_qty == _pull_line_cap(line)
+            else LineState.SHORT
+        )
         session.add(line)
 
     all_fulfilled = all(ln.line_state == LineState.FULFILLED for ln in lines)
@@ -3761,6 +3848,16 @@ def cancel_project_pull(
     if pull.state == ProjectPullState.FULFILLED:
         raise HTTPException(
             status_code=409, detail="Cannot cancel a fulfilled pull"
+        )
+    # Stock left at create and there is no reversal movement: cancelling would
+    # lose it silently. Only a pull that has not deducted yet (created before
+    # create started deducting) can still be cancelled while PENDING.
+    if pull.state == ProjectPullState.PENDING and pull_stock_deducted(
+        session=session, pull_id=pull.id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Stock was already taken for this request — it cannot be cancelled",
         )
 
     pull.state = assert_pull_transition(pull.state, ProjectPullState.CANCELLED)

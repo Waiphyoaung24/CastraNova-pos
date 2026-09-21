@@ -370,8 +370,10 @@ def test_short_pull_counted(
 ) -> None:
     admin = seed["admin"]
     customer = seed["customer"]
-    # Request 5 but only 3 in stock -> SHORT, consumes 3 @ 10 = 30 COGS.
-    part = seed["make_part"]("100.00", "20.00", [(3, "10.00")])
+    # Create deducts the full 5 @ 10 = 50 COGS; staff then hand out only 3 of
+    # them -> pull SHORT. The report counts what left stock, not what was
+    # handed over.
+    part = seed["make_part"]("100.00", "20.00", [(5, "10.00")])
     project = crud.create_project(
         session=db,
         project_in=ProjectCreate(
@@ -395,7 +397,7 @@ def test_short_pull_counted(
         created_by_user_id=admin.id,
     )
     line_id = _pull_lines(db, pull.id)[0].id
-    # Fulfill 3 of the 5 requested -> partial consumption -> line+pull SHORT.
+    # Hand out 3 of the 5 requested -> line+pull SHORT (stock already moved).
     settled = crud.fulfill_project_pull(
         session=db,
         pull_id=pull.id,
@@ -413,8 +415,8 @@ def test_short_pull_counted(
     )
     assert r.status_code == 200, r.text
     proj_row = _channel(r.json(), "PROJECT")
-    # 3 @ 10 consumed = 30 COGS, revenue 0.
-    assert Decimal(proj_row["cogs_thb"]) == Decimal("30.00")
+    # 5 @ 10 left stock at create = 50 COGS, revenue 0.
+    assert Decimal(proj_row["cogs_thb"]) == Decimal("50.00")
     assert Decimal(proj_row["revenue_thb"]) == Decimal("0.00")
 
 

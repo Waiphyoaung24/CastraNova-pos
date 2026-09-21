@@ -12,12 +12,14 @@ from app.core.config import settings
 from app.models import (
     CostLine,
     CustomerCreate,
+    LineState,
     Location,
     MovementType,
     PartMovement,
     ProductCreate,
     ProjectCreate,
     ProjectPull,
+    ProjectPullLine,
     ProjectPullState,
     ReceivePiece,
     SaleLineInput,
@@ -146,13 +148,208 @@ def _create(
     return body
 
 
-def test_admin_creates_pull_pending(
-    client: TestClient, superuser_token_headers: dict[str, str], pull_ctx: dict[str, Any]
+def _legacy_pull(db: Session, ctx: dict[str, Any], *, part_qty: int = 2) -> ProjectPull:
+    """A PENDING pull whose stock was NOT deducted at create — the shape every
+    pull had before create started deducting. Inserted directly so the
+    at-fulfill deduction path stays covered for rows that predate the change."""
+    pull = ProjectPull(
+        project_id=ctx["project_id"],
+        customer_id=ctx["customer_id"],
+        created_by_user_id=ctx["admin_id"],
+    )
+    db.add(pull)
+    db.flush()
+    db.add(
+        ProjectPullLine(
+            project_pull_id=pull.id,
+            line_kind=SaleLineKind.UNIT,
+            product_id=ctx["serialized_product_id"],
+            unit_serial=ctx["barcode"],
+        )
+    )
+    db.add(
+        ProjectPullLine(
+            project_pull_id=pull.id,
+            line_kind=SaleLineKind.PART,
+            product_id=ctx["part_product_id"],
+            requested_qty=part_qty,
+        )
+    )
+    db.commit()
+    db.refresh(pull)
+    return pull
+
+
+def _line_ids(db: Session, pull_id: uuid.UUID) -> dict[str, str]:
+    return {
+        ln.line_kind.value: str(ln.id)
+        for ln in crud.list_project_pull_lines(session=db, pull_id=pull_id)
+    }
+
+
+def _part_moves(db: Session, ctx: dict[str, Any]) -> list[PartMovement]:
+    return list(
+        db.exec(
+            select(PartMovement).where(
+                PartMovement.product_id == ctx["part_product_id"],
+                PartMovement.event_type == MovementType.PROJECT_OUT,
+            )
+        ).all()
+    )
+
+
+def _unit(db: Session, ctx: dict[str, Any]) -> Unit:
+    unit = db.exec(
+        select(Unit).where(Unit.castranova_barcode == ctx["barcode"])
+    ).first()
+    assert unit is not None
+    return unit
+
+
+def test_create_deducts_stock_and_stays_pending(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
 ) -> None:
-    pull = _create(client, superuser_token_headers, pull_ctx)
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=2)
     assert pull["state"] == "PENDING"
+    assert pull["stock_deducted"] is True
     assert len(pull["lines"]) == 2
+    # Lines still wait for the hand-out even though the stock is already gone.
     assert all(line["line_state"] == "PENDING" for line in pull["lines"])
+    assert all(line["fulfilled_qty"] == 0 for line in pull["lines"])
+
+    db.expire_all()
+    unit = _unit(db, pull_ctx)
+    assert unit.current_state == UnitState.PROJECT_OUT
+    umoves = db.exec(
+        select(UnitMovement).where(
+            UnitMovement.unit_id == unit.id,
+            UnitMovement.event_type == MovementType.PROJECT_OUT,
+        )
+    ).all()
+    assert len(umoves) == 1
+    assert umoves[0].project_pull_id == uuid.UUID(pull["id"])
+    assert umoves[0].actor_user_id == pull_ctx["admin_id"]
+
+    pmoves = _part_moves(db, pull_ctx)
+    assert len(pmoves) == 1 and pmoves[0].quantity == 2
+    assert pmoves[0].project_pull_id == uuid.UUID(pull["id"])
+    assert pmoves[0].actor_user_id == pull_ctx["admin_id"]
+    cost_lines = db.exec(
+        select(CostLine).where(CostLine.part_movement_id == pmoves[0].id)
+    ).all()
+    assert sum(c.quantity for c in cost_lines) == 2
+    assert sum(c.total_cost_thb for c in cost_lines) == Decimal("20.00")
+
+
+def test_create_insufficient_part_stock_409_nothing_written(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
+) -> None:
+    before = len(db.exec(select(ProjectPull)).all())
+    r = client.post(
+        f"{PREFIX}/project-pulls",
+        headers=superuser_token_headers,
+        json=_create_body(pull_ctx, part_qty=100),  # only 7 in stock
+    )
+    assert r.status_code == 409, r.text
+    db.expire_all()
+    assert len(db.exec(select(ProjectPull)).all()) == before
+    assert _part_moves(db, pull_ctx) == []
+    # The unit line came first; the whole txn rolled back so it is untouched.
+    assert _unit(db, pull_ctx).current_state == UnitState.IN_STOCK
+
+
+def test_create_unit_not_in_stock_409_nothing_written(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
+) -> None:
+    crud.create_sale(
+        session=db,
+        customer_id=pull_ctx["customer_id"],
+        lines=[
+            SaleLineInput(
+                line_kind=SaleLineKind.UNIT, castranova_barcode=pull_ctx["barcode"]
+            )
+        ],
+        idempotency_key=uuid.uuid4(),
+        created_by_user_id=pull_ctx["admin_id"],
+    )
+    before = len(db.exec(select(ProjectPull)).all())
+    r = client.post(
+        f"{PREFIX}/project-pulls",
+        headers=superuser_token_headers,
+        json=_create_body(pull_ctx, part_qty=2),
+    )
+    assert r.status_code == 409, r.text
+    db.expire_all()
+    assert len(db.exec(select(ProjectPull)).all()) == before
+    assert _part_moves(db, pull_ctx) == []
+    assert _unit(db, pull_ctx).current_state == UnitState.SOLD
+
+
+def test_fulfill_deducted_pull_moves_no_stock(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
+) -> None:
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=2)
+    line_ids = {ln["line_kind"]: ln["id"] for ln in pull["lines"]}
+    db.expire_all()
+    pmoves_before = len(_part_moves(db, pull_ctx))
+    umoves_before = len(db.exec(select(UnitMovement)).all())
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/fulfill",
+        headers=staff_token_headers,
+        json={
+            "lines": [
+                {"line_id": line_ids["UNIT"], "fulfilled_qty": 1},
+                {"line_id": line_ids["PART"], "fulfilled_qty": 2},
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "FULFILLED"
+    db.expire_all()
+    assert len(_part_moves(db, pull_ctx)) == pmoves_before
+    assert len(db.exec(select(UnitMovement)).all()) == umoves_before
+
+
+def test_legacy_pull_deducts_at_fulfill(
+    client: TestClient,
+    staff_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
+) -> None:
+    pull = _legacy_pull(db, pull_ctx, part_qty=2)
+    r = client.get(f"{PREFIX}/project-pulls/{pull.id}", headers=staff_token_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["stock_deducted"] is False
+    assert _part_moves(db, pull_ctx) == []
+
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull.id}/fulfill",
+        headers=staff_token_headers,
+        json={"lines": []},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "FULFILLED"
+    assert r.json()["stock_deducted"] is True
+    db.expire_all()
+    staff = crud.get_user_by_email(session=db, email="staff@example.com")
+    assert staff is not None
+    pmoves = _part_moves(db, pull_ctx)
+    assert len(pmoves) == 1 and pmoves[0].quantity == 2
+    assert pmoves[0].actor_user_id == staff.id
+    assert _unit(db, pull_ctx).current_state == UnitState.PROJECT_OUT
 
 
 def test_staff_cannot_create_pull_403(
@@ -376,7 +573,9 @@ def test_fulfill_all_marks_fulfilled(
     ).all()
     assert len(umoves) == 1
     assert umoves[0].project_pull_id == pull_row.id
-    assert umoves[0].actor_user_id == staff.id
+    # Stock moved at create, so the movement actor is the admin creator; the
+    # staff hand-out is recorded on the pull (fulfilled_by_user_id above).
+    assert umoves[0].actor_user_id == pull_ctx["admin_id"]
 
     # PART line: one PROJECT_OUT part_movement + balanced cost_lines.
     pmoves = db.exec(
@@ -427,22 +626,25 @@ def test_partial_part_marks_line_and_pull_short(
             PartMovement.event_type == MovementType.PROJECT_OUT,
         )
     ).all()
-    assert len(pmoves) == 1 and pmoves[0].quantity == 3
+    # All 5 left stock at create; the short hand-out does not put 2 back.
+    assert len(pmoves) == 1 and pmoves[0].quantity == 5
     cost_lines = db.exec(
         select(CostLine).where(CostLine.part_movement_id == pmoves[0].id)
     ).all()
-    assert sum(c.quantity for c in cost_lines) == 3
+    assert sum(c.quantity for c in cost_lines) == 5
 
 
-def test_unit_race_line_short(
+def test_legacy_unit_race_line_short(
     client: TestClient,
-    superuser_token_headers: dict[str, str],
     staff_token_headers: dict[str, str],
     db: Session,
     pull_ctx: dict[str, Any],
 ) -> None:
-    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=2)
-    line_ids = {ln["line_kind"]: ln["id"] for ln in pull["lines"]}
+    # Only an undeducted (legacy) pull can lose its unit to a sale: a created
+    # pull already holds the unit as PROJECT_OUT.
+    pull_row = _legacy_pull(db, pull_ctx, part_qty=2)
+    pull = {"id": str(pull_row.id)}
+    line_ids = _line_ids(db, pull_row.id)
     # Pre-sell the unit so it is SOLD (lost the race).
     crud.create_sale(
         session=db,
@@ -532,13 +734,34 @@ def test_refulfill_is_idempotent(
     assert len(db.exec(pmove_q).all()) == pmoves_before
 
 
-def test_cancel_pending_pull(
+def test_cancel_deducted_pending_pull_409(
     client: TestClient,
     superuser_token_headers: dict[str, str],
     db: Session,
     pull_ctx: dict[str, Any],
 ) -> None:
+    # Stock already left at create and there is no reversal movement, so a
+    # cancel would silently lose the stock — refuse it.
     pull = _create(client, superuser_token_headers, pull_ctx)
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/cancel",
+        headers=superuser_token_headers,
+        json={},
+    )
+    assert r.status_code == 409, r.text
+    db.expire_all()
+    pull_row = db.get(ProjectPull, uuid.UUID(pull["id"]))
+    assert pull_row is not None and pull_row.state == ProjectPullState.PENDING
+    assert len(_part_moves(db, pull_ctx)) == 1
+
+
+def test_cancel_legacy_pending_pull(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    db: Session,
+    pull_ctx: dict[str, Any],
+) -> None:
+    pull = {"id": str(_legacy_pull(db, pull_ctx).id)}
     r = client.post(
         f"{PREFIX}/project-pulls/{pull['id']}/cancel",
         headers=superuser_token_headers,
@@ -632,17 +855,17 @@ def test_cancel_fulfilled_pull_409(
     assert r.status_code == 409
 
 
-def test_insufficient_stock_409_nothing_written(
+def test_legacy_insufficient_stock_409_nothing_written(
     client: TestClient,
-    superuser_token_headers: dict[str, str],
     staff_token_headers: dict[str, str],
     db: Session,
     pull_ctx: dict[str, Any],
 ) -> None:
-    # requested 7 (all stock), fulfill 100 -> capped to 7 but only 7 in stock is
-    # fine; instead request beyond stock: requested 100, fulfill 100 -> 409.
-    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=100)
-    line_ids = {ln["line_kind"]: ln["id"] for ln in pull["lines"]}
+    # A created pull can never request beyond stock (create 409s); only a legacy
+    # undeducted pull can still hit insufficient stock at fulfill.
+    pull_row = _legacy_pull(db, pull_ctx, part_qty=100)
+    pull = {"id": str(pull_row.id)}
+    line_ids = _line_ids(db, pull_row.id)
     r = client.post(
         f"{PREFIX}/project-pulls/{pull['id']}/fulfill",
         headers=staff_token_headers,
@@ -699,12 +922,13 @@ def test_dual_audit_admin_recovered_via_join(
         )
     ).first()
     assert pmove is not None
-    # Movement actor is the staff fulfiller.
-    assert pmove.actor_user_id == staff.id
-    # The admin creator is recovered by joining via project_pull_id.
+    # Movement actor is the admin who created (and thereby deducted) the pull.
+    assert pmove.actor_user_id == pull_ctx["admin_id"]
+    # The staff hand-out is recovered by joining via project_pull_id.
     pull_row = db.get(ProjectPull, pmove.project_pull_id)
     assert pull_row is not None
     assert pull_row.created_by_user_id == pull_ctx["admin_id"]
+    assert pull_row.fulfilled_by_user_id == staff.id
 
 
 def test_fulfill_unauthenticated_401(
@@ -723,12 +947,20 @@ def _assert_pull_untouched(db: Session, pull_id: str, part_product_id: uuid.UUID
     db.expire_all()
     pull_row = db.get(ProjectPull, uuid.UUID(pull_id))
     assert pull_row is not None and pull_row.state == ProjectPullState.PENDING
-    assert not db.exec(
-        select(PartMovement).where(
-            PartMovement.product_id == part_product_id,
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+    for ln in crud.list_project_pull_lines(session=db, pull_id=pull_row.id):
+        assert ln.line_state == LineState.PENDING and ln.fulfilled_qty == 0
+    # Exactly the create-time deduction, nothing more.
+    assert (
+        len(
+            db.exec(
+                select(PartMovement).where(
+                    PartMovement.product_id == part_product_id,
+                    PartMovement.event_type == MovementType.PROJECT_OUT,
+                )
+            ).all()
         )
-    ).all()
+        == 1
+    )
 
 
 def test_fulfill_unknown_line_id_422(

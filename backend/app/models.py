@@ -1798,6 +1798,10 @@ class ProjectPullPublic(SQLModel):
     fulfilled_by_user_id: uuid.UUID | None
     cancelled_at: datetime | None
     cancelled_by_user_id: uuid.UUID | None
+    # True once PROJECT_OUT movements exist for this pull. Create deducts stock,
+    # so new pulls are True while still PENDING; pulls created before that
+    # change stay False until fulfilled. Drives the Cancel affordance.
+    stock_deducted: bool
     lines: list[ProjectPullLinePublic]
 
 

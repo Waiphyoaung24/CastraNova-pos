@@ -492,6 +492,7 @@ export type ProjectPullPublic = {
     fulfilled_by_user_id: (string | null);
     cancelled_at: (string | null);
     cancelled_by_user_id: (string | null);
+    stock_deducted: boolean;
     lines: Array<ProjectPullLinePublic>;
 };
 
