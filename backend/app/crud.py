@@ -4361,15 +4361,18 @@ def _channel_rows(
         )
     ).one()
 
-    # --- PROJECT (cost-only): pulls fulfilled in window. ---
+    # --- PROJECT (cost-only): stock that left for projects in window. Windowed
+    # on the movement date, not ProjectPull.fulfilled_at: a pull deducts at
+    # create, so its COGS belongs to the month the stock left, whether or not
+    # staff have handed it out yet. ---
     proj_part_cogs = session.exec(
         select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
             PartMovement.event_type == MovementType.PROJECT_OUT,
-            col(ProjectPull.fulfilled_at) >= start,
-            col(ProjectPull.fulfilled_at) < end,
+            col(PartMovement.occurred_at) >= start,
+            col(PartMovement.occurred_at) < end,
         )
     ).one()
     proj_unit_cogs = session.exec(
@@ -4379,8 +4382,8 @@ def _channel_rows(
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
             UnitMovement.event_type == MovementType.PROJECT_OUT,
-            col(ProjectPull.fulfilled_at) >= start,
-            col(ProjectPull.fulfilled_at) < end,
+            col(UnitMovement.occurred_at) >= start,
+            col(UnitMovement.occurred_at) < end,
         )
     ).one()
 
@@ -4566,8 +4569,8 @@ def _product_rows(
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
                 PartMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(PartMovement.occurred_at) >= start,
+                col(PartMovement.occurred_at) < end,
             )
             .group_by(col(PartMovement.product_id))
         ).all():
@@ -4583,8 +4586,8 @@ def _product_rows(
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
                 UnitMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(UnitMovement.occurred_at) >= start,
+                col(UnitMovement.occurred_at) < end,
             )
             .group_by(col(Unit.product_id))
         ).all():
@@ -4690,8 +4693,8 @@ def _customer_rows(
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
                 PartMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(PartMovement.occurred_at) >= start,
+                col(PartMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.customer_id))
         ).all():
@@ -4706,8 +4709,8 @@ def _customer_rows(
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
                 UnitMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(UnitMovement.occurred_at) >= start,
+                col(UnitMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.customer_id))
         ).all():
@@ -4757,8 +4760,8 @@ def _project_rows(
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
                 PartMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(PartMovement.occurred_at) >= start,
+                col(PartMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.project_id))
         ).all():
@@ -4773,8 +4776,8 @@ def _project_rows(
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
                 UnitMovement.event_type == MovementType.PROJECT_OUT,
-                col(ProjectPull.fulfilled_at) >= start,
-                col(ProjectPull.fulfilled_at) < end,
+                col(UnitMovement.occurred_at) >= start,
+                col(UnitMovement.occurred_at) < end,
             )
             .group_by(col(ProjectPull.project_id))
         ).all():

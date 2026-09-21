@@ -270,6 +270,13 @@ test.describe("Pulls screen", () => {
       .toBeGreaterThan(0)
 
     expect(created).toBeTruthy()
+
+    // Its stock already left, so the queue offers no Cancel (backend 409s it).
+    const row = page.getByRole("row").filter({ hasText: `Drop Project ${r}` })
+    await expect(
+      row.getByRole("button", { name: "Give out parts" }),
+    ).toBeVisible()
+    await expect(row.getByRole("button", { name: "Cancel" })).toHaveCount(0)
     const partLines = created!.lines.filter((l) => l.line_kind === "PART")
     const unitLines = created!.lines.filter((l) => l.line_kind === "UNIT")
     expect(partLines).toHaveLength(1)
