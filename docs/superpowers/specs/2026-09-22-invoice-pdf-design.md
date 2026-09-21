@@ -24,12 +24,14 @@ branding — not the Aquamarine Moon letterhead the sample was drawn on.
 - Two rounded gold boxes (fill `#C9A200`-ish gold, black text): left **Sold To**
   with the customer name; right **Invoice No** and **Date** (+ **Sold by**).
 - Line table: header row gold fill / black bold text, columns No · Description
-  · Qty · Price per Unit · Amount; thin gold grid; body black on white.
-- Sub Total row (white, bold label right-aligned) and **Total Amount** row
-  (gold fill, bold) — the total spans the label cells like the sample.
+  · Qty · Price per Unit · Amount; no vertical lines; a pale-gold hairline
+  between items and a firm gold line closing the list; body black on white.
+- Totals in their own right-aligned block under the money columns: Sub Total
+  (plain) over **Total Amount (THB)** in a gold band — nothing else is gold
+  below the header row, so the total is the one loud element.
 - Foot: the wave image full-width at the bottom edge; the story's bottom margin
   clears it. Multi-page sales repeat the header/footer on every page.
-- Colours: gold `#C9A227`, dark gold rule `#8A6D1F`, black `#111111`.
+- Colours: the app's brand gold `#D4AF37` (frontend `--primary`), pale gold hairline `#E8D9A0`, dark gold rule `#8A6D1F`, black `#0B0B0D`.
 
 ## Not changed
 - `render_sale_receipt` keeps its exact signature (the cost-leak guard test

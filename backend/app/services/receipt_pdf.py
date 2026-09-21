@@ -35,9 +35,11 @@ _ASSETS = Path(__file__).resolve().parent.parent / "assets"
 _LOGO_HEADER = _ASSETS / "castranova-logo-header.png"
 _FOOTER_WAVE = _ASSETS / "invoice-footer-wave.jpg"
 
-GOLD = colors.HexColor("#C9A227")
+# The app's brand gold (frontend --primary) with black text; pale gold for hairlines.
+GOLD = colors.HexColor("#D4AF37")
+GOLD_PALE = colors.HexColor("#E8D9A0")
 GOLD_DARK = colors.HexColor("#8A6D1F")
-INK = colors.HexColor("#111111")
+INK = colors.HexColor("#0B0B0D")
 
 # Invoices print the shop's wall clock, like every screen does via the
 # browser; the DB stores UTC. ponytail: fixed zone, make it a setting if the
@@ -184,50 +186,69 @@ def render_sale_receipt(
     data: list[Any] = [["No", "Description", "Qty", "Price per Unit", "Amount"]]
     for i, (label, qty, price) in enumerate(lines, start=1):
         data.append(
-            [str(i), Paragraph(escape(label), cell), str(qty), _fmt_amount(price), _fmt_amount(Decimal(qty) * price)]
+            [
+                str(i),
+                Paragraph(escape(label), cell),
+                str(qty),
+                _fmt_amount(price),
+                _fmt_amount(Decimal(qty) * price),
+            ]
         )
-    subtotal = sum((Decimal(q) * p for _, q, p in lines), Decimal("0"))
-    data.append(["", "", "", "Sub Total", _fmt_amount(subtotal)])
-    data.append(["Total Amount", "", "", "THB", _fmt_amount(total_thb)])
-    sub, last = len(data) - 2, len(data) - 1
-
-    table = Table(
-        data,
-        # Sum = 178 mm = A4 width (210) minus the 16 mm margins.
-        colWidths=[12 * mm, 84 * mm, 14 * mm, 34 * mm, 34 * mm],
-        repeatRows=1,
-    )
+    col_w = [12 * mm, 84 * mm, 14 * mm, 34 * mm, 34 * mm]  # = 178 mm content
+    table = Table(data, colWidths=col_w, repeatRows=1)
     table.setStyle(
         TableStyle(
             [
                 ("FONTSIZE", (0, 0), (-1, -1), 9.5),
                 ("TEXTCOLOR", (0, 0), (-1, -1), INK),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("ALIGN", (0, 0), (0, -1), "CENTER"),  # No
                 ("ALIGN", (2, 0), (2, -1), "CENTER"),  # Qty
                 ("ALIGN", (3, 0), (4, -1), "RIGHT"),  # money
-                ("INNERGRID", (0, 0), (-1, sub - 1), 0.5, GOLD),
-                ("BOX", (0, 0), (-1, -1), 0.9, GOLD_DARK),
-                # Header row
+                # Gold header, then quiet rows: no vertical lines, one pale
+                # hairline between items, a firm gold line closing the list.
                 ("BACKGROUND", (0, 0), (-1, 0), GOLD),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                # Sub Total: label + amount boxed like the paper form
-                ("FONTNAME", (3, sub), (4, sub), "Helvetica-Bold"),
-                ("LINEABOVE", (3, sub), (4, sub), 0.5, GOLD),
-                ("LINEBEFORE", (3, sub), (3, sub), 0.5, GOLD),
-                # Total Amount: gold band, label spans to the currency cell
-                ("SPAN", (0, last), (2, last)),
-                ("BACKGROUND", (0, last), (-1, last), GOLD),
-                ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
-                ("ALIGN", (0, last), (2, last), "CENTER"),
-                ("LINEABOVE", (0, last), (-1, last), 0.9, GOLD_DARK),
+                ("LINEBELOW", (0, 1), (-1, -1), 0.5, GOLD_PALE),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.9, GOLD_DARK),
             ]
         )
     )
     story.append(table)
+
+    # Totals stand apart from the items, right-aligned under the money columns.
+    subtotal = sum((Decimal(q) * p for _, q, p in lines), Decimal("0"))
+    totals = Table(
+        [
+            ["Sub Total", _fmt_amount(subtotal)],
+            ["Total Amount (THB)", _fmt_amount(total_thb)],
+        ],
+        colWidths=[38 * mm, 30 * mm],
+        hAlign="RIGHT",
+    )
+    totals.setStyle(
+        TableStyle(
+            [
+                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                ("TEXTCOLOR", (0, 0), (-1, -1), INK),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 1), (-1, 1), 10.5),
+                ("BACKGROUND", (0, 1), (-1, 1), GOLD),
+                ("ROUNDEDCORNERS", [0, 0, 6, 6]),
+            ]
+        )
+    )
+    story.append(Spacer(1, 2 * mm))
+    story.append(totals)
 
     doc.build(story, onFirstPage=_draw_page_furniture, onLaterPages=_draw_page_furniture)
     return buf.getvalue()
