@@ -3681,7 +3681,9 @@ def pull_line_returnable(
 
     Movements carry the pull but not the line, so PART lines net per product.
     Create allows one PART line per product; a legacy pull that repeats one
-    gets the whole product balance on its first line (by id)."""
+    gets the whole product balance on its first line (by id), so every return
+    goes through that line's own PROJECT_OUT movement — capped at what it drew
+    (``_reverse_part_out`` 409s past that); the other lines show 0."""
     events = (MovementType.PROJECT_OUT, MovementType.RETURNED)
 
     part_net: dict[uuid.UUID, int] = {}
@@ -3902,7 +3904,7 @@ def fulfill_project_pull(
     if pull_stock_deducted(session=session, pull_id=pull.id):
         # Stock already left at create: just record the hand-out, capped at
         # what was deducted. A short hand-out leaves the surplus deducted —
-        # admin reconciles it via Stock adjustment (Found).
+        # it can be put back with a pull Return.
         given = {
             ln.id: max(0, min(qty_by_line.get(ln.id, _pull_line_cap(ln)), _pull_line_cap(ln)))
             for ln in lines
@@ -3982,7 +3984,11 @@ def _return_pull_lines(
         ).all()
     } if serials else {}
     for line in unit_lines:
-        unit = units[line.unit_serial or ""]
+        unit = units.get(line.unit_serial or "")
+        if unit is None:
+            raise HTTPException(
+                status_code=409, detail=f"Unit {line.unit_serial} not found"
+            )
         # The PROJECT_OUT movement's key is deterministic (see _move_pull_stock).
         out = session.exec(
             select(UnitMovement).where(
@@ -3993,7 +3999,7 @@ def _return_pull_lines(
             session=session,
             unit=unit,
             back_to=(out.from_location_id if out and out.from_location_id else ygn.id),
-            idempotency_key=uuid.uuid5(key, f"unit:{line.id}"),
+            idempotency_key=uuid.uuid5(key, f"return-unit:{line.id}"),
             actor_user_id=actor_user_id,
             project_pull_id=pull.id,
         )
@@ -4014,12 +4020,21 @@ def _return_pull_lines(
             raise HTTPException(
                 status_code=409, detail="Original consumption movement not found"
             )
+        # Everything this pull already returned for the product came back
+        # through this line's movement (see pull_line_returnable), so skip it.
+        already_returned = session.exec(
+            select(func.coalesce(func.sum(PartMovement.quantity), 0)).where(
+                PartMovement.project_pull_id == pull.id,
+                PartMovement.product_id == line.product_id,
+                PartMovement.event_type == MovementType.RETURNED,
+            )
+        ).one()
         _reverse_part_out(
             session=session,
             source=out_part,
-            already_returned=max(0, out_part.quantity - returnable[line.id]),
+            already_returned=int(already_returned),
             quantity=qty_by_line[line.id],
-            idempotency_key=uuid.uuid5(key, f"part:{line.id}"),
+            idempotency_key=uuid.uuid5(key, f"return-part:{line.id}"),
             actor_user_id=actor_user_id,
             from_location_id=customer_loc.id,
             to_location_id=ygn.id,
@@ -4030,12 +4045,20 @@ def _pull_return_replay(
     *, session: Session, keys: list[uuid.UUID]
 ) -> UnitMovement | PartMovement | None:
     unit_hit = session.exec(
-        select(UnitMovement).where(col(UnitMovement.idempotency_key).in_(keys))
+        select(UnitMovement).where(
+            col(UnitMovement.idempotency_key).in_(keys),
+            UnitMovement.event_type == MovementType.RETURNED,
+        )
     ).first()
     if unit_hit is not None:
         return unit_hit
+    # RETURNED only: a key equal to the pull id derives the pull's own
+    # PROJECT_OUT keys, which must not read as an earlier return.
     return session.exec(
-        select(PartMovement).where(col(PartMovement.idempotency_key).in_(keys))
+        select(PartMovement).where(
+            col(PartMovement.idempotency_key).in_(keys),
+            PartMovement.event_type == MovementType.RETURNED,
+        )
     ).first()
 
 
@@ -4069,11 +4092,13 @@ def return_project_pull(
         raise HTTPException(status_code=404, detail="Project pull not found")
 
     # Checked AFTER the pull lock: a concurrent same-key request on this pull
-    # has committed by now, so its movements are visible here.
+    # has committed by now, so its movements are visible here. The "return-"
+    # prefix keeps these keys apart from the pull's own PROJECT_OUT keys
+    # (uuid5(pull.id, "part:<line>")), even when the caller's key IS the pull id.
     keys = [
         uuid.uuid5(payload.idempotency_key, f"{kind}:{ln.line_id}")
         for ln in payload.lines
-        for kind in ("unit", "part")
+        for kind in ("return-unit", "return-part")
     ]
     hit = _pull_return_replay(session=session, keys=keys)
     if hit is not None:
@@ -4082,7 +4107,7 @@ def return_project_pull(
     if pull.state == ProjectPullState.PENDING:
         raise HTTPException(
             status_code=409,
-            detail="This request is still waiting — use Cancel to put its stock back",
+            detail="This request is still waiting — an admin can cancel it to put the stock back",
         )
 
     lines = session.exec(
@@ -4884,7 +4909,7 @@ def _product_rows(
             _merge(acc, product_id, Decimal("0"), cogs)
 
     if channel in (None, Channel.PROJECT):
-        # part COGS by PartMovement.product_id (PROJECT_OUT)
+        # part COGS by PartMovement.product_id (PROJECT_OUT − pull RETURNED)
         for product_id, cogs in session.exec(
             select(
                 PartMovement.product_id,
@@ -4903,7 +4928,7 @@ def _product_rows(
             .group_by(col(PartMovement.product_id))
         ).all():
             _merge(acc, product_id, Decimal("0"), cogs)
-        # unit COGS by Unit.product_id (PROJECT_OUT)
+        # unit COGS by Unit.product_id (PROJECT_OUT − pull RETURNED)
         for product_id, cogs in session.exec(
             select(
                 Unit.product_id,
@@ -5081,7 +5106,7 @@ def _project_rows(
     session: Session, start: datetime, end: datetime, channel: Channel | None
 ) -> list[MarginBreakdownRow]:
     """Revenue/COGS per project (cost-only, mirroring the PROJECT channel).
-    Only PROJECT_OUT movements carry a project, so SALE + MAINTENANCE money
+    Only PROJECT_OUT and pull RETURNED movements carry a project, so SALE + MAINTENANCE money
     has no project home; when ``channel`` is unscoped, that remainder is
     rolled into a single reconciling ``(not project work)`` bucket so totals
     still match the channel view."""
@@ -5467,7 +5492,7 @@ def _project_consumed_items(
                 unit_serial=None,
                 quantity=movement.quantity,
                 occurred_at=movement.occurred_at,
-                # PROJECT_OUT always carries its pull; the guard satisfies mypy.
+                # project movements always carry their pull; the guard satisfies mypy.
                 project_pull_id=cast(uuid.UUID, movement.project_pull_id),
                 total_cost_thb=_q(
                     sum((d.total_cost_thb for d in draws), Decimal("0"))

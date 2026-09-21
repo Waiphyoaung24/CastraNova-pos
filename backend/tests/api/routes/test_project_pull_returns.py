@@ -16,7 +16,9 @@ from app.models import (
     Product,
     ProjectPull,
     ProjectPullFulfillLine,
+    ProjectPullLine,
     ProjectPullState,
+    SaleLineKind,
     UnitMovement,
     UnitState,
 )
@@ -148,7 +150,7 @@ def test_pending_pull_return_409_use_cancel(
     ids = _line_ids(db, uuid.UUID(pull["id"]))
     r = _return(client, superuser_token_headers, pull["id"], [(ids["PART"], 1)])
     assert r.status_code == 409, r.text
-    assert "Cancel" in r.json()["detail"]
+    assert "cancel" in r.json()["detail"].lower()
 
 
 def test_replay_same_key_no_double_credit(
@@ -312,3 +314,77 @@ def test_return_works_for_deactivated_product(
     ids = _line_ids(db, uuid.UUID(pull["id"]))
     r = _return(client, superuser_token_headers, pull["id"], [(ids["PART"], 1)])
     assert r.status_code == 200, r.text
+
+
+def test_key_equal_to_pull_id_still_returns(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session, pull_ctx: dict[str, Any]
+) -> None:
+    # uuid5(pull.id, "part:<line>") is the pull's own PROJECT_OUT key — the replay
+    # check must not mistake it for an earlier return.
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=2)
+    _settle(db, pull["id"], pull_ctx)
+    before = _batches(db, pull_ctx)
+    ids = _line_ids(db, uuid.UUID(pull["id"]))
+    r = _return(
+        client, superuser_token_headers, pull["id"], [(ids["PART"], 1)], uuid.UUID(pull["id"])
+    )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    rets = db.exec(
+        select(PartMovement).where(
+            PartMovement.project_pull_id == uuid.UUID(pull["id"]),
+            PartMovement.event_type == MovementType.RETURNED,
+        )
+    ).all()
+    assert len(rets) == 1 and rets[0].quantity == 1
+    assert sum(_batches(db, pull_ctx)) == sum(before) + 1
+
+
+def test_legacy_duplicate_part_lines_credit_first_line_only(
+    client: TestClient, superuser_token_headers: dict[str, str], db: Session, pull_ctx: dict[str, Any]
+) -> None:
+    # A legacy pull with TWO PART lines for one product (create no longer allows
+    # it). Its whole balance shows on the first line by id, so every return goes
+    # through that line's own PROJECT_OUT movement (3 units) and no further.
+    pull = ProjectPull(
+        project_id=pull_ctx["project_id"],
+        customer_id=pull_ctx["customer_id"],
+        created_by_user_id=pull_ctx["admin_id"],
+    )
+    db.add(pull)
+    db.flush()
+    first_id, second_id = sorted((uuid.uuid4(), uuid.uuid4()), key=str)
+    for line_id, qty in ((first_id, 3), (second_id, 2)):
+        db.add(
+            ProjectPullLine(
+                id=line_id,
+                project_pull_id=pull.id,
+                line_kind=SaleLineKind.PART,
+                product_id=pull_ctx["part_product_id"],
+                requested_qty=qty,
+            )
+        )
+    db.commit()
+    crud.fulfill_project_pull(
+        session=db, pull_id=pull.id, fulfill_lines=[], actor_user_id=pull_ctx["admin_id"]
+    )
+    first = str(first_id)
+    assert _return(client, superuser_token_headers, str(pull.id), [(first, 2)]).status_code == 200
+    assert _return(client, superuser_token_headers, str(pull.id), [(first, 1)]).status_code == 200
+    r = _return(client, superuser_token_headers, str(pull.id), [(first, 1)])
+    assert r.status_code == 409, r.text
+    # Caught by the app's own guard, not by the batch CHECK constraint.
+    assert "exceeds the quantity originally consumed" in r.json()["detail"]
+
+    db.expire_all()
+    for b in db.exec(
+        select(PartBatch).where(PartBatch.product_id == pull_ctx["part_product_id"])
+    ).all():
+        assert 0 <= b.remaining_qty <= b.received_qty, (b.remaining_qty, b.received_qty)
+    rets = db.exec(
+        select(PartMovement).where(
+            PartMovement.project_pull_id == pull.id,
+            PartMovement.event_type == MovementType.RETURNED,
+        )
+    ).all()
+    assert sum(m.quantity for m in rets) == 3
