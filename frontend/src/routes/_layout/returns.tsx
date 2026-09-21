@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Undo2 } from "lucide-react"
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 
 import { type ApiError, ProjectPullsService, SalesService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
@@ -107,6 +107,11 @@ function Returns() {
   // A 404 from either lookup means the same thing (unknown SKU/barcode).
   const lookupError = lookup.error ?? pullLookup.error
 
+  // One key per return attempt: reused on retry so a lost response can't
+  // return twice; replaced after a success or when the target changes (tab
+  // switch, new scan, or a different sale/request picked).
+  const returnKeyRef = useRef<string>(crypto.randomUUID())
+
   // Takes the draft as a variable rather than reading state, so a click that
   // both selects a line and submits cannot post a stale draft.
   const mutation = useMutation({
@@ -117,14 +122,15 @@ function Returns() {
             pullId: vars.draft.pullId,
             requestBody: buildPullReturnPayload(
               vars.draft,
-              crypto.randomUUID(),
+              returnKeyRef.current,
             ),
           })
         : SalesService.createSaleReturn({
             saleId: vars.draft.saleId,
-            requestBody: buildReturnPayload(vars.draft, crypto.randomUUID()),
+            requestBody: buildReturnPayload(vars.draft, returnKeyRef.current),
           }),
     onSuccess: () => {
+      returnKeyRef.current = crypto.randomUUID()
       queryClient.invalidateQueries({ queryKey: ["stock-on-hand"] })
       queryClient.invalidateQueries({ queryKey: ["search-sku"] })
       queryClient.invalidateQueries({ queryKey: ["search-serial"] })
@@ -181,6 +187,7 @@ function Returns() {
               setTargetKind(v as TargetKind)
               setCode("")
               setDraft(emptyReturnDraft)
+              returnKeyRef.current = crypto.randomUUID()
             }}
           >
             <TabsList>
@@ -195,8 +202,14 @@ function Returns() {
               <ScanField
                 id={barcodeId}
                 value={code}
-                onValueChange={setCode}
-                onScan={setCode}
+                onValueChange={(v) => {
+                  setCode(v)
+                  returnKeyRef.current = crypto.randomUUID()
+                }}
+                onScan={(v) => {
+                  setCode(v)
+                  returnKeyRef.current = crypto.randomUUID()
+                }}
                 placeholder="Scan or type the unit barcode…"
               />
               {unitSale && unitLine ? (
@@ -292,6 +305,7 @@ function Returns() {
                       pullId: "",
                       saleLineId: "",
                     })
+                    returnKeyRef.current = crypto.randomUUID()
                   }}
                   onScan={(sku) => {
                     setCode(sku)
@@ -301,6 +315,7 @@ function Returns() {
                       pullId: "",
                       saleLineId: "",
                     })
+                    returnKeyRef.current = crypto.randomUUID()
                   }}
                   placeholder="Scan or type the SKU…"
                 />
@@ -339,10 +354,11 @@ function Returns() {
                         pullId: hit.pullId ?? "",
                         quantity: "1",
                       })
+                      returnKeyRef.current = crypto.randomUUID()
                     }}
                   >
                     <SelectTrigger id={salePickerId}>
-                      <SelectValue placeholder="Pick the sale this is coming back from…" />
+                      <SelectValue placeholder="Pick the sale or request this is coming back from…" />
                     </SelectTrigger>
                     <SelectContent>
                       {options.map((o) => (
