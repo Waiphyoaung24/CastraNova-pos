@@ -310,7 +310,7 @@ function Sale() {
               <AlertTitle>Sale completed</AlertTitle>
               <AlertDescription className="flex flex-wrap items-center gap-3">
                 <span>
-                  Total {formatThb(saleResult.totalThb)} THB. Give the customer
+                  Total {formatThb(saleResult.totalThb)}. Give the customer
                   their invoice:
                 </span>
                 <DownloadInvoiceButton saleId={saleResult.saleId} />

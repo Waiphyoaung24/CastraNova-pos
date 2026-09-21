@@ -5,27 +5,16 @@ import { Button } from "@/components/ui/button"
 import useCustomToast from "@/hooks/useCustomToast"
 import { openAuthedPdf } from "@/lib/print-pdf"
 
-/** The API path (after /api/v1) of a sale's invoice PDF. */
-export function invoicePath(saleId: string): string {
-  return `/sales/${saleId}/receipt.pdf`
-}
-
 /** Opens a sale's invoice PDF in a new tab (staff + admin). Same authed-PDF
  * path as label printing; disabled while the PDF is in flight so a double
  * click cannot open two tabs. */
-export function DownloadInvoiceButton({
-  saleId,
-  size = "sm",
-}: {
-  saleId: string
-  size?: "sm" | "default"
-}) {
+export function DownloadInvoiceButton({ saleId }: { saleId: string }) {
   const { showErrorToast } = useCustomToast()
   const [isOpening, setIsOpening] = useState(false)
 
   async function handleOpen() {
     setIsOpening(true)
-    const result = await openAuthedPdf(invoicePath(saleId))
+    const result = await openAuthedPdf(`/sales/${saleId}/receipt.pdf`)
     setIsOpening(false)
     if (result === "no-token") {
       showErrorToast("Session expired. Please log in again.")
@@ -40,7 +29,7 @@ export function DownloadInvoiceButton({
     <Button
       type="button"
       variant="outline"
-      size={size}
+      size="sm"
       disabled={isOpening}
       onClick={handleOpen}
     >

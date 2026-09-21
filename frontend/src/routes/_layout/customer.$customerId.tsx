@@ -134,7 +134,7 @@ function CustomerDetail() {
                 <TableHead>Kind</TableHead>
                 <TableHead>Reference</TableHead>
                 <TableHead>When</TableHead>
-                <TableHead className="w-44" />
+                <TableHead className="w-44" aria-label="Invoice" />
               </TableRow>
             </TableHeader>
             <TableBody>

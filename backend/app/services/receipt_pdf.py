@@ -13,6 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
+from zoneinfo import ZoneInfo
 
 from reportlab.lib import colors  # type: ignore[import-untyped]
 from reportlab.lib.pagesizes import A4  # type: ignore[import-untyped]
@@ -38,9 +39,10 @@ GOLD = colors.HexColor("#C9A227")
 GOLD_DARK = colors.HexColor("#8A6D1F")
 INK = colors.HexColor("#111111")
 
-# Lines printed under the table (bank account, KPay, ...). Empty until the
-# owner supplies CastraNova's details; the sample form's were another company's.
-FOOTER_LINES: tuple[str, ...] = ()
+# Invoices print the shop's wall clock, like every screen does via the
+# browser; the DB stores UTC. ponytail: fixed zone, make it a setting if the
+# shop ever spans zones.
+SHOP_TZ = ZoneInfo("Asia/Bangkok")
 
 _MARGIN = 16 * mm
 _CONTENT_W = A4[0] - 2 * _MARGIN  # 178 mm
@@ -55,11 +57,13 @@ def _fmt_amount(value: Decimal) -> str:
 
 
 def _fmt_date(sold_at: str) -> str:
-    """ISO string -> ``25 Jun 2026, 14:02``; raw string on parse failure."""
+    """ISO string -> ``25 Jun 2026, 14:02`` in shop time; raw on parse failure."""
     try:
         dt = datetime.fromisoformat(sold_at)
     except ValueError:
         return sold_at
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(SHOP_TZ)
     return dt.strftime("%d %b %Y, %H:%M")
 
 
@@ -145,7 +149,6 @@ def render_sale_receipt(
     )
     styles = getSampleStyleSheet()
     cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9.5, leading=12.5, textColor=INK)
-    foot = ParagraphStyle("foot", parent=styles["Normal"], fontSize=9, leading=13, textColor=INK)
 
     gap = 8 * mm
     box_w = (_CONTENT_W - gap) / 2
@@ -225,9 +228,6 @@ def render_sale_receipt(
         )
     )
     story.append(table)
-    if FOOTER_LINES:
-        story.append(Spacer(1, 6 * mm))
-        story.extend(Paragraph(escape(line), foot) for line in FOOTER_LINES)
 
     doc.build(story, onFirstPage=_draw_page_furniture, onLaterPages=_draw_page_furniture)
     return buf.getvalue()
