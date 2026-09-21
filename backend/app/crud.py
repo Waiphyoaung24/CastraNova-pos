@@ -4620,6 +4620,17 @@ def _sale_return_totals(
     return refund, cogs
 
 
+# Project COGS nets pull returns (design 2026-09-21): a RETURNED movement with
+# a project_pull_id gives its cost back, in the month it came back. Every
+# project query inner-joins ProjectPull, which already drops sale returns
+# (their project_pull_id is NULL).
+_PROJECT_COST_EVENTS = (MovementType.PROJECT_OUT, MovementType.RETURNED)
+
+
+def _project_cost(amount: Any, event_type: Any) -> Any:
+    return case((event_type == MovementType.RETURNED, -amount), else_=amount)
+
+
 def _channel_rows(
     session: Session,
     start: datetime,
@@ -4670,22 +4681,32 @@ def _channel_rows(
     # create, so its COGS belongs to the month the stock left, whether or not
     # staff have handed it out yet. ---
     proj_part_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(PartMovement.occurred_at) >= start,
             col(PartMovement.occurred_at) < end,
         )
     ).one()
     proj_unit_cogs = session.exec(
-        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(UnitMovement.occurred_at) >= start,
             col(UnitMovement.occurred_at) < end,
         )
@@ -4867,12 +4888,15 @@ def _product_rows(
         for product_id, cogs in session.exec(
             select(
                 PartMovement.product_id,
-                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
-                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
                 col(PartMovement.occurred_at) >= start,
                 col(PartMovement.occurred_at) < end,
             )
@@ -4883,13 +4907,16 @@ def _product_rows(
         for product_id, cogs in session.exec(
             select(
                 Unit.product_id,
-                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .select_from(UnitMovement)
             .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
-                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
                 col(UnitMovement.occurred_at) >= start,
                 col(UnitMovement.occurred_at) < end,
             )
@@ -4991,12 +5018,15 @@ def _customer_rows(
         for cust_id, cogs in session.exec(
             select(
                 ProjectPull.customer_id,
-                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
-                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
                 col(PartMovement.occurred_at) >= start,
                 col(PartMovement.occurred_at) < end,
             )
@@ -5006,13 +5036,16 @@ def _customer_rows(
         for cust_id, cogs in session.exec(
             select(
                 ProjectPull.customer_id,
-                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .select_from(UnitMovement)
             .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
-                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
                 col(UnitMovement.occurred_at) >= start,
                 col(UnitMovement.occurred_at) < end,
             )
@@ -5058,12 +5091,15 @@ def _project_rows(
         for proj_id, cogs in session.exec(
             select(
                 ProjectPull.project_id,
-                func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
             .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
             .where(
-                PartMovement.event_type == MovementType.PROJECT_OUT,
+                col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
                 col(PartMovement.occurred_at) >= start,
                 col(PartMovement.occurred_at) < end,
             )
@@ -5073,13 +5109,16 @@ def _project_rows(
         for proj_id, cogs in session.exec(
             select(
                 ProjectPull.project_id,
-                func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+                func.coalesce(
+                    func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                    Decimal("0"),
+                ),
             )
             .select_from(UnitMovement)
             .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
             .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
             .where(
-                UnitMovement.event_type == MovementType.PROJECT_OUT,
+                col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
                 col(UnitMovement.occurred_at) >= start,
                 col(UnitMovement.occurred_at) < end,
             )
@@ -5215,21 +5254,31 @@ def get_customer_dashboard(
     ).one()
 
     proj_part_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.customer_id) == customer_id,
         )
     ).one()
     proj_unit_cogs = session.exec(
-        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.customer_id) == customer_id,
         )
     ).one()
@@ -5285,12 +5334,15 @@ def _project_consumed_costs(
     part_rows = session.exec(
         select(
             col(ProjectPull.project_id),
-            func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")),
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            ),
         )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id).in_(project_ids),
         )
         .group_by(col(ProjectPull.project_id))
@@ -5301,13 +5353,16 @@ def _project_consumed_costs(
     unit_rows = session.exec(
         select(
             col(ProjectPull.project_id),
-            func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")),
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            ),
         )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id).in_(project_ids),
         )
         .group_by(col(ProjectPull.project_id))
@@ -5320,21 +5375,31 @@ def _project_consumed_costs(
 
 def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decimal:
     part_cogs = session.exec(
-        select(func.coalesce(func.sum(CostLine.total_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(CostLine.total_cost_thb), col(PartMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .join(PartMovement, col(CostLine.part_movement_id) == col(PartMovement.id))
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).one()
     unit_cogs = session.exec(
-        select(func.coalesce(func.sum(Unit.purchase_cost_thb), Decimal("0")))
+        select(
+            func.coalesce(
+                func.sum(_project_cost(col(Unit.purchase_cost_thb), col(UnitMovement.event_type))),
+                Decimal("0"),
+            )
+        )
         .select_from(UnitMovement)
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).one()
@@ -5344,7 +5409,7 @@ def _project_consumed_cost(*, session: Session, project_id: uuid.UUID) -> Decima
 def _project_consumed_items(
     *, session: Session, project_id: uuid.UUID
 ) -> list[ProjectConsumptionRowPublic]:
-    """Every PROJECT_OUT movement against this project, newest first, with the
+    """Every PROJECT_OUT and pull RETURNED movement against this project, newest first, with the
     FIFO batch draws behind each PART row (FR-020 batch attribution).
 
     Two legs because consumption spans both ledgers: QUANTITY parts draw from
@@ -5364,7 +5429,7 @@ def _project_consumed_items(
         select(PartMovement)
         .join(ProjectPull, col(PartMovement.project_pull_id) == col(ProjectPull.id))
         .where(
-            PartMovement.event_type == MovementType.PROJECT_OUT,
+            col(PartMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).all()
@@ -5395,6 +5460,7 @@ def _project_consumed_items(
         rows.append(
             ProjectConsumptionRowPublic(
                 line_kind=SaleLineKind.PART,
+                event_type=movement.event_type,
                 product_id=movement.product_id,
                 product_sku=(product.sku if product else "—"),
                 model_name=(product.model_name if product else "—"),
@@ -5416,7 +5482,7 @@ def _project_consumed_items(
         .join(ProjectPull, col(UnitMovement.project_pull_id) == col(ProjectPull.id))
         .join(Unit, col(UnitMovement.unit_id) == col(Unit.id))
         .where(
-            UnitMovement.event_type == MovementType.PROJECT_OUT,
+            col(UnitMovement.event_type).in_(_PROJECT_COST_EVENTS),
             col(ProjectPull.project_id) == project_id,
         )
     ).all()
@@ -5427,6 +5493,7 @@ def _project_consumed_items(
         rows.append(
             ProjectConsumptionRowPublic(
                 line_kind=SaleLineKind.UNIT,
+                event_type=unit_movement.event_type,
                 product_id=unit.product_id,
                 product_sku=(unit_product.sku if unit_product else "—"),
                 model_name=(unit_product.model_name if unit_product else "—"),

@@ -2194,7 +2194,8 @@ class ProjectDashboardStaffPublic(SQLModel):
 
 
 class ProjectConsumptionRowPublic(SQLModel):
-    """One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+    """One PROJECT_OUT or pull RETURNED movement against a project (FR-020
+    consumed-items list).
     ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
     is physically absent from the staff payload.
 
@@ -2202,6 +2203,9 @@ class ProjectConsumptionRowPublic(SQLModel):
     same concept here as in the SKU consumption history (FR-015)."""
 
     line_kind: SaleLineKind  # UNIT | PART
+    # PROJECT_OUT (stock went to the project) or RETURNED (it came back —
+    # quantity and cost are the amounts given back, both positive).
+    event_type: MovementType
     product_id: uuid.UUID
     product_sku: str
     model_name: str
