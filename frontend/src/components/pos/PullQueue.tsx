@@ -62,8 +62,13 @@ function PullActions({
   PullQueueProps,
   "isAdmin" | "isCancelling" | "onSelect" | "onCancel"
 > & { pull: ProjectPullPublic }) {
+  // A waiting request whose stock already left at create has nothing to
+  // give back (no reversal movement), so it cannot be cancelled — the backend
+  // 409s it too. Requests created before create deducted stock still can.
   const cancellable =
-    isAdmin && (pull.state === "PENDING" || pull.state === "SHORT")
+    isAdmin &&
+    ((pull.state === "PENDING" && !pull.stock_deducted) ||
+      pull.state === "SHORT")
   return (
     <div className="flex justify-end gap-2">
       <Button

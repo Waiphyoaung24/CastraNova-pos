@@ -93,6 +93,14 @@ export function PullFulfillPanel({
       </div>
 
       {pull.state === "PENDING" ? (
+        <p className="text-muted-foreground text-sm">
+          {pull.stock_deducted
+            ? "Stock was already taken when this request was created."
+            : "Stock will be taken from the system when you finish."}
+        </p>
+      ) : null}
+
+      {pull.state === "PENDING" ? (
         <ScanField
           ref={scanRef}
           label="Scan item"

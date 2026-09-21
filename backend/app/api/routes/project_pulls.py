@@ -50,17 +50,27 @@ def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
         fulfilled_by_user_id=pull.fulfilled_by_user_id,
         cancelled_at=pull.cancelled_at,
         cancelled_by_user_id=pull.cancelled_by_user_id,
+        stock_deducted=crud.pull_stock_deducted(session=session, pull_id=pull.id),
         lines=public_lines,
     )
 
 
 @router.post("", response_model=ProjectPullPublic, dependencies=[Depends(get_admin)])
 def create_project_pull(
-    *, session: SessionDep, current_user: CurrentUser, payload: ProjectPullCreate
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    payload: ProjectPullCreate,
 ) -> ProjectPullPublic:
     pull = crud.create_project_pull(
         session=session, pull_in=payload, created_by_user_id=current_user.id
     )
+    # FR-016: create deducts stock, so this is where a SKU can cross its
+    # low-stock threshold.
+    crossed = crud.pop_low_stock_crossed(session)
+    if crossed:
+        background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, pull=pull)
 
 

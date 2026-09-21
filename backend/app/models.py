@@ -1674,17 +1674,18 @@ class ServiceTicketRecordRequest(SQLModel):
 
 
 class ProjectPull(SQLModel, table=True):
-    # Admin-created online, fulfilled at the warehouse (Flow D). No
-    # idempotency_key: replay safety lives in the deterministic movement keys
-    # written at fulfill (§7, spec line 461). Index (state, created_at) drives the
-    # staff queue.
+    # Admin-created online (stock deducted then), handed out at the warehouse
+    # (Flow D). No idempotency_key on the pull itself: movement keys are
+    # uuid5(pull.id, line) so a pull can never deduct twice, but a retried
+    # create makes a second pull that deducts again (§7). Index
+    # (state, created_at) drives the staff queue.
     __table_args__ = (
         Index("ix_project_pull_state_created", "state", "created_at"),
         Index("ix_projectpull_customer_id", "customer_id"),
         Index("ix_projectpull_project_id", "project_id"),
-        # margin_report range-filters fulfilled_at; ix_project_pull_state_created
-        # does not help it (those queries touch neither state nor created_at).
-        # Partial: unfulfilled pulls are NULL and never satisfy `>= start`.
+        # Historical: margin_report used to range-filter fulfilled_at; it now
+        # windows on the movement's occurred_at (stock leaves at create), so
+        # nothing reads this index any more. Kept to avoid a drop migration.
         Index(
             "ix_projectpull_fulfilled_at",
             "fulfilled_at",
@@ -1798,6 +1799,10 @@ class ProjectPullPublic(SQLModel):
     fulfilled_by_user_id: uuid.UUID | None
     cancelled_at: datetime | None
     cancelled_by_user_id: uuid.UUID | None
+    # True once PROJECT_OUT movements exist for this pull. Create deducts stock,
+    # so new pulls are True while still PENDING; pulls created before that
+    # change stay False until fulfilled. Drives the Cancel affordance.
+    stock_deducted: bool
     lines: list[ProjectPullLinePublic]
 
 

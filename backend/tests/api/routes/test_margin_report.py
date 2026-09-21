@@ -20,6 +20,7 @@ from app.models import (
 )
 from tests.api.routes.test_reports import (  # noqa: F401  (seed is a pytest fixture)
     TARGET,
+    _clock_at,
     _pin_pull,
     _pin_sale,
     _pin_ticket,
@@ -119,36 +120,37 @@ def _seed_full_month(db: Session, seed: dict[str, Any], when: datetime = TARGET)
             customer_id=customer.id,
         ),
     )
-    pull = crud.create_project_pull(
-        session=db,
-        pull_in=ProjectPullCreate(
-            project_id=project.id,
-            lines=[
-                ProjectPullLineCreate(
-                    line_kind=SaleLineKind.UNIT,
-                    product_id=seed["serialized"].id,
-                    unit_serial=proj_barcode,
-                ),
-                ProjectPullLineCreate(
-                    line_kind=SaleLineKind.PART,
-                    product_id=proj_part.id,
-                    requested_qty=3,
-                ),
+    with _clock_at(when):
+        pull = crud.create_project_pull(
+            session=db,
+            pull_in=ProjectPullCreate(
+                project_id=project.id,
+                lines=[
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.UNIT,
+                        product_id=seed["serialized"].id,
+                        unit_serial=proj_barcode,
+                    ),
+                    ProjectPullLineCreate(
+                        line_kind=SaleLineKind.PART,
+                        product_id=proj_part.id,
+                        requested_qty=3,
+                    ),
+                ],
+            ),
+            created_by_user_id=admin.id,
+        )
+        line_ids = {ln.line_kind: ln.id for ln in _pull_lines(db, pull.id)}
+        crud.fulfill_project_pull(
+            session=db,
+            pull_id=pull.id,
+            fulfill_lines=[
+                ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.UNIT], fulfilled_qty=1),
+                ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.PART], fulfilled_qty=3),
             ],
-        ),
-        created_by_user_id=admin.id,
-    )
-    line_ids = {ln.line_kind: ln.id for ln in _pull_lines(db, pull.id)}
-    crud.fulfill_project_pull(
-        session=db,
-        pull_id=pull.id,
-        fulfill_lines=[
-            ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.UNIT], fulfilled_qty=1),
-            ProjectPullFulfillLine(line_id=line_ids[SaleLineKind.PART], fulfilled_qty=3),
-        ],
-        actor_user_id=admin.id,
-    )
-    _pin_pull(db, pull.id, when)
+            actor_user_id=admin.id,
+        )
+        _pin_pull(db, pull.id, when)
 
 
 def test_product_grouping_reconciles_to_channel(db: Session, seed: dict[str, Any]) -> None:  # noqa: F811
