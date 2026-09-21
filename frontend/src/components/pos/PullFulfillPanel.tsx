@@ -41,7 +41,7 @@ interface PullFulfillPanelProps {
   canReturn: boolean
 }
 
-function lineLabel(line: ProjectPullLinePublic): string {
+export function lineLabel(line: ProjectPullLinePublic): string {
   if (line.line_kind === "UNIT") return line.unit_serial ?? "(no serial)"
   return `${line.model_name} (${line.product_sku})`
 }

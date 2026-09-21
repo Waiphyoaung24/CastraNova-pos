@@ -1,10 +1,8 @@
 import { Minus, Plus } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import type {
-  ProjectPullLinePublic,
-  ProjectPullPublic,
-} from "@/client/types.gen"
+import type { ProjectPullPublic } from "@/client/types.gen"
+import { lineLabel } from "@/components/pos/PullFulfillPanel"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -26,11 +24,6 @@ interface PullReturnDialogProps {
   onOpenChange: (open: boolean) => void
   onSubmit: (draft: ReturnDraft) => void
   isPending: boolean
-}
-
-function lineLabel(line: ProjectPullLinePublic): string {
-  if (line.line_kind === "UNIT") return line.unit_serial ?? "(no serial)"
-  return `${line.model_name} (${line.product_sku})`
 }
 
 export function PullReturnDialog({
