@@ -37,9 +37,11 @@ interface PullFulfillPanelProps {
   onSubmit: () => void
   onBack: () => void
   isPending: boolean
+  onReturn: () => void
+  canReturn: boolean
 }
 
-function lineLabel(line: ProjectPullLinePublic): string {
+export function lineLabel(line: ProjectPullLinePublic): string {
   if (line.line_kind === "UNIT") return line.unit_serial ?? "(no serial)"
   return `${line.model_name} (${line.product_sku})`
 }
@@ -59,6 +61,8 @@ export function PullFulfillPanel({
   onSubmit,
   onBack,
   isPending,
+  onReturn,
+  canReturn,
 }: PullFulfillPanelProps) {
   const canFulfill = pull.state === "PENDING" && !isPending
   const projected = projectedPullState(pull.lines, draft)
@@ -130,6 +134,12 @@ export function PullFulfillPanel({
       ) : (
         <Badge variant="outline">This request is {stateWord}</Badge>
       )}
+
+      {canReturn ? (
+        <Button type="button" variant="outline" onClick={onReturn}>
+          Return items to stock
+        </Button>
+      ) : null}
 
       <Table>
         <TableHeader>

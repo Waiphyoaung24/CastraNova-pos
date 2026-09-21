@@ -11,8 +11,10 @@ from app.models import (
     ProjectPullFulfill,
     ProjectPullLinePublic,
     ProjectPullPublic,
+    ProjectPullReturnCreate,
     ProjectPullsPublic,
     ProjectPullState,
+    ReturnablePullsPublic,
 )
 from app.services import notify
 
@@ -23,6 +25,9 @@ def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
     lines = crud.list_project_pull_lines(session=session, pull_id=pull.id)
     project = crud.get_project(session=session, project_id=pull.project_id)
     customer = crud.get_customer(session=session, customer_id=pull.customer_id)
+    # ponytail: 2 grouped queries per pull on top of the existing per-line
+    # product lookups; batch across pulls if the 100-row list gets slow.
+    returnable = crud.pull_line_returnable(session=session, pull_id=pull.id, lines=lines)
     public_lines = []
     for line in lines:
         product = crud.get_product(session=session, product_id=line.product_id)
@@ -32,6 +37,7 @@ def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
                 update={
                     "product_sku": product.sku if product else "",
                     "model_name": product.model_name if product else "",
+                    "returnable_qty": returnable[line.id],
                 },
             )
         )
@@ -95,6 +101,26 @@ def read_project_pulls(
     )
 
 
+# Declared before /{pull_id}: a literal segment must win over the parameterized
+# one, or "returnable" is parsed as a pull id.
+@router.get(
+    "/returnable",
+    response_model=ReturnablePullsPublic,
+    dependencies=[Depends(get_current_user)],
+)
+def read_returnable_pulls(
+    *,
+    session: SessionDep,
+    castranova_barcode: str | None = None,
+    sku: str | None = None,
+) -> ReturnablePullsPublic:
+    """Settled pulls with stock still out for one unit or one SKU. Staff +
+    admin — the payload carries no cost."""
+    return crud.list_returnable_pulls(
+        session=session, castranova_barcode=castranova_barcode, sku=sku
+    )
+
+
 @router.get(
     "/{pull_id}",
     response_model=ProjectPullPublic,
@@ -149,6 +175,25 @@ def fulfill_project_pull(
         background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, pull=pull)
 
+
+# Open to staff + admin like fulfill (shared-team access, decision D3). No
+# cost fields on this surface, so no staff redaction variant.
+@router.post(
+    "/{pull_id}/returns",
+    response_model=ProjectPullPublic,
+    dependencies=[Depends(get_current_user)],
+)
+def return_project_pull(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    pull_id: uuid.UUID,
+    payload: ProjectPullReturnCreate,
+) -> ProjectPullPublic:
+    pull = crud.return_project_pull(
+        session=session, pull_id=pull_id, payload=payload, actor_user_id=current_user.id
+    )
+    return _to_public(session=session, pull=pull)
 
 @router.post(
     "/{pull_id}/cancel",

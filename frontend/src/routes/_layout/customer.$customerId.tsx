@@ -7,6 +7,7 @@ import {
   type ProjectSummaryStaffPublic,
 } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { DownloadInvoiceButton } from "@/components/DownloadInvoiceButton"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -133,6 +134,7 @@ function CustomerDetail() {
                 <TableHead>Kind</TableHead>
                 <TableHead>Reference</TableHead>
                 <TableHead>When</TableHead>
+                <TableHead className="w-44" aria-label="Invoice" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -144,6 +146,11 @@ function CustomerDetail() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {new Date(t.occurred_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {t.kind === "SALE" ? (
+                      <DownloadInvoiceButton saleId={t.reference_id} />
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}

@@ -383,3 +383,48 @@ def test_project_routes_still_admin_only(
         ).status_code
         == 403
     )
+
+
+def test_pull_return_nets_consumed_cost_and_lists_returned_row(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    db: Session,
+) -> None:
+    ctx = _seed_project_with_unit_and_multibatch_part(
+        client, superuser_token_headers, staff_token_headers, db
+    )
+    url = f"{PREFIX}/projects/{ctx['project_id']}/dashboard"
+    pull = client.get(
+        f"{PREFIX}/project-pulls/{ctx['pull_id']}", headers=superuser_token_headers
+    ).json()
+    part_line = next(ln for ln in pull["lines"] if ln["line_kind"] == "PART")
+    unit_line = next(ln for ln in pull["lines"] if ln["line_kind"] == "UNIT")
+
+    # Return 2 parts (newest batch first: 2@12 = 24.00) and the unit (100.00).
+    r = client.post(
+        f"{PREFIX}/project-pulls/{ctx['pull_id']}/returns",
+        headers=staff_token_headers,
+        json={
+            "idempotency_key": str(uuid.uuid4()),
+            "lines": [
+                {"line_id": part_line["id"], "quantity": 2},
+                {"line_id": unit_line["id"], "quantity": 1},
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = client.get(url, headers=superuser_token_headers).json()
+
+    assert body["consumed_cost_thb"] == "30.00"  # 154 - 24 - 100
+    returned = [row for row in body["consumed_items"] if row["event_type"] == "RETURNED"]
+    assert sorted(Decimal(row["total_cost_thb"]) for row in returned) == [
+        Decimal("24.00"),
+        Decimal("100.00"),
+    ]
+    # The list still reconciles with the aggregate, signed.
+    signed = sum(
+        (-1 if row["event_type"] == "RETURNED" else 1) * Decimal(row["total_cost_thb"])
+        for row in body["consumed_items"]
+    )
+    assert signed == Decimal(body["consumed_cost_thb"])

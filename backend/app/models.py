@@ -458,6 +458,7 @@ class ProjectOption(SQLModel):
     id: uuid.UUID
     code: str
     name: str
+    customer_name: str  # a pull's customer is copied from its project
 
 
 class CustomersPublic(SQLModel):
@@ -1788,6 +1789,18 @@ class ProjectPullFulfill(SQLModel):
     lines: list[ProjectPullFulfillLine] = Field(default_factory=list, max_length=200)
 
 
+class ProjectPullReturnLine(SQLModel):
+    line_id: uuid.UUID
+    quantity: int = Field(gt=0, le=1_000_000)
+
+
+class ProjectPullReturnCreate(SQLModel):
+    # Movement keys are uuid5(idempotency_key, "<kind>:<line_id>"), so a
+    # replay finds its own movements — no header row needed.
+    idempotency_key: uuid.UUID
+    lines: list[ProjectPullReturnLine] = Field(min_length=1, max_length=200)
+
+
 class ProjectPullLinePublic(SQLModel):
     id: uuid.UUID
     line_kind: SaleLineKind
@@ -1798,6 +1811,8 @@ class ProjectPullLinePublic(SQLModel):
     requested_qty: int | None
     fulfilled_qty: int
     line_state: LineState
+    # Still out and can come back: PROJECT_OUT minus RETURNED for this line.
+    returnable_qty: int = 0
 
 
 class ProjectPullPublic(SQLModel):
@@ -1832,6 +1847,29 @@ class PricingOverridesPublic(SQLModel):
 class ProjectPullsPublic(SQLModel):
     data: list[ProjectPullPublic]
     count: int
+
+
+class ReturnablePullLinePublic(SQLModel):
+    line_id: uuid.UUID
+    line_kind: SaleLineKind
+    product_id: uuid.UUID
+    label: str  # "SKU — Model name"
+    quantity_out: int  # the line's cap: 1 for UNIT, requested_qty for PART
+    quantity_returnable: int
+
+
+class ReturnablePullPublic(SQLModel):
+    pull_id: uuid.UUID
+    project_code: str
+    project_name: str
+    customer_name: str
+    created_at: datetime
+    lines: list[ReturnablePullLinePublic]
+
+
+class ReturnablePullsPublic(SQLModel):
+    # Cost-free on purpose: the Returns page is a staff surface.
+    pulls: list[ReturnablePullPublic]
 
 
 # --- Notifications (FR-018; M007/M019) ----------------------------------------
@@ -2180,7 +2218,8 @@ class ProjectDashboardStaffPublic(SQLModel):
 
 
 class ProjectConsumptionRowPublic(SQLModel):
-    """One PROJECT_OUT movement against a project (FR-020 consumed-items list).
+    """One PROJECT_OUT or pull RETURNED movement against a project (FR-020
+    consumed-items list).
     ADMIN ONLY — it carries cost, so it lives on the admin dashboard schema and
     is physically absent from the staff payload.
 
@@ -2188,6 +2227,9 @@ class ProjectConsumptionRowPublic(SQLModel):
     same concept here as in the SKU consumption history (FR-015)."""
 
     line_kind: SaleLineKind  # UNIT | PART
+    # PROJECT_OUT (stock went to the project) or RETURNED (it came back —
+    # quantity and cost are the amounts given back, both positive).
+    event_type: MovementType
     product_id: uuid.UUID
     product_sku: str
     model_name: str
