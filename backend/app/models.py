@@ -1788,6 +1788,18 @@ class ProjectPullFulfill(SQLModel):
     lines: list[ProjectPullFulfillLine] = Field(default_factory=list, max_length=200)
 
 
+class ProjectPullReturnLine(SQLModel):
+    line_id: uuid.UUID
+    quantity: int = Field(gt=0, le=1_000_000)
+
+
+class ProjectPullReturnCreate(SQLModel):
+    # Movement keys are uuid5(idempotency_key, "<kind>:<line_id>"), so a
+    # replay finds its own movements — no header row needed.
+    idempotency_key: uuid.UUID
+    lines: list[ProjectPullReturnLine] = Field(min_length=1, max_length=200)
+
+
 class ProjectPullLinePublic(SQLModel):
     id: uuid.UUID
     line_kind: SaleLineKind

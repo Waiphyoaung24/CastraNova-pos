@@ -19,9 +19,11 @@ _TABLE: dict[tuple[UnitState, MovementType], UnitState] = {
     (UnitState.IN_STOCK, MovementType.MAINTENANCE_OUT): UnitState.MAINTENANCE_OUT,
     (UnitState.IN_STOCK, MovementType.PROJECT_OUT): UnitState.PROJECT_OUT,
     (UnitState.IN_STOCK, MovementType.ADJUSTED_OUT): UnitState.ADJUSTED_OUT,
-    # Sale return only (m035). Deliberately the single edge back out of a
-    # terminal-looking state: nothing else may resurrect a SOLD unit.
+    # Returns (m035 sale, 2026-09-21 project pull): the only edges back out of
+    # a terminal-looking state. Nothing else may resurrect a unit — never add
+    # a RETURNED edge from ADJUSTED_OUT or MAINTENANCE_OUT.
     (UnitState.SOLD, MovementType.RETURNED): UnitState.IN_STOCK,
+    (UnitState.PROJECT_OUT, MovementType.RETURNED): UnitState.IN_STOCK,
 }
 
 

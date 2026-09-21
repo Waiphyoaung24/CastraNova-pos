@@ -70,6 +70,7 @@ from app.models import (
     ProjectPullCreate,
     ProjectPullFulfillLine,
     ProjectPullLine,
+    ProjectPullReturnCreate,
     ProjectPullState,
     ProjectStatus,
     ProjectUpdate,
@@ -3934,6 +3935,184 @@ def fulfill_project_pull(
     # FR-018: notifying admins on a SHORT pull is a post-commit side effect
     # triggered in the fulfill route (kept out of this consumption transaction).
     session.commit()
+    session.refresh(pull)
+    return pull
+
+
+def _return_pull_lines(
+    *,
+    session: Session,
+    pull: ProjectPull,
+    lines: Sequence[ProjectPullLine],
+    qty_by_line: dict[uuid.UUID, int],
+    key: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> None:
+    """Put pulled stock back by appending RETURNED movements that reverse this
+    pull's own PROJECT_OUT ones: units walk back to where they left from,
+    parts re-credit the exact batches, newest first. The caller holds the pull
+    FOR UPDATE (the serialization point) and commits."""
+    returnable = pull_line_returnable(session=session, pull_id=pull.id, lines=lines)
+    for line_id, qty in qty_by_line.items():
+        if qty > returnable[line_id]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Over-return: {returnable[line_id]} returnable, requested {qty}",
+            )
+    ygn = session.exec(select(Location).where(Location.code == "YGN_WH")).first()
+    customer_loc = session.exec(
+        select(Location).where(Location.code == "CUSTOMER")
+    ).first()
+    if not ygn or not customer_loc:
+        raise HTTPException(status_code=500, detail="Locations not seeded")
+
+    by_id = {ln.id: ln for ln in lines}
+    wanted = [by_id[lid] for lid, qty in qty_by_line.items() if qty > 0]
+
+    # All units in one id-ordered lock, same order as _move_pull_stock.
+    unit_lines = [ln for ln in wanted if ln.line_kind == SaleLineKind.UNIT]
+    serials = [ln.unit_serial for ln in unit_lines if ln.unit_serial]
+    units = {
+        u.castranova_barcode: u
+        for u in session.exec(
+            select(Unit)
+            .where(col(Unit.castranova_barcode).in_(serials))
+            .order_by(col(Unit.id))
+            .with_for_update()
+        ).all()
+    } if serials else {}
+    for line in unit_lines:
+        unit = units[line.unit_serial or ""]
+        # The PROJECT_OUT movement's key is deterministic (see _move_pull_stock).
+        out = session.exec(
+            select(UnitMovement).where(
+                UnitMovement.idempotency_key == uuid.uuid5(pull.id, f"unit:{line.id}")
+            )
+        ).first()
+        _reverse_unit_out(
+            session=session,
+            unit=unit,
+            back_to=(out.from_location_id if out and out.from_location_id else ygn.id),
+            idempotency_key=uuid.uuid5(key, f"unit:{line.id}"),
+            actor_user_id=actor_user_id,
+            project_pull_id=pull.id,
+        )
+
+    # PART lines in product order, same as _move_pull_stock, so batch locks
+    # are taken in one global order.
+    part_lines = sorted(
+        (ln for ln in wanted if ln.line_kind == SaleLineKind.PART),
+        key=lambda ln: str(ln.product_id),
+    )
+    for line in part_lines:
+        out_part = session.exec(
+            select(PartMovement).where(
+                PartMovement.idempotency_key == uuid.uuid5(pull.id, f"part:{line.id}")
+            )
+        ).first()
+        if out_part is None:
+            raise HTTPException(
+                status_code=409, detail="Original consumption movement not found"
+            )
+        _reverse_part_out(
+            session=session,
+            source=out_part,
+            already_returned=max(0, out_part.quantity - returnable[line.id]),
+            quantity=qty_by_line[line.id],
+            idempotency_key=uuid.uuid5(key, f"part:{line.id}"),
+            actor_user_id=actor_user_id,
+            from_location_id=customer_loc.id,
+            to_location_id=ygn.id,
+        )
+
+
+def _pull_return_replay(
+    *, session: Session, keys: list[uuid.UUID]
+) -> UnitMovement | PartMovement | None:
+    unit_hit = session.exec(
+        select(UnitMovement).where(col(UnitMovement.idempotency_key).in_(keys))
+    ).first()
+    if unit_hit is not None:
+        return unit_hit
+    return session.exec(
+        select(PartMovement).where(col(PartMovement.idempotency_key).in_(keys))
+    ).first()
+
+
+def _replayed_pull(
+    *, hit: UnitMovement | PartMovement, pull: ProjectPull, actor_user_id: uuid.UUID
+) -> ProjectPull:
+    _assert_replay_actor(stored_user_id=hit.actor_user_id, caller_user_id=actor_user_id)
+    if hit.project_pull_id != pull.id:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency key already used for a different request",
+        )
+    return pull
+
+
+def return_project_pull(
+    *,
+    session: Session,
+    pull_id: uuid.UUID,
+    payload: ProjectPullReturnCreate,
+    actor_user_id: uuid.UUID,
+) -> ProjectPull:
+    """Staff or admin puts items from a pull back into stock (design
+    2026-09-21). FULFILLED / SHORT / CANCELLED pulls only — a waiting pull is
+    undone with cancel. The pull's state and hand-out record are unchanged;
+    only stock and Project COGS move. Idempotent on idempotency_key."""
+    pull = session.exec(
+        select(ProjectPull).where(ProjectPull.id == pull_id).with_for_update()
+    ).first()
+    if not pull:
+        raise HTTPException(status_code=404, detail="Project pull not found")
+
+    # Checked AFTER the pull lock: a concurrent same-key request on this pull
+    # has committed by now, so its movements are visible here.
+    keys = [
+        uuid.uuid5(payload.idempotency_key, f"{kind}:{ln.line_id}")
+        for ln in payload.lines
+        for kind in ("unit", "part")
+    ]
+    hit = _pull_return_replay(session=session, keys=keys)
+    if hit is not None:
+        return _replayed_pull(hit=hit, pull=pull, actor_user_id=actor_user_id)
+
+    if pull.state == ProjectPullState.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail="This request is still waiting — use Cancel to put its stock back",
+        )
+
+    lines = session.exec(
+        select(ProjectPullLine)
+        .where(ProjectPullLine.project_pull_id == pull.id)
+        .order_by(col(ProjectPullLine.id))
+    ).all()
+    payload_ids = [ln.line_id for ln in payload.lines]
+    if len(payload_ids) != len(set(payload_ids)):
+        raise HTTPException(status_code=422, detail="Duplicate line_id in payload")
+    if set(payload_ids) - {ln.id for ln in lines}:
+        raise HTTPException(status_code=422, detail="Unknown line_id for this pull")
+
+    try:
+        _return_pull_lines(
+            session=session,
+            pull=pull,
+            lines=lines,
+            qty_by_line={ln.line_id: ln.quantity for ln in payload.lines},
+            key=payload.idempotency_key,
+            actor_user_id=actor_user_id,
+        )
+        session.commit()
+    except IntegrityError:
+        # A same-key request on ANOTHER pull won the race (different lock).
+        session.rollback()
+        winner = _pull_return_replay(session=session, keys=keys)
+        if winner is None:
+            raise
+        return _replayed_pull(hit=winner, pull=pull, actor_user_id=actor_user_id)
     session.refresh(pull)
     return pull
 

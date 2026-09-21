@@ -11,6 +11,7 @@ from app.models import (
     ProjectPullFulfill,
     ProjectPullLinePublic,
     ProjectPullPublic,
+    ProjectPullReturnCreate,
     ProjectPullsPublic,
     ProjectPullState,
 )
@@ -153,6 +154,25 @@ def fulfill_project_pull(
         background_tasks.add_task(notify.notify_low_stock_bg, product_ids=list(crossed))
     return _to_public(session=session, pull=pull)
 
+
+# Open to staff + admin like fulfill (shared-team access, decision D3). No
+# cost fields on this surface, so no staff redaction variant.
+@router.post(
+    "/{pull_id}/returns",
+    response_model=ProjectPullPublic,
+    dependencies=[Depends(get_current_user)],
+)
+def return_project_pull(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    pull_id: uuid.UUID,
+    payload: ProjectPullReturnCreate,
+) -> ProjectPullPublic:
+    pull = crud.return_project_pull(
+        session=session, pull_id=pull_id, payload=payload, actor_user_id=current_user.id
+    )
+    return _to_public(session=session, pull=pull)
 
 @router.post(
     "/{pull_id}/cancel",
