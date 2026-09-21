@@ -1526,8 +1526,6 @@ class SaleReturnLinePublic(SQLModel):
 
 
 class SaleReturnPublic(SQLModel):
-    # Admin-only surface (returns are an admin desk action), so cost fields are
-    # exposed here deliberately — unlike SaleStaffPublic there is no staff variant.
     id: uuid.UUID
     sale_id: uuid.UUID
     reason: str
@@ -1536,6 +1534,26 @@ class SaleReturnPublic(SQLModel):
     total_cogs_restored_thb: Decimal
     created_by_user_id: uuid.UUID
     lines: list[SaleReturnLinePublic]
+
+
+class SaleReturnLineStaffPublic(SQLModel):
+    id: uuid.UUID
+    sale_line_id: uuid.UUID
+    quantity: int
+    unit_price_thb: Decimal
+    # no cogs_restored_thb — redacted for staff (see SaleLineStaffPublic).
+
+
+class SaleReturnStaffPublic(SQLModel):
+    # Returns became a shared sale-desk action (2026-09-21); staff get this
+    # variant. Any NEW cost/margin field on SaleReturn MUST be omitted here too.
+    id: uuid.UUID
+    sale_id: uuid.UUID
+    reason: str
+    returned_at: datetime
+    total_refund_thb: Decimal
+    created_by_user_id: uuid.UUID
+    lines: list[SaleReturnLineStaffPublic]
 
 
 class ReturnableLinePublic(SQLModel):

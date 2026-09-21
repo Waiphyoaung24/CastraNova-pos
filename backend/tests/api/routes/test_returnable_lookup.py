@@ -102,12 +102,15 @@ def test_lookup_requires_exactly_one_selector(
     )
 
 
-def test_staff_cannot_use_the_lookup(
+def test_staff_can_use_the_lookup(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
+    # Returns are a shared sale-desk action (2026-09-21); the lookup exposes only
+    # sale prices, which staff already see when selling.
     r = client.get(
         f"{PREFIX}/sales/returnable",
         headers=normal_user_token_headers,
         params={"sku": f"missing-{uuid.uuid4().hex[:8]}"},
     )
-    assert r.status_code == 403
+    # Past the auth gate: an unknown SKU is the usual 404, not a 403.
+    assert r.status_code == 404

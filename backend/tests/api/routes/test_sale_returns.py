@@ -432,12 +432,14 @@ def test_admin_can_post_a_return(
     assert len(body["lines"]) == 1
 
 
-def test_staff_cannot_post_a_return(
+def test_staff_can_post_a_return_without_cost_fields(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
+    # Returns are a shared sale-desk action (2026-09-21). Staff get the same
+    # restock, but the response redacts COGS like SaleStaffPublic does.
     _seed(db)
     product_id, sku = _part_product(db)
-    _receive(db, product_id=product_id, qty=1, cost="10.00")
+    batch = _receive(db, product_id=product_id, qty=1, cost="10.00")
     sale = _sell_parts(db, sku=sku, qty=1, customer_id=_customer(db))
 
     r = client.post(
@@ -445,11 +447,18 @@ def test_staff_cannot_post_a_return(
         headers=normal_user_token_headers,
         json={
             "idempotency_key": str(uuid.uuid4()),
-            "reason": "nope",
+            "reason": "customer changed mind",
             "lines": [{"sale_line_id": str(_line_of(db, sale).id), "quantity": 1}],
         },
     )
-    assert r.status_code == 403
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sale_id"] == str(sale.id)
+    assert Decimal(body["total_refund_thb"]) == Decimal("100.00")
+    assert "total_cogs_restored_thb" not in body
+    assert "cogs_restored_thb" not in body["lines"][0]
+    db.refresh(batch)
+    assert batch.remaining_qty == 1  # restocked
 
 
 def test_missing_reason_is_422(

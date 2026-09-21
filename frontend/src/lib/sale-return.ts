@@ -1,7 +1,7 @@
 import type { SaleReturnCreateRequest } from "@/client/types.gen"
 
 // ---------------------------------------------------------------------------
-// Pure form logic for recording a sale return from the Stock Adjustment screen
+// Pure form logic for recording a sale return from the Returns screen
 // (design 2026-07-25). Mirrors the backend guards so the UI never POSTs a body
 // the server will reject:
 //   - a sale line must be picked
