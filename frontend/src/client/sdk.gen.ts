@@ -904,7 +904,6 @@ export class ProjectPullsService {
      * Read Project Pulls
      * @param data The data for the request.
      * @param data.state
-     * @param data.projectId
      * @param data.settled Only finished requests (not waiting)
      * @param data.skip
      * @param data.limit
@@ -917,7 +916,6 @@ export class ProjectPullsService {
             url: '/api/v1/project-pulls',
             query: {
                 state: data.state,
-                project_id: data.projectId,
                 settled: data.settled,
                 skip: data.skip,
                 limit: data.limit

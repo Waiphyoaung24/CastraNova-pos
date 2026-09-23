@@ -2215,7 +2215,7 @@ class ProjectStaffPublic(SQLModel):
 
 class ProjectDashboardStaffPublic(SQLModel):
     project: ProjectStaffPublic
-    # Request history is GET /project-pulls?project_id=… (lines included).
+    pulls: list[TransactionSummaryPublic]  # kind="PROJECT_PULL"
     # No budget / consumed_cost — staff redaction.
 
 

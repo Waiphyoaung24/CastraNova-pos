@@ -1,13 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { Fragment, type ReactNode, useState } from "react"
+import { Fragment, useState } from "react"
 
-import type { ProjectConsumptionRowPublic, ProjectPullPublic } from "@/client"
-import { ProjectPullsService, ProjectsService } from "@/client"
+import type { ProjectConsumptionRowPublic } from "@/client"
+import { ProjectsService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
-import { PullRequestCard } from "@/components/pos/PullHistory"
-import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -16,13 +15,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useIsMobile } from "@/hooks/useMobile"
 import {
   budgetRemaining,
   consumedItemLabel,
-  type ItemTotalsRow,
   isAdminProjectDashboard,
-  projectItemTotals,
 } from "@/lib/project-dashboard"
 import { formatThb } from "@/lib/reports"
 import { requireAuth } from "@/lib/route-guards"
@@ -45,16 +41,6 @@ function ProjectDetail() {
     queryKey: ["project-dashboard", projectId],
     queryFn: () => ProjectsService.getProjectDashboard({ projectId }),
   })
-  // Every request for this project, newest first. No cost on it, so staff see
-  // it too. ponytail: one page of 500 feeds both the totals and the history;
-  // page it (and total server-side) if a project ever outgrows that.
-  const { data: pullPage } = useQuery({
-    queryKey: ["project-pulls", "project", projectId],
-    queryFn: () =>
-      ProjectPullsService.readProjectPulls({ projectId, limit: 500 }),
-  })
-  const pulls = pullPage?.data ?? []
-  const { rows, totals } = projectItemTotals(pulls)
 
   if (isPending) {
     return (
@@ -69,7 +55,7 @@ function ProjectDetail() {
     )
   }
 
-  const { project } = data
+  const { project, pulls } = data
   const isAdmin = isAdminProjectDashboard(data)
   const remaining = isAdmin
     ? budgetRemaining(data.budget_thb, data.consumed_cost_thb)
@@ -103,36 +89,59 @@ function ProjectDetail() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Allocated" value={totals.allocated} />
-        <StatCard label="Supplied" value={totals.supplied} />
-        <StatCard label="Returned" value={totals.returned} />
-        <StatCard
-          label="Still out"
-          value={totals.stillOut}
-          hint="Not back in stock"
-        />
-      </div>
-
       {isAdmin && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <StatCard
-            label="Budget"
-            value={data.budget_thb ? formatThb(data.budget_thb) : "—"}
-          />
-          <StatCard label="Spent" value={formatThb(data.consumed_cost_thb)} />
-          <StatCard
-            label="Remaining"
-            value={remaining ? formatThb(remaining) : "—"}
-          />
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Budget</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-3 gap-4">
+            <Figure
+              label="Budget"
+              value={data.budget_thb ? formatThb(data.budget_thb) : "—"}
+            />
+            <Figure
+              label="Consumed cost"
+              value={formatThb(data.consumed_cost_thb)}
+            />
+            <Figure
+              label="Remaining"
+              value={remaining ? formatThb(remaining) : "—"}
+            />
+          </CardContent>
+        </Card>
       )}
 
-      <ItemTotalsList rows={rows} />
-
-      <OrderHistory pulls={pulls} />
-
       {isAdmin ? <ConsumedItems rows={data.consumed_items} /> : null}
+
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold">Pulls</h2>
+        {pulls.length === 0 ? (
+          <p className="text-muted-foreground py-6 text-center text-sm">
+            No pulls yet.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Reference</TableHead>
+                <TableHead>When</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pulls.map((t) => (
+                <TableRow key={t.reference_id}>
+                  <TableCell className="num font-medium">
+                    {t.reference_id}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {new Date(t.occurred_at).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   )
 }
@@ -157,7 +166,7 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
 
   return (
     <div className="space-y-2">
-      <h2 className="text-lg font-semibold">Cost by batch</h2>
+      <h2 className="text-lg font-semibold">Consumed items</h2>
       {rows.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
           Nothing consumed yet.
@@ -244,92 +253,13 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
   )
 }
 
-/** One row per product across every request: a table, or lines on a phone. */
-function ItemTotalsList({ rows }: { rows: ItemTotalsRow[] }) {
-  const isMobile = useIsMobile()
+function Figure({ label, value }: { label: string; value: string }) {
   return (
-    <Section title="Items">
-      {rows.length === 0 ? (
-        <Empty>Nothing allocated yet.</Empty>
-      ) : isMobile ? (
-        <ul className="bg-card divide-y rounded-lg border">
-          {rows.map((r) => (
-            <li key={r.productId} className="space-y-1 px-4 py-2 text-sm">
-              <p className="font-medium">{r.label}</p>
-              <p className="text-muted-foreground num text-xs">
-                {r.allocated} allocated · {r.supplied} supplied · {r.returned}{" "}
-                returned ·{" "}
-                <span className="text-foreground font-semibold whitespace-nowrap">
-                  {r.stillOut} still out
-                </span>
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Item</TableHead>
-              <TableHead className="text-right">Allocated</TableHead>
-              <TableHead className="text-right">Supplied</TableHead>
-              <TableHead className="text-right">Returned</TableHead>
-              <TableHead className="text-right">Still out</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.productId}>
-                <TableCell className="font-medium">{r.label}</TableCell>
-                <TableCell className="num text-right">{r.allocated}</TableCell>
-                <TableCell className="num text-right">{r.supplied}</TableCell>
-                <TableCell className="num text-right">
-                  {r.returned || "—"}
-                </TableCell>
-                <TableCell className="num text-right font-semibold">
-                  {r.stillOut}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </Section>
-  )
-}
-
-/** One card per request: when, its status, and each item's counts. */
-function OrderHistory({ pulls }: { pulls: ProjectPullPublic[] }) {
-  return (
-    <Section title="Order history">
-      {pulls.length === 0 ? (
-        <Empty>No requests yet.</Empty>
-      ) : (
-        <ol className="space-y-3">
-          {pulls.map((pull) => (
-            <li key={pull.id}>
-              <PullRequestCard pull={pull} />
-            </li>
-          ))}
-        </ol>
-      )}
-    </Section>
-  )
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-2">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-function Empty({ children }: { children: ReactNode }) {
-  return (
-    <p className="text-muted-foreground rounded-lg border border-dashed py-6 text-center text-sm">
-      {children}
-    </p>
+    <div className="space-y-1">
+      <p className="text-muted-foreground text-xs uppercase tracking-wide">
+        {label}
+      </p>
+      <p className="num text-lg font-semibold">{value}</p>
+    </div>
   )
 }

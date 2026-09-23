@@ -110,21 +110,6 @@ test.describe("Pull returns", () => {
     await expect(page.getByText("Items returned to stock.")).toBeVisible()
 
     await expect.poll(() => onHand(product.sku)).toBe(ON_HAND - REQUESTED + 2)
-
-    // The project page's totals and order history show the same counts.
-    await page.goto(`/project/${pull.project_id}`)
-    await expect(
-      page.getByRole("heading", { name: "Order history" }),
-    ).toBeVisible()
-    // Items: allocated 3, supplied 3, returned 2, 1 still in use.
-    await expect(
-      page.getByRole("row", {
-        name: `Return Part ${r} (${product.sku}) 3 3 2 1`,
-      }),
-    ).toBeVisible()
-    await expect(
-      page.getByText("3 allocated · 3 supplied · 2 returned"),
-    ).toBeVisible()
   })
 
   test("cancel a waiting pull puts its stock back", async ({ page }) => {

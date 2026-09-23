@@ -3547,7 +3547,6 @@ def list_project_pulls(
     *,
     session: Session,
     state: ProjectPullState | None = None,
-    project_id: uuid.UUID | None = None,
     settled: bool = False,
     skip: int = 0,
     limit: int = 100,
@@ -3557,8 +3556,6 @@ def list_project_pulls(
     statement = select(ProjectPull)
     if state is not None:
         statement = statement.where(ProjectPull.state == state)
-    if project_id is not None:
-        statement = statement.where(ProjectPull.project_id == project_id)
     if settled:
         statement = statement.where(ProjectPull.state != ProjectPullState.PENDING)
     statement = (
@@ -3571,14 +3568,11 @@ def count_project_pulls(
     *,
     session: Session,
     state: ProjectPullState | None = None,
-    project_id: uuid.UUID | None = None,
     settled: bool = False,
 ) -> int:
     statement = select(func.count()).select_from(ProjectPull)
     if state is not None:
         statement = statement.where(ProjectPull.state == state)
-    if project_id is not None:
-        statement = statement.where(ProjectPull.project_id == project_id)
     if settled:
         statement = statement.where(ProjectPull.state != ProjectPullState.PENDING)
     return session.exec(statement).one()
@@ -5694,15 +5688,24 @@ def _products_by_id(
 def get_project_dashboard(
     *, session: Session, project_id: uuid.UUID
 ) -> dict[str, Any]:
-    """Admin-superset dashboard for one project: budget, consumed cost (reusing _project_consumed_cost) and the consumed-items
+    """Admin-superset dashboard for one project: its pull transactions plus
+    budget, consumed cost (reusing _project_consumed_cost) and the consumed-items
     list with batch attribution. The route picks the staff or admin schema by
     role; budget/consumed_cost/consumed_items are physically absent from the
     staff JSON."""
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    pulls = session.exec(
+        select(ProjectPull).where(col(ProjectPull.project_id) == project_id)
+    ).all()
+    pull_rows = [
+        {"kind": "PROJECT_PULL", "reference_id": p.id, "occurred_at": p.created_at}
+        for p in sorted(pulls, key=lambda p: p.created_at, reverse=True)
+    ]
     return {
         "project": project,
+        "pulls": pull_rows,
         "budget_thb": project.budget_thb,
         "consumed_cost_thb": _project_consumed_cost(
             session=session, project_id=project_id

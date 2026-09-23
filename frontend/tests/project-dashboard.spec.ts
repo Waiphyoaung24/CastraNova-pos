@@ -26,6 +26,7 @@ const STAFF: ProjectDashboardStaffPublic = {
     end_date: null,
     status: "ACTIVE",
   },
+  pulls: [],
 }
 
 const ADMIN: ProjectDashboardAdminPublic = {
@@ -39,6 +40,7 @@ const ADMIN: ProjectDashboardAdminPublic = {
     budget_thb: "1000.00",
     id: "00000000-0000-0000-0000-000000000001",
   },
+  pulls: [],
   budget_thb: "1000.00",
   consumed_cost_thb: "600.50",
   consumed_items: [],

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/useMobile"
-import { groupPullsByProject } from "@/lib/project-dashboard"
+import { groupPullsByProject } from "@/lib/pull-history"
 
 /** Waiting requests, or History: every finished one (done, short, cancelled). */
 export type PullStateFilter = "PENDING" | "HISTORY"

@@ -4,10 +4,7 @@ import type { ReactNode } from "react"
 import type { ProjectPullPublic, ProjectPullState } from "@/client/types.gen"
 import { lineLabel } from "@/components/pos/PullFulfillPanel"
 import { Badge } from "@/components/ui/badge"
-import {
-  type ProjectPullGroup,
-  suppliedReturned,
-} from "@/lib/project-dashboard"
+import { type ProjectPullGroup, suppliedReturned } from "@/lib/pull-history"
 
 export const STATE_VARIANT: Record<
   ProjectPullState,

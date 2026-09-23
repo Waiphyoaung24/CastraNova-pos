@@ -495,37 +495,6 @@ def test_staff_queue_lists_pending(
     assert pull["id"] in ids
 
 
-def test_list_filters_by_project(
-    client: TestClient,
-    db: Session,
-    superuser_token_headers: dict[str, str],
-    staff_token_headers: dict[str, str],
-    pull_ctx: dict[str, Any],
-) -> None:
-    # Project history: staff and admin list one project's pulls, any state.
-    pull = _create(client, superuser_token_headers, pull_ctx)
-    other = crud.create_project(
-        session=db,
-        project_in=ProjectCreate(
-            code=f"PRJ-{uuid.uuid4().hex[:8]}",
-            name="Site B",
-            customer_id=pull_ctx["customer_id"],
-        ),
-    )
-    r = client.get(
-        f"{PREFIX}/project-pulls?project_id={pull_ctx['project_id']}",
-        headers=staff_token_headers,
-    )
-    assert r.status_code == 200, r.text
-    assert [p["id"] for p in r.json()["data"]] == [pull["id"]]
-    assert r.json()["count"] == 1
-    r = client.get(
-        f"{PREFIX}/project-pulls?project_id={other.id}",
-        headers=staff_token_headers,
-    )
-    assert r.json() == {"data": [], "count": 0}
-
-
 def test_settled_filter_hides_waiting_pulls(
     client: TestClient,
     superuser_token_headers: dict[str, str],
@@ -552,13 +521,14 @@ def test_settled_filter_hides_waiting_pulls(
     )
     assert r.status_code == 200, r.text
     r = client.get(
-        f"{PREFIX}/project-pulls?settled=true&project_id={pull_ctx['project_id']}",
+        f"{PREFIX}/project-pulls?settled=true&limit=500",
         headers=staff_token_headers,
     )
     assert r.status_code == 200, r.text
-    assert [p["id"] for p in r.json()["data"]] == [done["id"]]
-    assert r.json()["count"] == 1
-    assert waiting["id"] not in [p["id"] for p in r.json()["data"]]
+    ids = [p["id"] for p in r.json()["data"]]
+    assert done["id"] in ids
+    assert waiting["id"] not in ids
+    assert all(p["state"] != "PENDING" for p in r.json()["data"])
 
 
 def test_staff_can_read_pull(
