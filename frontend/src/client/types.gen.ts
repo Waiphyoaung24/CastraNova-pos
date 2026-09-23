@@ -477,6 +477,7 @@ export type ProjectPullLinePublic = {
     fulfilled_qty: number;
     line_state: LineState;
     returnable_qty?: number;
+    returned_qty?: number;
 };
 
 export type ProjectPullPublic = {

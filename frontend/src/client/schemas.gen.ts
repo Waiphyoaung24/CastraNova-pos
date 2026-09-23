@@ -2329,6 +2329,11 @@ export const ProjectPullLinePublicSchema = {
             type: 'integer',
             title: 'Returnable Qty',
             default: 0
+        },
+        returned_qty: {
+            type: 'integer',
+            title: 'Returned Qty',
+            default: 0
         }
     },
     type: 'object',

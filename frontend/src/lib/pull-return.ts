@@ -48,12 +48,3 @@ export function buildPullReturnPayload(
       .map(([line_id, quantity]) => ({ line_id, quantity })),
   }
 }
-
-/** How much of a line has come back. Only a settled pull can have returns. */
-export function returnedQty(
-  pull: ProjectPullPublic,
-  line: ProjectPullLinePublic,
-): number {
-  if (pull.state !== "FULFILLED" && pull.state !== "SHORT") return 0
-  return line.fulfilled_qty - (line.returnable_qty ?? 0)
-}

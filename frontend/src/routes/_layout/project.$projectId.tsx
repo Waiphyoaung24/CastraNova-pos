@@ -5,8 +5,7 @@ import { Fragment, type ReactNode, useState } from "react"
 import type { ProjectConsumptionRowPublic, ProjectPullPublic } from "@/client"
 import { ProjectPullsService, ProjectsService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
-import { lineLabel } from "@/components/pos/PullFulfillPanel"
-import { STATE_LABEL, STATE_VARIANT } from "@/components/pos/PullQueue"
+import { PullRequestCard } from "@/components/pos/PullHistory"
 import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -25,7 +24,6 @@ import {
   isAdminProjectDashboard,
   projectItemTotals,
 } from "@/lib/project-dashboard"
-import { returnedQty } from "@/lib/pull-return"
 import { formatThb } from "@/lib/reports"
 import { requireAuth } from "@/lib/route-guards"
 
@@ -110,9 +108,9 @@ function ProjectDetail() {
         <StatCard label="Supplied" value={totals.supplied} />
         <StatCard label="Returned" value={totals.returned} />
         <StatCard
-          label="In use"
-          value={totals.inUse}
-          hint="Supplied, not returned"
+          label="Still out"
+          value={totals.stillOut}
+          hint="Not back in stock"
         />
       </div>
 
@@ -262,7 +260,7 @@ function ItemTotalsList({ rows }: { rows: ItemTotalsRow[] }) {
                 {r.allocated} allocated · {r.supplied} supplied · {r.returned}{" "}
                 returned ·{" "}
                 <span className="text-foreground font-semibold whitespace-nowrap">
-                  {r.inUse} in use
+                  {r.stillOut} still out
                 </span>
               </p>
             </li>
@@ -276,7 +274,7 @@ function ItemTotalsList({ rows }: { rows: ItemTotalsRow[] }) {
               <TableHead className="text-right">Allocated</TableHead>
               <TableHead className="text-right">Supplied</TableHead>
               <TableHead className="text-right">Returned</TableHead>
-              <TableHead className="text-right">In use</TableHead>
+              <TableHead className="text-right">Still out</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -289,7 +287,7 @@ function ItemTotalsList({ rows }: { rows: ItemTotalsRow[] }) {
                   {r.returned || "—"}
                 </TableCell>
                 <TableCell className="num text-right font-semibold">
-                  {r.inUse}
+                  {r.stillOut}
                 </TableCell>
               </TableRow>
             ))}
@@ -309,49 +307,8 @@ function OrderHistory({ pulls }: { pulls: ProjectPullPublic[] }) {
       ) : (
         <ol className="space-y-3">
           {pulls.map((pull) => (
-            <li key={pull.id} className="bg-card rounded-lg border">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3">
-                <span className="num font-medium">
-                  {new Date(pull.created_at).toLocaleString()}
-                </span>
-                <Badge variant={STATE_VARIANT[pull.state]}>
-                  {STATE_LABEL[pull.state]}
-                </Badge>
-                <span className="text-muted-foreground text-sm">
-                  {pull.lines.length}{" "}
-                  {pull.lines.length === 1 ? "item" : "items"}
-                </span>
-                {pull.admin_notes ? (
-                  <span className="text-muted-foreground w-full truncate text-sm sm:w-auto sm:flex-1 sm:text-right">
-                    {pull.admin_notes}
-                  </span>
-                ) : null}
-              </div>
-              <ul className="divide-y">
-                {pull.lines.map((line) => {
-                  const returned = returnedQty(pull, line)
-                  const settled =
-                    pull.state === "FULFILLED" || pull.state === "SHORT"
-                  return (
-                    <li
-                      key={line.id}
-                      className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-2 text-sm"
-                    >
-                      <span>
-                        {line.line_kind === "UNIT"
-                          ? `${line.model_name} · ${lineLabel(line)}`
-                          : lineLabel(line)}
-                      </span>
-                      <span className="text-muted-foreground num text-xs">
-                        {/* A UNIT line is one serial, so it carries no qty. */}
-                        {line.requested_qty ?? 1} allocated
-                        {settled ? ` · ${line.fulfilled_qty} supplied` : ""}
-                        {returned > 0 ? ` · ${returned} returned` : ""}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
+            <li key={pull.id}>
+              <PullRequestCard pull={pull} />
             </li>
           ))}
         </ol>

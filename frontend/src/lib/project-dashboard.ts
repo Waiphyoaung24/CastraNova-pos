@@ -2,9 +2,9 @@ import type {
   ProjectConsumptionRowPublic,
   ProjectDashboardAdminPublic,
   ProjectDashboardStaffPublic,
+  ProjectPullLinePublic,
   ProjectPullPublic,
 } from "@/client/types.gen"
-import { returnedQty } from "@/lib/pull-return"
 
 // ---------------------------------------------------------------------------
 // Pure helpers for the project-detail dashboard (FR-020, role-tiered).
@@ -53,8 +53,17 @@ export interface ItemTotals {
   allocated: number
   supplied: number
   returned: number
-  /** Supplied and not yet back. */
-  inUse: number
+  /** Out of stock on this project and not back yet (ledger, not inferred). */
+  stillOut: number
+}
+
+/**
+ * Returns of what was actually handed over. A cancel (or a return of a short
+ * hand-out's surplus) also writes RETURNED movements, but that stock never
+ * reached the project, so it doesn't read as "returned".
+ */
+export function suppliedReturned(line: ProjectPullLinePublic): number {
+  return Math.min(line.returned_qty ?? 0, line.fulfilled_qty)
 }
 
 export interface ItemTotalsRow extends ItemTotals {
@@ -64,8 +73,9 @@ export interface ItemTotalsRow extends ItemTotals {
 
 /**
  * Per-product totals across a project's requests, plus the grand total.
- * Cancelled requests allocated nothing, so they are left out. A UNIT line is
- * one serial, so it allocates one.
+ * Returned and still-out come from the ledger (a short hand-out keeps its
+ * surplus out until returned). A cancelled request allocated only what it
+ * handed out before closing. A UNIT line is one serial, so it allocates one.
  */
 export function projectItemTotals(pulls: ProjectPullPublic[]): {
   rows: ItemTotalsRow[]
@@ -76,10 +86,10 @@ export function projectItemTotals(pulls: ProjectPullPublic[]): {
     allocated: 0,
     supplied: 0,
     returned: 0,
-    inUse: 0,
+    stillOut: 0,
   }
   for (const pull of pulls) {
-    if (pull.state === "CANCELLED") continue
+    const cancelled = pull.state === "CANCELLED"
     for (const line of pull.lines) {
       const row = byProduct.get(line.product_id) ?? {
         productId: line.product_id,
@@ -87,13 +97,13 @@ export function projectItemTotals(pulls: ProjectPullPublic[]): {
         allocated: 0,
         supplied: 0,
         returned: 0,
-        inUse: 0,
+        stillOut: 0,
       }
       const add: ItemTotals = {
-        allocated: line.requested_qty ?? 1,
+        allocated: cancelled ? line.fulfilled_qty : (line.requested_qty ?? 1),
         supplied: line.fulfilled_qty,
-        returned: returnedQty(pull, line),
-        inUse: line.fulfilled_qty - returnedQty(pull, line),
+        returned: suppliedReturned(line),
+        stillOut: line.returnable_qty ?? 0,
       }
       for (const k of Object.keys(add) as (keyof ItemTotals)[]) {
         row[k] += add[k]
@@ -103,4 +113,35 @@ export function projectItemTotals(pulls: ProjectPullPublic[]): {
     }
   }
   return { rows: [...byProduct.values()], totals }
+}
+
+export interface ProjectPullGroup {
+  projectId: string
+  label: string
+  customerName: string
+  /** Newest request first, as the list came in. */
+  pulls: ProjectPullPublic[]
+  lastAt: string
+  totals: ItemTotals
+}
+
+/** Newest-first pulls grouped per project, projects ordered by latest request. */
+export function groupPullsByProject(
+  pulls: ProjectPullPublic[],
+): ProjectPullGroup[] {
+  const byProject = new Map<string, ProjectPullPublic[]>()
+  for (const pull of pulls) {
+    byProject.set(pull.project_id, [
+      ...(byProject.get(pull.project_id) ?? []),
+      pull,
+    ])
+  }
+  return [...byProject.values()].map((group) => ({
+    projectId: group[0].project_id,
+    label: `${group[0].project_name} (${group[0].project_code})`,
+    customerName: group[0].customer_name,
+    pulls: group,
+    lastAt: group[0].created_at,
+    totals: projectItemTotals(group).totals,
+  }))
 }

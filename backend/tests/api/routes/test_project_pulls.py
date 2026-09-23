@@ -595,6 +595,46 @@ def test_staff_pull_carries_display_labels(
     assert_no_financial_keys(row)
 
 
+def test_line_returned_qty_reads_the_ledger(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+) -> None:
+    # A short hand-out keeps its surplus deducted, so still-out (returnable)
+    # can exceed fulfilled. returned_qty is the RETURNED sum, never inferred.
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=5)
+    line_ids = {ln["line_kind"]: ln["id"] for ln in pull["lines"]}
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/fulfill",
+        headers=staff_token_headers,
+        json={
+            "lines": [
+                {"line_id": line_ids["UNIT"], "fulfilled_qty": 1},
+                {"line_id": line_ids["PART"], "fulfilled_qty": 3},
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/returns",
+        headers=staff_token_headers,
+        json={
+            "idempotency_key": str(uuid.uuid4()),
+            "lines": [{"line_id": line_ids["PART"], "quantity": 1}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    part = next(ln for ln in r.json()["lines"] if ln["line_kind"] == "PART")
+    assert (part["fulfilled_qty"], part["returnable_qty"], part["returned_qty"]) == (
+        3,
+        4,
+        1,
+    )
+    unit = next(ln for ln in r.json()["lines"] if ln["line_kind"] == "UNIT")
+    assert (unit["returnable_qty"], unit["returned_qty"]) == (1, 0)
+
+
 def test_fulfill_all_marks_fulfilled(
     client: TestClient,
     superuser_token_headers: dict[str, str],

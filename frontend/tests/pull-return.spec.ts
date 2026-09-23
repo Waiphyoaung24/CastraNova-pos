@@ -93,11 +93,13 @@ test.describe("Pull returns", () => {
     await page.goto("/pulls")
     // The queue defaults to waiting requests; a done one is under History.
     await page.getByRole("tab", { name: "History" }).click()
-    await page
-      .getByRole("row")
+    // History rolls requests up per project; open the project, then the request.
+    const project = page
+      .locator("details")
       .filter({ hasText: `Return Project ${r}` })
-      .getByRole("button", { name: "Open" })
-      .click()
+    await expect(project.locator("summary")).toContainText("1 request")
+    await project.locator("summary").click()
+    await project.getByRole("button", { name: "Open" }).click()
 
     await page.getByRole("button", { name: "Return items to stock" }).click()
     const dialog = page.getByRole("dialog")

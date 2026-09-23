@@ -93,8 +93,9 @@ function Pulls() {
       ProjectPullsService.readProjectPulls({
         state: stateFilter === "PENDING" ? "PENDING" : undefined,
         settled: stateFilter === "HISTORY",
-        skip,
-        limit,
+        // ponytail: History groups per project on the client, so it loads one
+        // page of 500; page per project server-side if that's outgrown.
+        ...(stateFilter === "HISTORY" ? { limit: 500 } : { skip, limit }),
       }),
     placeholderData: keepPreviousData,
     refetchInterval: 30_000,
@@ -429,7 +430,7 @@ function Pulls() {
           isCancelling={cancelMutation.isPending}
         />
       )}
-      {mode === "queue" && !selectedPull ? (
+      {mode === "queue" && !selectedPull && stateFilter === "PENDING" ? (
         <PaginationControls
           total={pullPage?.count ?? 0}
           pageSize={pageSize}

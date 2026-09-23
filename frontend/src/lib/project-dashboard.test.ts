@@ -4,7 +4,7 @@ import type {
   ProjectPullLinePublic,
   ProjectPullPublic,
 } from "@/client/types.gen"
-import { projectItemTotals } from "./project-dashboard"
+import { groupPullsByProject, projectItemTotals } from "./project-dashboard"
 
 function line(over: Partial<ProjectPullLinePublic>): ProjectPullLinePublic {
   return {
@@ -18,6 +18,7 @@ function line(over: Partial<ProjectPullLinePublic>): ProjectPullLinePublic {
     fulfilled_qty: 5,
     line_state: "FULFILLED",
     returnable_qty: 5,
+    returned_qty: 0,
     ...over,
   }
 }
@@ -30,11 +31,24 @@ function pull(
 }
 
 describe("projectItemTotals", () => {
-  it("sums each product across requests, skipping cancelled ones", () => {
+  it("sums each product across requests from the ledger numbers", () => {
     const { rows, totals } = projectItemTotals([
-      pull("FULFILLED", [line({ returnable_qty: 3 })]), // 2 came back
-      pull("PENDING", [line({ requested_qty: 4, fulfilled_qty: 0 })]),
-      pull("CANCELLED", [line({ requested_qty: 9, fulfilled_qty: 0 })]),
+      // 2 came back, 3 still out
+      pull("FULFILLED", [line({ returnable_qty: 3, returned_qty: 2 })]),
+      // Waiting: deducted at create, so out of stock but not supplied yet
+      pull("PENDING", [
+        line({ requested_qty: 4, fulfilled_qty: 0, returnable_qty: 4 }),
+      ]),
+      // Cancelled while waiting: its stock went back as RETURNED movements,
+      // but nothing was supplied, so nothing counts as allocated or returned
+      pull("CANCELLED", [
+        line({
+          requested_qty: 9,
+          fulfilled_qty: 0,
+          returnable_qty: 0,
+          returned_qty: 9,
+        }),
+      ]),
       pull("SHORT", [
         line({
           line_kind: "UNIT",
@@ -55,7 +69,7 @@ describe("projectItemTotals", () => {
         allocated: 9,
         supplied: 5,
         returned: 2,
-        inUse: 3,
+        stillOut: 7,
       },
       {
         productId: "cmp",
@@ -63,18 +77,71 @@ describe("projectItemTotals", () => {
         allocated: 1,
         supplied: 1,
         returned: 0,
-        inUse: 1,
+        stillOut: 1,
       },
     ])
     expect(totals).toEqual({
       allocated: 10,
       supplied: 6,
       returned: 2,
-      inUse: 4,
+      stillOut: 8,
+    })
+  })
+
+  it("keeps a short hand-out's surplus out until it is returned", () => {
+    const { totals } = projectItemTotals([
+      pull("SHORT", [line({ fulfilled_qty: 3, returnable_qty: 5 })]),
+    ])
+    expect(totals).toEqual({
+      allocated: 5,
+      supplied: 3,
+      returned: 0,
+      stillOut: 5,
     })
   })
 
   it("is empty with no requests", () => {
     expect(projectItemTotals([]).rows).toEqual([])
+  })
+})
+
+describe("groupPullsByProject", () => {
+  const at = (
+    project_id: string,
+    created_at: string,
+    lines: ProjectPullLinePublic[],
+  ) =>
+    ({
+      id: crypto.randomUUID(),
+      project_id,
+      project_name: `Site ${project_id}`,
+      project_code: `PRJ-${project_id}`,
+      customer_name: `Cust ${project_id}`,
+      state: "FULFILLED",
+      created_at,
+      lines,
+    }) as ProjectPullPublic
+
+  it("groups newest-first pulls per project, keeping order and totals", () => {
+    const a2 = at("a", "2026-09-03T00:00:00Z", [line({ returnable_qty: 5 })])
+    const b1 = at("b", "2026-09-02T00:00:00Z", [
+      line({ returnable_qty: 1, returned_qty: 4 }),
+    ])
+    const a1 = at("a", "2026-09-01T00:00:00Z", [line({ returnable_qty: 5 })])
+    const groups = groupPullsByProject([a2, b1, a1])
+    expect(groups.map((g) => g.projectId)).toEqual(["a", "b"])
+    expect(groups[0]).toMatchObject({
+      label: "Site a (PRJ-a)",
+      customerName: "Cust a",
+      lastAt: "2026-09-03T00:00:00Z",
+      pulls: [a2, a1],
+      totals: { allocated: 10, supplied: 10, returned: 0, stillOut: 10 },
+    })
+    expect(groups[1].totals).toEqual({
+      allocated: 5,
+      supplied: 5,
+      returned: 4,
+      stillOut: 1,
+    })
   })
 })

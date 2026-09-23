@@ -1,15 +1,20 @@
-import { Link } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
 
-import type { ProjectPullPublic, ProjectPullState } from "@/client/types.gen"
+import type { ProjectPullPublic } from "@/client/types.gen"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
+import {
+  ProjectHistory,
+  STATE_LABEL,
+  STATE_VARIANT,
+} from "@/components/pos/PullHistory"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/useMobile"
+import { groupPullsByProject } from "@/lib/project-dashboard"
 
 /** Waiting requests, or History: every finished one (done, short, cancelled). */
 export type PullStateFilter = "PENDING" | "HISTORY"
@@ -30,23 +35,6 @@ interface PullQueueProps {
   isCancelling: boolean
   /** A page/filter fetch is in flight while the current rows stay on screen. */
   loading?: boolean
-}
-
-export const STATE_VARIANT: Record<
-  ProjectPullState,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
-  PENDING: "secondary",
-  FULFILLED: "default",
-  SHORT: "destructive",
-  CANCELLED: "outline",
-}
-
-export const STATE_LABEL: Record<ProjectPullState, string> = {
-  PENDING: "Waiting",
-  FULFILLED: "Done",
-  SHORT: "Short",
-  CANCELLED: "Cancelled",
 }
 
 // Column widths in header order (Project, Customer, Created, Items, Status,
@@ -91,22 +79,6 @@ function PullActions({
         </Button>
       ) : null}
     </div>
-  )
-}
-
-/** Project name linking to that project's page, where its request history lives. */
-function ProjectLink({
-  pull,
-  projectLabels,
-}: Pick<PullQueueProps, "projectLabels"> & { pull: ProjectPullPublic }) {
-  return (
-    <Link
-      to="/project/$projectId"
-      params={{ projectId: pull.project_id }}
-      className="hover:underline"
-    >
-      {projectLabels.get(pull.project_id) ?? pull.project_id}
-    </Link>
   )
 }
 
@@ -160,6 +132,21 @@ export function PullQueue({
         <p className="text-muted-foreground py-8 text-center text-sm">
           No requests to show.
         </p>
+      ) : stateFilter === "HISTORY" ? (
+        <ListShell loading={loading}>
+          <ProjectHistory
+            groups={groupPullsByProject(pulls)}
+            renderActions={(pull) => (
+              <PullActions
+                pull={pull}
+                isAdmin={isAdmin}
+                isCancelling={isCancelling}
+                onSelect={onSelect}
+                onCancel={onCancel}
+              />
+            )}
+          />
+        </ListShell>
       ) : isMobile ? (
         <ListShell loading={loading}>
           <div className="space-y-3">
@@ -168,7 +155,7 @@ export function PullQueue({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-medium">
-                      <ProjectLink pull={pull} projectLabels={projectLabels} />
+                      {projectLabels.get(pull.project_id) ?? pull.project_id}
                     </p>
                     <p className="text-muted-foreground truncate text-sm">
                       {customerLabels.get(pull.customer_id) ?? pull.customer_id}
@@ -219,7 +206,7 @@ export function PullQueue({
             {pulls.map((pull) => (
               <TableRow key={pull.id}>
                 <TableCell className="font-medium">
-                  <ProjectLink pull={pull} projectLabels={projectLabels} />
+                  {projectLabels.get(pull.project_id) ?? pull.project_id}
                 </TableCell>
                 <TableCell>
                   {customerLabels.get(pull.customer_id) ?? pull.customer_id}
