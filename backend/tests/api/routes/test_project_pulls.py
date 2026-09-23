@@ -495,6 +495,42 @@ def test_staff_queue_lists_pending(
     assert pull["id"] in ids
 
 
+def test_settled_filter_hides_waiting_pulls(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+) -> None:
+    # History tab: settled=true lists done / short / cancelled, never waiting.
+    # Part-only bodies: the fixture has one unit, and it can't go out twice.
+    def part_pull() -> dict[str, Any]:
+        body = _create_body(pull_ctx, part_qty=1)
+        body["lines"] = body["lines"][1:]
+        r = client.post(
+            f"{PREFIX}/project-pulls", headers=superuser_token_headers, json=body
+        )
+        assert r.status_code == 200, r.text
+        pull: dict[str, Any] = r.json()
+        return pull
+
+    waiting = part_pull()
+    done = part_pull()
+    r = client.post(
+        f"{PREFIX}/project-pulls/{done['id']}/cancel",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    r = client.get(
+        f"{PREFIX}/project-pulls?settled=true&limit=500",
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    ids = [p["id"] for p in r.json()["data"]]
+    assert done["id"] in ids
+    assert waiting["id"] not in ids
+    assert all(p["state"] != "PENDING" for p in r.json()["data"])
+
+
 def test_staff_can_read_pull(
     client: TestClient,
     superuser_token_headers: dict[str, str],
@@ -527,6 +563,46 @@ def test_staff_pull_carries_display_labels(
     assert row["project_code"].startswith("PRJ-")
     assert row["customer_name"] == "Proj Cust"
     assert_no_financial_keys(row)
+
+
+def test_line_returned_qty_reads_the_ledger(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+) -> None:
+    # A short hand-out keeps its surplus deducted, so still-out (returnable)
+    # can exceed fulfilled. returned_qty is the RETURNED sum, never inferred.
+    pull = _create(client, superuser_token_headers, pull_ctx, part_qty=5)
+    line_ids = {ln["line_kind"]: ln["id"] for ln in pull["lines"]}
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/fulfill",
+        headers=staff_token_headers,
+        json={
+            "lines": [
+                {"line_id": line_ids["UNIT"], "fulfilled_qty": 1},
+                {"line_id": line_ids["PART"], "fulfilled_qty": 3},
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        f"{PREFIX}/project-pulls/{pull['id']}/returns",
+        headers=staff_token_headers,
+        json={
+            "idempotency_key": str(uuid.uuid4()),
+            "lines": [{"line_id": line_ids["PART"], "quantity": 1}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    part = next(ln for ln in r.json()["lines"] if ln["line_kind"] == "PART")
+    assert (part["fulfilled_qty"], part["returnable_qty"], part["returned_qty"]) == (
+        3,
+        4,
+        1,
+    )
+    unit = next(ln for ln in r.json()["lines"] if ln["line_kind"] == "UNIT")
+    assert (unit["returnable_qty"], unit["returned_qty"]) == (1, 0)
 
 
 def test_fulfill_all_marks_fulfilled(

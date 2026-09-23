@@ -3547,6 +3547,7 @@ def list_project_pulls(
     *,
     session: Session,
     state: ProjectPullState | None = None,
+    settled: bool = False,
     skip: int = 0,
     limit: int = 100,
 ) -> list[ProjectPull]:
@@ -3555,6 +3556,8 @@ def list_project_pulls(
     statement = select(ProjectPull)
     if state is not None:
         statement = statement.where(ProjectPull.state == state)
+    if settled:
+        statement = statement.where(ProjectPull.state != ProjectPullState.PENDING)
     statement = (
         statement.order_by(col(ProjectPull.created_at).desc()).offset(skip).limit(limit)
     )
@@ -3562,11 +3565,16 @@ def list_project_pulls(
 
 
 def count_project_pulls(
-    *, session: Session, state: ProjectPullState | None = None
+    *,
+    session: Session,
+    state: ProjectPullState | None = None,
+    settled: bool = False,
 ) -> int:
     statement = select(func.count()).select_from(ProjectPull)
     if state is not None:
         statement = statement.where(ProjectPull.state == state)
+    if settled:
+        statement = statement.where(ProjectPull.state != ProjectPullState.PENDING)
     return session.exec(statement).one()
 
 
@@ -3691,7 +3699,37 @@ def pull_line_returnable(
     gets the whole product balance on its first line (by id), so every return
     goes through that line's own PROJECT_OUT movement — capped at what it drew
     (``_reverse_part_out`` 409s past that); the other lines show 0."""
-    events = (MovementType.PROJECT_OUT, MovementType.RETURNED)
+    return _pull_line_net(
+        session=session,
+        pull_id=pull_id,
+        lines=lines,
+        signs={MovementType.PROJECT_OUT: 1, MovementType.RETURNED: -1},
+    )
+
+
+def pull_line_returned(
+    *, session: Session, pull_id: uuid.UUID, lines: Sequence[ProjectPullLine]
+) -> dict[uuid.UUID, int]:
+    """Per line, how much of this pull has come back (RETURNED sum), with the
+    same line attribution as ``pull_line_returnable``."""
+    return _pull_line_net(
+        session=session,
+        pull_id=pull_id,
+        lines=lines,
+        signs={MovementType.RETURNED: 1},
+    )
+
+
+def _pull_line_net(
+    *,
+    session: Session,
+    pull_id: uuid.UUID,
+    lines: Sequence[ProjectPullLine],
+    signs: dict[MovementType, int],
+) -> dict[uuid.UUID, int]:
+    """Signed sum of this pull's ledger movements per line (see
+    ``pull_line_returnable`` for how movements map to lines)."""
+    events = tuple(signs)
 
     part_net: dict[uuid.UUID, int] = {}
     for product_id, event, qty in session.exec(
@@ -3702,8 +3740,7 @@ def pull_line_returnable(
         )
         .group_by(col(PartMovement.product_id), col(PartMovement.event_type))
     ).all():
-        sign = -1 if event == MovementType.RETURNED else 1
-        part_net[product_id] = part_net.get(product_id, 0) + sign * int(qty)
+        part_net[product_id] = part_net.get(product_id, 0) + signs[MovementType(event)] * int(qty)
 
     unit_net: dict[str, int] = {}
     for barcode, event, n in session.exec(
@@ -3715,8 +3752,7 @@ def pull_line_returnable(
         )
         .group_by(col(Unit.castranova_barcode), col(UnitMovement.event_type))
     ).all():
-        sign = -1 if event == MovementType.RETURNED else 1
-        unit_net[barcode] = unit_net.get(barcode, 0) + sign * int(n)
+        unit_net[barcode] = unit_net.get(barcode, 0) + signs[MovementType(event)] * int(n)
 
     out: dict[uuid.UUID, int] = {}
     for line in sorted(lines, key=lambda ln: str(ln.id)):

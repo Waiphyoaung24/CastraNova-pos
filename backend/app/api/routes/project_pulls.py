@@ -25,9 +25,10 @@ def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
     lines = crud.list_project_pull_lines(session=session, pull_id=pull.id)
     project = crud.get_project(session=session, project_id=pull.project_id)
     customer = crud.get_customer(session=session, customer_id=pull.customer_id)
-    # ponytail: 2 grouped queries per pull on top of the existing per-line
+    # ponytail: 4 grouped queries per pull on top of the existing per-line
     # product lookups; batch across pulls if the 100-row list gets slow.
     returnable = crud.pull_line_returnable(session=session, pull_id=pull.id, lines=lines)
+    returned = crud.pull_line_returned(session=session, pull_id=pull.id, lines=lines)
     public_lines = []
     for line in lines:
         product = crud.get_product(session=session, product_id=line.product_id)
@@ -38,6 +39,7 @@ def _to_public(*, session: SessionDep, pull: ProjectPull) -> ProjectPullPublic:
                     "product_sku": product.sku if product else "",
                     "model_name": product.model_name if product else "",
                     "returnable_qty": returnable[line.id],
+                    "returned_qty": returned[line.id],
                 },
             )
         )
@@ -89,15 +91,24 @@ def read_project_pulls(
     *,
     session: SessionDep,
     state: ProjectPullState | None = None,
+    settled: Annotated[
+        bool, Query(description="Only finished requests (not waiting)")
+    ] = False,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ProjectPullsPublic:
     pulls = crud.list_project_pulls(
-        session=session, state=state, skip=skip, limit=limit
+        session=session,
+        state=state,
+        settled=settled,
+        skip=skip,
+        limit=limit,
     )
     return ProjectPullsPublic(
         data=[_to_public(session=session, pull=p) for p in pulls],
-        count=crud.count_project_pulls(session=session, state=state),
+        count=crud.count_project_pulls(
+            session=session, state=state, settled=settled
+        ),
     )
 
 

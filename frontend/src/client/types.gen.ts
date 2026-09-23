@@ -479,6 +479,7 @@ export type ProjectPullLinePublic = {
     fulfilled_qty: number;
     line_state: LineState;
     returnable_qty?: number;
+    returned_qty?: number;
 };
 
 export type ProjectPullPublic = {
@@ -1385,6 +1386,10 @@ export type ProjectPullsCreateProjectPullResponse = (ProjectPullPublic);
 
 export type ProjectPullsReadProjectPullsData = {
     limit?: number;
+    /**
+     * Only finished requests (not waiting)
+     */
+    settled?: boolean;
     skip?: number;
     state?: (ProjectPullState | null);
 };

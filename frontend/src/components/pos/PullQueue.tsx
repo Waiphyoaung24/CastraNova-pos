@@ -1,16 +1,23 @@
 import { ClipboardList } from "lucide-react"
 
-import type { ProjectPullPublic, ProjectPullState } from "@/client/types.gen"
+import type { ProjectPullPublic } from "@/client/types.gen"
 import { ListShell } from "@/components/Common/ListShell"
 import { ListTable } from "@/components/Common/ListTable"
+import {
+  ProjectHistory,
+  STATE_LABEL,
+  STATE_VARIANT,
+} from "@/components/pos/PullHistory"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/useMobile"
+import { groupPullsByProject } from "@/lib/pull-history"
 
-/** State filter value: a concrete state, or ALL for the unfiltered queue. */
-export type PullStateFilter = ProjectPullState | "ALL"
+/** Waiting requests, or History: every finished one (done, short, cancelled). */
+export type PullStateFilter = "PENDING" | "HISTORY"
 
 interface PullQueueProps {
   pulls: ProjectPullPublic[]
@@ -28,23 +35,6 @@ interface PullQueueProps {
   isCancelling: boolean
   /** A page/filter fetch is in flight while the current rows stay on screen. */
   loading?: boolean
-}
-
-const STATE_VARIANT: Record<
-  ProjectPullState,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
-  PENDING: "secondary",
-  FULFILLED: "default",
-  SHORT: "destructive",
-  CANCELLED: "outline",
-}
-
-const STATE_LABEL: Record<ProjectPullState, string> = {
-  PENDING: "Waiting",
-  FULFILLED: "Done",
-  SHORT: "Short",
-  CANCELLED: "Cancelled",
 }
 
 // Column widths in header order (Project, Customer, Created, Items, Status,
@@ -108,30 +98,28 @@ export function PullQueue({
   const isMobile = useIsMobile()
   return (
     <div className="space-y-4">
-      <Alert>
-        <ClipboardList />
-        <AlertTitle>Stock requests waiting</AlertTitle>
-        <AlertDescription>
-          These are parts requested for projects. Tap “Give out parts” on a
-          request, then scan each part to hand it out.{" "}
-          {isAdmin ? "Use “New request” to raise one." : null}
-        </AlertDescription>
-      </Alert>
+      {stateFilter === "PENDING" ? (
+        <Alert>
+          <ClipboardList />
+          <AlertTitle>Stock requests waiting</AlertTitle>
+          <AlertDescription>
+            These are parts requested for projects. Tap “Give out parts” on a
+            request, then scan each part to hand it out.{" "}
+            {isAdmin ? "Use “New request” to raise one." : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <div className="flex items-center justify-between gap-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-pressed={stateFilter === "PENDING"}
-          onClick={() =>
-            onStateFilterChange(stateFilter === "PENDING" ? "ALL" : "PENDING")
-          }
+        <Tabs
+          value={stateFilter}
+          onValueChange={(v) => onStateFilterChange(v as PullStateFilter)}
         >
-          {stateFilter === "PENDING"
-            ? "Show all (incl. completed)"
-            : "Show only waiting"}
-        </Button>
+          <TabsList>
+            <TabsTrigger value="PENDING">Waiting</TabsTrigger>
+            <TabsTrigger value="HISTORY">History</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {isAdmin ? (
           <Button type="button" onClick={onNew}>
@@ -144,6 +132,21 @@ export function PullQueue({
         <p className="text-muted-foreground py-8 text-center text-sm">
           No requests to show.
         </p>
+      ) : stateFilter === "HISTORY" ? (
+        <ListShell loading={loading}>
+          <ProjectHistory
+            groups={groupPullsByProject(pulls)}
+            renderActions={(pull) => (
+              <PullActions
+                pull={pull}
+                isAdmin={isAdmin}
+                isCancelling={isCancelling}
+                onSelect={onSelect}
+                onCancel={onCancel}
+              />
+            )}
+          />
+        </ListShell>
       ) : isMobile ? (
         <ListShell loading={loading}>
           <div className="space-y-3">

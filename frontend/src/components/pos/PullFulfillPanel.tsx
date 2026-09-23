@@ -37,8 +37,6 @@ interface PullFulfillPanelProps {
   onSubmit: () => void
   onBack: () => void
   isPending: boolean
-  onReturn: () => void
-  canReturn: boolean
 }
 
 export function lineLabel(line: ProjectPullLinePublic): string {
@@ -61,20 +59,12 @@ export function PullFulfillPanel({
   onSubmit,
   onBack,
   isPending,
-  onReturn,
-  canReturn,
 }: PullFulfillPanelProps) {
   const canFulfill = pull.state === "PENDING" && !isPending
   const projected = projectedPullState(pull.lines, draft)
   const given = fulfilledLineCount(pull.lines, draft)
   const total = pull.lines.length
   const pct = total === 0 ? 0 : Math.round((given / total) * 100)
-  const stateWord =
-    pull.state === "FULFILLED"
-      ? "done"
-      : pull.state === "CANCELLED"
-        ? "cancelled"
-        : "short"
 
   return (
     <div className="space-y-4">
@@ -131,14 +121,6 @@ export function PullFulfillPanel({
             </>
           }
         />
-      ) : (
-        <Badge variant="outline">This request is {stateWord}</Badge>
-      )}
-
-      {canReturn ? (
-        <Button type="button" variant="outline" onClick={onReturn}>
-          Return items to stock
-        </Button>
       ) : null}
 
       <Table>
