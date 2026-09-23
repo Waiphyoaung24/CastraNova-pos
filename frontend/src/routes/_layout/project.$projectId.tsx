@@ -3,8 +3,11 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { Fragment, useState } from "react"
 
 import type { ProjectConsumptionRowPublic } from "@/client"
-import { ProjectsService } from "@/client"
+import { ProjectPullsService, ProjectsService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
+import { PaginationControls } from "@/components/Common/PaginationControls"
+import { lineLabel } from "@/components/pos/PullFulfillPanel"
+import { STATE_LABEL, STATE_VARIANT } from "@/components/pos/PullQueue"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -15,11 +18,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { usePagination } from "@/hooks/usePagination"
 import {
   budgetRemaining,
   consumedItemLabel,
   isAdminProjectDashboard,
 } from "@/lib/project-dashboard"
+import { returnedQty } from "@/lib/pull-return"
 import { formatThb } from "@/lib/reports"
 import { requireAuth } from "@/lib/route-guards"
 
@@ -55,7 +60,7 @@ function ProjectDetail() {
     )
   }
 
-  const { project, pulls } = data
+  const { project } = data
   const isAdmin = isAdminProjectDashboard(data)
   const remaining = isAdmin
     ? budgetRemaining(data.budget_thb, data.consumed_cost_thb)
@@ -113,35 +118,7 @@ function ProjectDetail() {
 
       {isAdmin ? <ConsumedItems rows={data.consumed_items} /> : null}
 
-      <div className="space-y-2">
-        <h2 className="text-lg font-semibold">Pulls</h2>
-        {pulls.length === 0 ? (
-          <p className="text-muted-foreground py-6 text-center text-sm">
-            No pulls yet.
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Reference</TableHead>
-                <TableHead>When</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pulls.map((t) => (
-                <TableRow key={t.reference_id}>
-                  <TableCell className="num font-medium">
-                    {t.reference_id}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(t.occurred_at).toLocaleString()}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </div>
+      <RequestHistory projectId={projectId} />
     </div>
   )
 }
@@ -249,6 +226,92 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
           </TableBody>
         </Table>
       )}
+    </div>
+  )
+}
+
+/**
+ * Every stock request raised for this project, newest first, with what was
+ * asked for, given out and brought back. No cost here, so staff see it too.
+ */
+function RequestHistory({ projectId }: { projectId: string }) {
+  const { page, pageSize, skip, limit, setPage } = usePagination()
+  const { data } = useQuery({
+    queryKey: ["project-pulls", "project", projectId, { skip, limit }],
+    queryFn: () =>
+      ProjectPullsService.readProjectPulls({ projectId, skip, limit }),
+  })
+  const pulls = data?.data ?? []
+
+  return (
+    <div className="space-y-2">
+      <h2 className="text-lg font-semibold">Request history</h2>
+      {pulls.length === 0 ? (
+        <p className="text-muted-foreground py-6 text-center text-sm">
+          No requests yet.
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Item</TableHead>
+              <TableHead className="text-right">Requested</TableHead>
+              <TableHead className="text-right">Given</TableHead>
+              <TableHead className="text-right">Returned</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pulls.map((pull) => (
+              <Fragment key={pull.id}>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableCell colSpan={4}>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="num font-medium">
+                        {new Date(pull.created_at).toLocaleDateString()}
+                      </span>
+                      <Badge variant={STATE_VARIANT[pull.state]}>
+                        {STATE_LABEL[pull.state]}
+                      </Badge>
+                      {pull.admin_notes ? (
+                        <span className="text-muted-foreground truncate text-sm">
+                          {pull.admin_notes}
+                        </span>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                </TableRow>
+                {pull.lines.map((line) => {
+                  const returned = returnedQty(pull, line)
+                  return (
+                    <TableRow key={line.id}>
+                      <TableCell className="pl-6">
+                        {line.line_kind === "UNIT"
+                          ? `${line.model_name} · ${lineLabel(line)}`
+                          : lineLabel(line)}
+                      </TableCell>
+                      <TableCell className="num text-right">
+                        {line.requested_qty ?? 1}
+                      </TableCell>
+                      <TableCell className="num text-right">
+                        {pull.state === "PENDING" ? "—" : line.fulfilled_qty}
+                      </TableCell>
+                      <TableCell className="num text-right">
+                        {returned > 0 ? returned : "—"}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </Fragment>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+      <PaginationControls
+        total={data?.count ?? 0}
+        pageSize={pageSize}
+        page={page}
+        onPageChange={setPage}
+      />
     </div>
   )
 }

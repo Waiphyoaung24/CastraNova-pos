@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
 
 import type { ProjectPullPublic, ProjectPullState } from "@/client/types.gen"
@@ -7,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/useMobile"
 
 /** State filter value: a concrete state, or ALL for the unfiltered queue. */
@@ -30,7 +32,7 @@ interface PullQueueProps {
   loading?: boolean
 }
 
-const STATE_VARIANT: Record<
+export const STATE_VARIANT: Record<
   ProjectPullState,
   "default" | "secondary" | "destructive" | "outline"
 > = {
@@ -40,7 +42,7 @@ const STATE_VARIANT: Record<
   CANCELLED: "outline",
 }
 
-const STATE_LABEL: Record<ProjectPullState, string> = {
+export const STATE_LABEL: Record<ProjectPullState, string> = {
   PENDING: "Waiting",
   FULFILLED: "Done",
   SHORT: "Short",
@@ -92,6 +94,22 @@ function PullActions({
   )
 }
 
+/** Project name linking to that project's page, where its request history lives. */
+function ProjectLink({
+  pull,
+  projectLabels,
+}: Pick<PullQueueProps, "projectLabels"> & { pull: ProjectPullPublic }) {
+  return (
+    <Link
+      to="/project/$projectId"
+      params={{ projectId: pull.project_id }}
+      className="hover:underline"
+    >
+      {projectLabels.get(pull.project_id) ?? pull.project_id}
+    </Link>
+  )
+}
+
 export function PullQueue({
   pulls,
   projectLabels,
@@ -108,30 +126,28 @@ export function PullQueue({
   const isMobile = useIsMobile()
   return (
     <div className="space-y-4">
-      <Alert>
-        <ClipboardList />
-        <AlertTitle>Stock requests waiting</AlertTitle>
-        <AlertDescription>
-          These are parts requested for projects. Tap “Give out parts” on a
-          request, then scan each part to hand it out.{" "}
-          {isAdmin ? "Use “New request” to raise one." : null}
-        </AlertDescription>
-      </Alert>
+      {stateFilter === "PENDING" ? (
+        <Alert>
+          <ClipboardList />
+          <AlertTitle>Stock requests waiting</AlertTitle>
+          <AlertDescription>
+            These are parts requested for projects. Tap “Give out parts” on a
+            request, then scan each part to hand it out.{" "}
+            {isAdmin ? "Use “New request” to raise one." : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <div className="flex items-center justify-between gap-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-pressed={stateFilter === "PENDING"}
-          onClick={() =>
-            onStateFilterChange(stateFilter === "PENDING" ? "ALL" : "PENDING")
-          }
+        <Tabs
+          value={stateFilter === "PENDING" ? "PENDING" : "ALL"}
+          onValueChange={(v) => onStateFilterChange(v as PullStateFilter)}
         >
-          {stateFilter === "PENDING"
-            ? "Show all (incl. completed)"
-            : "Show only waiting"}
-        </Button>
+          <TabsList>
+            <TabsTrigger value="PENDING">Waiting</TabsTrigger>
+            <TabsTrigger value="ALL">History</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {isAdmin ? (
           <Button type="button" onClick={onNew}>
@@ -152,7 +168,7 @@ export function PullQueue({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-medium">
-                      {projectLabels.get(pull.project_id) ?? pull.project_id}
+                      <ProjectLink pull={pull} projectLabels={projectLabels} />
                     </p>
                     <p className="text-muted-foreground truncate text-sm">
                       {customerLabels.get(pull.customer_id) ?? pull.customer_id}
@@ -203,7 +219,7 @@ export function PullQueue({
             {pulls.map((pull) => (
               <TableRow key={pull.id}>
                 <TableCell className="font-medium">
-                  {projectLabels.get(pull.project_id) ?? pull.project_id}
+                  <ProjectLink pull={pull} projectLabels={projectLabels} />
                 </TableCell>
                 <TableCell>
                   {customerLabels.get(pull.customer_id) ?? pull.customer_id}

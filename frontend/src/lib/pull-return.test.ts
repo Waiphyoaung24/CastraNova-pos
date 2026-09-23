@@ -8,6 +8,7 @@ import {
   buildPullReturnPayload,
   canReturnPull,
   returnDraftTotal,
+  returnedQty,
   setReturnQty,
 } from "./pull-return"
 
@@ -53,5 +54,21 @@ describe("pull return draft", () => {
     expect(canReturnPull(pull("CANCELLED", 1))).toBe(true)
     expect(canReturnPull(pull("PENDING", 1))).toBe(false) // use Cancel
     expect(canReturnPull(pull("SHORT", 0))).toBe(false)
+  })
+})
+
+describe("returnedQty", () => {
+  const pull = (state: ProjectPullPublic["state"]) =>
+    ({ state }) as ProjectPullPublic
+
+  it("is given-out minus still-out on a settled pull", () => {
+    expect(returnedQty(pull("FULFILLED"), line({}))).toBe(2)
+    expect(returnedQty(pull("SHORT"), line({ returnable_qty: 5 }))).toBe(0)
+  })
+
+  it("is zero before settlement or after cancel", () => {
+    // A waiting pull has stock out but nothing given — never a return.
+    expect(returnedQty(pull("PENDING"), line({ fulfilled_qty: 0 }))).toBe(0)
+    expect(returnedQty(pull("CANCELLED"), line({}))).toBe(0)
   })
 })

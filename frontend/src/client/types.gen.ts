@@ -1385,6 +1385,7 @@ export type ProjectPullsCreateProjectPullResponse = (ProjectPullPublic);
 
 export type ProjectPullsReadProjectPullsData = {
     limit?: number;
+    projectId?: (string | null);
     skip?: number;
     state?: (ProjectPullState | null);
 };

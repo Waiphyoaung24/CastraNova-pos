@@ -91,10 +91,8 @@ test.describe("Pull returns", () => {
     expect(await onHand(product.sku)).toBe(ON_HAND - REQUESTED)
 
     await page.goto("/pulls")
-    // The queue defaults to waiting requests; a done one needs "Show all".
-    await page
-      .getByRole("button", { name: "Show all (incl. completed)" })
-      .click()
+    // The queue defaults to waiting requests; a done one is under History.
+    await page.getByRole("tab", { name: "History" }).click()
     await page
       .getByRole("row")
       .filter({ hasText: `Return Project ${r}` })
@@ -110,6 +108,17 @@ test.describe("Pull returns", () => {
     await expect(page.getByText("Items returned to stock.")).toBeVisible()
 
     await expect.poll(() => onHand(product.sku)).toBe(ON_HAND - REQUESTED + 2)
+
+    // The project page's request history shows asked / given / returned.
+    await page.goto(`/project/${pull.project_id}`)
+    await expect(
+      page.getByRole("heading", { name: "Request history" }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole("row", {
+        name: `Return Part ${r} (${product.sku}) 3 3 2`,
+      }),
+    ).toBeVisible()
   })
 
   test("cancel a waiting pull puts its stock back", async ({ page }) => {

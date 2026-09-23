@@ -3547,6 +3547,7 @@ def list_project_pulls(
     *,
     session: Session,
     state: ProjectPullState | None = None,
+    project_id: uuid.UUID | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[ProjectPull]:
@@ -3555,6 +3556,8 @@ def list_project_pulls(
     statement = select(ProjectPull)
     if state is not None:
         statement = statement.where(ProjectPull.state == state)
+    if project_id is not None:
+        statement = statement.where(ProjectPull.project_id == project_id)
     statement = (
         statement.order_by(col(ProjectPull.created_at).desc()).offset(skip).limit(limit)
     )
@@ -3562,11 +3565,16 @@ def list_project_pulls(
 
 
 def count_project_pulls(
-    *, session: Session, state: ProjectPullState | None = None
+    *,
+    session: Session,
+    state: ProjectPullState | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> int:
     statement = select(func.count()).select_from(ProjectPull)
     if state is not None:
         statement = statement.where(ProjectPull.state == state)
+    if project_id is not None:
+        statement = statement.where(ProjectPull.project_id == project_id)
     return session.exec(statement).one()
 
 
