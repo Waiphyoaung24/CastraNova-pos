@@ -2,7 +2,9 @@ import type {
   ProjectConsumptionRowPublic,
   ProjectDashboardAdminPublic,
   ProjectDashboardStaffPublic,
+  ProjectPullPublic,
 } from "@/client/types.gen"
+import { returnedQty } from "@/lib/pull-return"
 
 // ---------------------------------------------------------------------------
 // Pure helpers for the project-detail dashboard (FR-020, role-tiered).
@@ -45,4 +47,60 @@ export function budgetRemaining(
 export function consumedItemLabel(row: ProjectConsumptionRowPublic): string {
   if (row.line_kind === "UNIT") return row.unit_serial ?? "(no serial)"
   return `${row.model_name} (${row.product_sku})`
+}
+
+export interface ItemTotals {
+  allocated: number
+  supplied: number
+  returned: number
+  /** Supplied and not yet back. */
+  inUse: number
+}
+
+export interface ItemTotalsRow extends ItemTotals {
+  productId: string
+  label: string
+}
+
+/**
+ * Per-product totals across a project's requests, plus the grand total.
+ * Cancelled requests allocated nothing, so they are left out. A UNIT line is
+ * one serial, so it allocates one.
+ */
+export function projectItemTotals(pulls: ProjectPullPublic[]): {
+  rows: ItemTotalsRow[]
+  totals: ItemTotals
+} {
+  const byProduct = new Map<string, ItemTotalsRow>()
+  const totals: ItemTotals = {
+    allocated: 0,
+    supplied: 0,
+    returned: 0,
+    inUse: 0,
+  }
+  for (const pull of pulls) {
+    if (pull.state === "CANCELLED") continue
+    for (const line of pull.lines) {
+      const row = byProduct.get(line.product_id) ?? {
+        productId: line.product_id,
+        label: `${line.model_name} (${line.product_sku})`,
+        allocated: 0,
+        supplied: 0,
+        returned: 0,
+        inUse: 0,
+      }
+      const add: ItemTotals = {
+        allocated: line.requested_qty ?? 1,
+        supplied: line.fulfilled_qty,
+        returned: returnedQty(pull, line),
+        inUse: line.fulfilled_qty - returnedQty(pull, line),
+      }
+      for (const k of Object.keys(add) as (keyof ItemTotals)[]) {
+        row[k] += add[k]
+        totals[k] += add[k]
+      }
+      byProduct.set(line.product_id, row)
+    }
+  }
+  return { rows: [...byProduct.values()], totals }
 }

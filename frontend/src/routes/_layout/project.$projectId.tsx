@@ -1,15 +1,14 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { Fragment, useState } from "react"
+import { Fragment, type ReactNode, useState } from "react"
 
-import type { ProjectConsumptionRowPublic } from "@/client"
+import type { ProjectConsumptionRowPublic, ProjectPullPublic } from "@/client"
 import { ProjectPullsService, ProjectsService } from "@/client"
 import { PageHeader } from "@/components/Common/PageHeader"
-import { PaginationControls } from "@/components/Common/PaginationControls"
 import { lineLabel } from "@/components/pos/PullFulfillPanel"
 import { STATE_LABEL, STATE_VARIANT } from "@/components/pos/PullQueue"
+import { StatCard } from "@/components/reports/StatCard"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -18,11 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { usePagination } from "@/hooks/usePagination"
+import { useIsMobile } from "@/hooks/useMobile"
 import {
   budgetRemaining,
   consumedItemLabel,
+  type ItemTotalsRow,
   isAdminProjectDashboard,
+  projectItemTotals,
 } from "@/lib/project-dashboard"
 import { returnedQty } from "@/lib/pull-return"
 import { formatThb } from "@/lib/reports"
@@ -46,6 +47,16 @@ function ProjectDetail() {
     queryKey: ["project-dashboard", projectId],
     queryFn: () => ProjectsService.getProjectDashboard({ projectId }),
   })
+  // Every request for this project, newest first. No cost on it, so staff see
+  // it too. ponytail: one page of 500 feeds both the totals and the history;
+  // page it (and total server-side) if a project ever outgrows that.
+  const { data: pullPage } = useQuery({
+    queryKey: ["project-pulls", "project", projectId],
+    queryFn: () =>
+      ProjectPullsService.readProjectPulls({ projectId, limit: 500 }),
+  })
+  const pulls = pullPage?.data ?? []
+  const { rows, totals } = projectItemTotals(pulls)
 
   if (isPending) {
     return (
@@ -94,31 +105,36 @@ function ProjectDetail() {
         }
       />
 
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Allocated" value={totals.allocated} />
+        <StatCard label="Supplied" value={totals.supplied} />
+        <StatCard label="Returned" value={totals.returned} />
+        <StatCard
+          label="In use"
+          value={totals.inUse}
+          hint="Supplied, not returned"
+        />
+      </div>
+
       {isAdmin && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Budget</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-3 gap-4">
-            <Figure
-              label="Budget"
-              value={data.budget_thb ? formatThb(data.budget_thb) : "—"}
-            />
-            <Figure
-              label="Consumed cost"
-              value={formatThb(data.consumed_cost_thb)}
-            />
-            <Figure
-              label="Remaining"
-              value={remaining ? formatThb(remaining) : "—"}
-            />
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <StatCard
+            label="Budget"
+            value={data.budget_thb ? formatThb(data.budget_thb) : "—"}
+          />
+          <StatCard label="Spent" value={formatThb(data.consumed_cost_thb)} />
+          <StatCard
+            label="Remaining"
+            value={remaining ? formatThb(remaining) : "—"}
+          />
+        </div>
       )}
 
-      {isAdmin ? <ConsumedItems rows={data.consumed_items} /> : null}
+      <ItemTotalsList rows={rows} />
 
-      <RequestHistory projectId={projectId} />
+      <OrderHistory pulls={pulls} />
+
+      {isAdmin ? <ConsumedItems rows={data.consumed_items} /> : null}
     </div>
   )
 }
@@ -143,7 +159,7 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
 
   return (
     <div className="space-y-2">
-      <h2 className="text-lg font-semibold">Consumed items</h2>
+      <h2 className="text-lg font-semibold">Cost by batch</h2>
       {rows.length === 0 ? (
         <p className="text-muted-foreground py-6 text-center text-sm">
           Nothing consumed yet.
@@ -230,100 +246,133 @@ function ConsumedItems({ rows }: { rows: ProjectConsumptionRowPublic[] }) {
   )
 }
 
-/**
- * Every stock request raised for this project, newest first, with what was
- * asked for, given out and brought back. No cost here, so staff see it too.
- */
-function RequestHistory({ projectId }: { projectId: string }) {
-  const { page, pageSize, skip, limit, setPage } = usePagination()
-  const { data } = useQuery({
-    queryKey: ["project-pulls", "project", projectId, { skip, limit }],
-    queryFn: () =>
-      ProjectPullsService.readProjectPulls({ projectId, skip, limit }),
-  })
-  const pulls = data?.data ?? []
-
+/** One row per product across every request: a table, or lines on a phone. */
+function ItemTotalsList({ rows }: { rows: ItemTotalsRow[] }) {
+  const isMobile = useIsMobile()
   return (
-    <div className="space-y-2">
-      <h2 className="text-lg font-semibold">Request history</h2>
-      {pulls.length === 0 ? (
-        <p className="text-muted-foreground py-6 text-center text-sm">
-          No requests yet.
-        </p>
+    <Section title="Items">
+      {rows.length === 0 ? (
+        <Empty>Nothing allocated yet.</Empty>
+      ) : isMobile ? (
+        <ul className="bg-card divide-y rounded-lg border">
+          {rows.map((r) => (
+            <li key={r.productId} className="space-y-1 px-4 py-2 text-sm">
+              <p className="font-medium">{r.label}</p>
+              <p className="text-muted-foreground num text-xs">
+                {r.allocated} allocated · {r.supplied} supplied · {r.returned}{" "}
+                returned ·{" "}
+                <span className="text-foreground font-semibold whitespace-nowrap">
+                  {r.inUse} in use
+                </span>
+              </p>
+            </li>
+          ))}
+        </ul>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Item</TableHead>
-              <TableHead className="text-right">Requested</TableHead>
-              <TableHead className="text-right">Given</TableHead>
+              <TableHead className="text-right">Allocated</TableHead>
+              <TableHead className="text-right">Supplied</TableHead>
               <TableHead className="text-right">Returned</TableHead>
+              <TableHead className="text-right">In use</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pulls.map((pull) => (
-              <Fragment key={pull.id}>
-                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableCell colSpan={4}>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="num font-medium">
-                        {new Date(pull.created_at).toLocaleString()}
-                      </span>
-                      <Badge variant={STATE_VARIANT[pull.state]}>
-                        {STATE_LABEL[pull.state]}
-                      </Badge>
-                      {pull.admin_notes ? (
-                        <span className="text-muted-foreground truncate text-sm">
-                          {pull.admin_notes}
-                        </span>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                </TableRow>
-                {pull.lines.map((line) => {
-                  const returned = returnedQty(pull, line)
-                  return (
-                    <TableRow key={line.id}>
-                      <TableCell className="pl-6">
-                        {line.line_kind === "UNIT"
-                          ? `${line.model_name} · ${lineLabel(line)}`
-                          : lineLabel(line)}
-                      </TableCell>
-                      <TableCell className="num text-right">
-                        {/* A UNIT line is one serial, so it carries no qty. */}
-                        {line.requested_qty ?? 1}
-                      </TableCell>
-                      <TableCell className="num text-right">
-                        {pull.state === "PENDING" ? "—" : line.fulfilled_qty}
-                      </TableCell>
-                      <TableCell className="num text-right">
-                        {returned > 0 ? returned : "—"}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </Fragment>
+            {rows.map((r) => (
+              <TableRow key={r.productId}>
+                <TableCell className="font-medium">{r.label}</TableCell>
+                <TableCell className="num text-right">{r.allocated}</TableCell>
+                <TableCell className="num text-right">{r.supplied}</TableCell>
+                <TableCell className="num text-right">
+                  {r.returned || "—"}
+                </TableCell>
+                <TableCell className="num text-right font-semibold">
+                  {r.inUse}
+                </TableCell>
+              </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
-      <PaginationControls
-        total={data?.count ?? 0}
-        pageSize={pageSize}
-        page={page}
-        onPageChange={setPage}
-      />
-    </div>
+    </Section>
   )
 }
 
-function Figure({ label, value }: { label: string; value: string }) {
+/** One card per request: when, its status, and each item's counts. */
+function OrderHistory({ pulls }: { pulls: ProjectPullPublic[] }) {
   return (
-    <div className="space-y-1">
-      <p className="text-muted-foreground text-xs uppercase tracking-wide">
-        {label}
-      </p>
-      <p className="num text-lg font-semibold">{value}</p>
-    </div>
+    <Section title="Order history">
+      {pulls.length === 0 ? (
+        <Empty>No requests yet.</Empty>
+      ) : (
+        <ol className="space-y-3">
+          {pulls.map((pull) => (
+            <li key={pull.id} className="bg-card rounded-lg border">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3">
+                <span className="num font-medium">
+                  {new Date(pull.created_at).toLocaleString()}
+                </span>
+                <Badge variant={STATE_VARIANT[pull.state]}>
+                  {STATE_LABEL[pull.state]}
+                </Badge>
+                <span className="text-muted-foreground text-sm">
+                  {pull.lines.length}{" "}
+                  {pull.lines.length === 1 ? "item" : "items"}
+                </span>
+                {pull.admin_notes ? (
+                  <span className="text-muted-foreground w-full truncate text-sm sm:w-auto sm:flex-1 sm:text-right">
+                    {pull.admin_notes}
+                  </span>
+                ) : null}
+              </div>
+              <ul className="divide-y">
+                {pull.lines.map((line) => {
+                  const returned = returnedQty(pull, line)
+                  const settled =
+                    pull.state === "FULFILLED" || pull.state === "SHORT"
+                  return (
+                    <li
+                      key={line.id}
+                      className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-2 text-sm"
+                    >
+                      <span>
+                        {line.line_kind === "UNIT"
+                          ? `${line.model_name} · ${lineLabel(line)}`
+                          : lineLabel(line)}
+                      </span>
+                      <span className="text-muted-foreground num text-xs">
+                        {/* A UNIT line is one serial, so it carries no qty. */}
+                        {line.requested_qty ?? 1} allocated
+                        {settled ? ` · ${line.fulfilled_qty} supplied` : ""}
+                        {returned > 0 ? ` · ${returned} returned` : ""}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Section>
+  )
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      {children}
+    </section>
+  )
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-muted-foreground rounded-lg border border-dashed py-6 text-center text-sm">
+      {children}
+    </p>
   )
 }
