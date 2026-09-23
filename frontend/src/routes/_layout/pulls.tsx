@@ -91,7 +91,8 @@ function Pulls() {
     queryKey: ["project-pulls", stateFilter, { skip, limit }],
     queryFn: () =>
       ProjectPullsService.readProjectPulls({
-        state: stateFilter === "ALL" ? undefined : stateFilter,
+        state: stateFilter === "PENDING" ? "PENDING" : undefined,
+        settled: stateFilter === "HISTORY",
         skip,
         limit,
       }),

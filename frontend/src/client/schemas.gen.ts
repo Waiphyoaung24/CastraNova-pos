@@ -2030,13 +2030,6 @@ export const ProjectDashboardAdminPublicSchema = {
         project: {
             '$ref': '#/components/schemas/ProjectPublic'
         },
-        pulls: {
-            items: {
-                '$ref': '#/components/schemas/TransactionSummaryPublic'
-            },
-            type: 'array',
-            title: 'Pulls'
-        },
         budget_thb: {
             anyOf: [
                 {
@@ -2063,7 +2056,7 @@ export const ProjectDashboardAdminPublicSchema = {
         }
     },
     type: 'object',
-    required: ['project', 'pulls', 'budget_thb', 'consumed_cost_thb', 'consumed_items'],
+    required: ['project', 'budget_thb', 'consumed_cost_thb', 'consumed_items'],
     title: 'ProjectDashboardAdminPublic'
 } as const;
 
@@ -2071,17 +2064,10 @@ export const ProjectDashboardStaffPublicSchema = {
     properties: {
         project: {
             '$ref': '#/components/schemas/ProjectStaffPublic'
-        },
-        pulls: {
-            items: {
-                '$ref': '#/components/schemas/TransactionSummaryPublic'
-            },
-            type: 'array',
-            title: 'Pulls'
         }
     },
     type: 'object',
-    required: ['project', 'pulls'],
+    required: ['project'],
     title: 'ProjectDashboardStaffPublic'
 } as const;
 

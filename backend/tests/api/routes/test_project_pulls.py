@@ -526,6 +526,41 @@ def test_list_filters_by_project(
     assert r.json() == {"data": [], "count": 0}
 
 
+def test_settled_filter_hides_waiting_pulls(
+    client: TestClient,
+    superuser_token_headers: dict[str, str],
+    staff_token_headers: dict[str, str],
+    pull_ctx: dict[str, Any],
+) -> None:
+    # History tab: settled=true lists done / short / cancelled, never waiting.
+    # Part-only bodies: the fixture has one unit, and it can't go out twice.
+    def part_pull() -> dict[str, Any]:
+        body = _create_body(pull_ctx, part_qty=1)
+        body["lines"] = body["lines"][1:]
+        r = client.post(
+            f"{PREFIX}/project-pulls", headers=superuser_token_headers, json=body
+        )
+        assert r.status_code == 200, r.text
+        pull: dict[str, Any] = r.json()
+        return pull
+
+    waiting = part_pull()
+    done = part_pull()
+    r = client.post(
+        f"{PREFIX}/project-pulls/{done['id']}/cancel",
+        headers=superuser_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    r = client.get(
+        f"{PREFIX}/project-pulls?settled=true&project_id={pull_ctx['project_id']}",
+        headers=staff_token_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert [p["id"] for p in r.json()["data"]] == [done["id"]]
+    assert r.json()["count"] == 1
+    assert waiting["id"] not in [p["id"] for p in r.json()["data"]]
+
+
 def test_staff_can_read_pull(
     client: TestClient,
     superuser_token_headers: dict[str, str],

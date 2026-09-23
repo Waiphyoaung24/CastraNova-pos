@@ -417,7 +417,6 @@ export type ProjectCreate = {
 
 export type ProjectDashboardAdminPublic = {
     project: ProjectPublic;
-    pulls: Array<TransactionSummaryPublic>;
     budget_thb: (string | null);
     consumed_cost_thb: string;
     consumed_items: Array<ProjectConsumptionRowPublic>;
@@ -425,7 +424,6 @@ export type ProjectDashboardAdminPublic = {
 
 export type ProjectDashboardStaffPublic = {
     project: ProjectStaffPublic;
-    pulls: Array<TransactionSummaryPublic>;
 };
 
 export type ProjectOption = {
@@ -1386,6 +1384,10 @@ export type ProjectPullsCreateProjectPullResponse = (ProjectPullPublic);
 export type ProjectPullsReadProjectPullsData = {
     limit?: number;
     projectId?: (string | null);
+    /**
+     * Only finished requests (not waiting)
+     */
+    settled?: boolean;
     skip?: number;
     state?: (ProjectPullState | null);
 };

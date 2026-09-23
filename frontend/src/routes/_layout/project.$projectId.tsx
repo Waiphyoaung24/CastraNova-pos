@@ -267,7 +267,7 @@ function RequestHistory({ projectId }: { projectId: string }) {
                   <TableCell colSpan={4}>
                     <div className="flex flex-wrap items-center gap-3">
                       <span className="num font-medium">
-                        {new Date(pull.created_at).toLocaleDateString()}
+                        {new Date(pull.created_at).toLocaleString()}
                       </span>
                       <Badge variant={STATE_VARIANT[pull.state]}>
                         {STATE_LABEL[pull.state]}
@@ -290,6 +290,7 @@ function RequestHistory({ projectId }: { projectId: string }) {
                           : lineLabel(line)}
                       </TableCell>
                       <TableCell className="num text-right">
+                        {/* A UNIT line is one serial, so it carries no qty. */}
                         {line.requested_qty ?? 1}
                       </TableCell>
                       <TableCell className="num text-right">

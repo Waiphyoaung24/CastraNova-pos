@@ -2213,7 +2213,7 @@ class ProjectStaffPublic(SQLModel):
 
 class ProjectDashboardStaffPublic(SQLModel):
     project: ProjectStaffPublic
-    pulls: list[TransactionSummaryPublic]  # kind="PROJECT_PULL"
+    # Request history is GET /project-pulls?project_id=… (lines included).
     # No budget / consumed_cost — staff redaction.
 
 

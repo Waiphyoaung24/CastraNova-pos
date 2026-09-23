@@ -11,8 +11,8 @@ import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useIsMobile } from "@/hooks/useMobile"
 
-/** State filter value: a concrete state, or ALL for the unfiltered queue. */
-export type PullStateFilter = ProjectPullState | "ALL"
+/** Waiting requests, or History: every finished one (done, short, cancelled). */
+export type PullStateFilter = "PENDING" | "HISTORY"
 
 interface PullQueueProps {
   pulls: ProjectPullPublic[]
@@ -140,12 +140,12 @@ export function PullQueue({
 
       <div className="flex items-center justify-between gap-4">
         <Tabs
-          value={stateFilter === "PENDING" ? "PENDING" : "ALL"}
+          value={stateFilter}
           onValueChange={(v) => onStateFilterChange(v as PullStateFilter)}
         >
           <TabsList>
             <TabsTrigger value="PENDING">Waiting</TabsTrigger>
-            <TabsTrigger value="ALL">History</TabsTrigger>
+            <TabsTrigger value="HISTORY">History</TabsTrigger>
           </TabsList>
         </Tabs>
 

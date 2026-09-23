@@ -90,16 +90,24 @@ def read_project_pulls(
     session: SessionDep,
     state: ProjectPullState | None = None,
     project_id: uuid.UUID | None = None,
+    settled: Annotated[
+        bool, Query(description="Only finished requests (not waiting)")
+    ] = False,
     skip: Annotated[int, Query(ge=0, le=10_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> ProjectPullsPublic:
     pulls = crud.list_project_pulls(
-        session=session, state=state, project_id=project_id, skip=skip, limit=limit
+        session=session,
+        state=state,
+        project_id=project_id,
+        settled=settled,
+        skip=skip,
+        limit=limit,
     )
     return ProjectPullsPublic(
         data=[_to_public(session=session, pull=p) for p in pulls],
         count=crud.count_project_pulls(
-            session=session, state=state, project_id=project_id
+            session=session, state=state, project_id=project_id, settled=settled
         ),
     )
 
