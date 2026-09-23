@@ -94,7 +94,8 @@ describe("groupPullsByProject", () => {
     const groups = groupPullsByProject([a2, b1, a1])
     expect(groups.map((g) => g.projectId)).toEqual(["a", "b"])
     expect(groups[0]).toMatchObject({
-      label: "Site a (PRJ-a)",
+      name: "Site a",
+      code: "PRJ-a",
       customerName: "Cust a",
       lastAt: "2026-09-03T00:00:00Z",
       pulls: [a2, a1],

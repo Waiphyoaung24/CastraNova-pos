@@ -49,7 +49,8 @@ export function pullTotals(pulls: ProjectPullPublic[]): PullTotals {
 
 export interface ProjectPullGroup {
   projectId: string
-  label: string
+  name: string
+  code: string
   customerName: string
   /** Newest request first, as the list came in. */
   pulls: ProjectPullPublic[]
@@ -70,7 +71,8 @@ export function groupPullsByProject(
   }
   return [...byProject.values()].map((group) => ({
     projectId: group[0].project_id,
-    label: `${group[0].project_name} (${group[0].project_code})`,
+    name: group[0].project_name,
+    code: group[0].project_code,
     customerName: group[0].customer_name,
     pulls: group,
     lastAt: group[0].created_at,

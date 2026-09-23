@@ -23,6 +23,7 @@ import { PullCreatePanel } from "@/components/pos/PullCreatePanel"
 import { PullFulfillPanel } from "@/components/pos/PullFulfillPanel"
 import { PullQueue, type PullStateFilter } from "@/components/pos/PullQueue"
 import { PullReturnDialog } from "@/components/pos/PullReturnDialog"
+import { PullSummaryPanel } from "@/components/pos/PullSummaryPanel"
 import type { ScanFieldHandle } from "@/components/ScanField"
 import useCustomToast from "@/hooks/useCustomToast"
 import { usePagination } from "@/hooks/usePagination"
@@ -362,9 +363,34 @@ function Pulls() {
           onBack={handleBackToQueue}
           isPending={createMutation.isPending}
         />
+      ) : selectedPull?.state === "PENDING" ? (
+        <PullFulfillPanel
+          pull={selectedPull}
+          projectLabel={
+            projectLabels.get(selectedPull.project_id) ??
+            selectedPull.project_id
+          }
+          customerLabel={
+            customerLabels.get(selectedPull.customer_id) ??
+            selectedPull.customer_id
+          }
+          draft={fulfillDraft}
+          scanRef={scanRef}
+          onScan={resolve}
+          isSearching={isSearching}
+          notFound={notFound}
+          isError={isError}
+          scanNotice={scanNotice}
+          onQtyChange={(line: ProjectPullLinePublic, qty: number) =>
+            setFulfillDraft((prev) => setLineFulfilledQty(prev, line, qty))
+          }
+          onSubmit={handleFulfill}
+          onBack={handleBackToQueue}
+          isPending={fulfillMutation.isPending}
+        />
       ) : selectedPull ? (
         <>
-          <PullFulfillPanel
+          <PullSummaryPanel
             pull={selectedPull}
             projectLabel={
               projectLabels.get(selectedPull.project_id) ??
@@ -374,19 +400,7 @@ function Pulls() {
               customerLabels.get(selectedPull.customer_id) ??
               selectedPull.customer_id
             }
-            draft={fulfillDraft}
-            scanRef={scanRef}
-            onScan={resolve}
-            isSearching={isSearching}
-            notFound={notFound}
-            isError={isError}
-            scanNotice={scanNotice}
-            onQtyChange={(line: ProjectPullLinePublic, qty: number) =>
-              setFulfillDraft((prev) => setLineFulfilledQty(prev, line, qty))
-            }
-            onSubmit={handleFulfill}
             onBack={handleBackToQueue}
-            isPending={fulfillMutation.isPending}
             canReturn={canReturnPull(selectedPull)}
             onReturn={() => {
               if (returnKeyPullRef.current !== selectedPull.id) {
